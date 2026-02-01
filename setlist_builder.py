@@ -35,67 +35,72 @@ class SetlistBuilder:
     def build_setlist(self, recognitions: list) -> list[Track]:
         """Build setlist from recognition results."""
         valid_recognitions = [r for r in recognitions if r.recognized]
-        
+
         if not valid_recognitions:
             print("No tracks recognized")
             return []
-        
-        # Create clusters
+
+        # Step 1: Create clusters (group all detections by track_id)
         clusters = self._create_clusters(valid_recognitions)
-        
-        # Filter noise
+
+        # Step 2: Resolve temporal overlaps (competing tracks at same time)
+        # Do this BEFORE filtering to choose dominant track among competitors
+        if Config.OVERLAP_RESOLUTION_ENABLED:
+            clusters = self._resolve_overlapping_clusters(clusters)
+
+        # Step 3: Filter noise (now that overlaps are resolved)
         filtered_clusters = self._filter_clusters(clusters)
-        
+
         # Convert to tracks
         tracks = [self._cluster_to_track(cluster) for cluster in filtered_clusters]
-        
+
         # Calculate confidence
         tracks = self._calculate_confidence(tracks)
-        
+
         print(f"\n{'='*70}")
         print(f"CLUSTERING RESULTS")
         print(f"{'='*70}")
         print(f"Built setlist with {len(tracks)} tracks")
         print(f"Filtered out {len(clusters) - len(filtered_clusters)} noise detections")
-        
+
         return tracks
     
     def _create_clusters(self, recognitions: list) -> list[dict]:
-        """Group recognitions into clusters with gap tolerance."""
+        """Group ALL detections by track_id (simplified approach - no gap splitting).
+
+        This simplified algorithm groups all detections of the same track together,
+        regardless of gap size. Overlap resolution will handle competing detections.
+        """
         if not recognitions:
             return []
-        
+
+        print(f"\n{'='*70}")
+        print(f"CLUSTERING PHASE (Simplified)")
+        print(f"{'='*70}")
+
         sorted_recs = sorted(recognitions, key=lambda x: x.segment_index)
-        
-        # Group by track ID
+
+        # Group by track ID - collect ALL detections for each track
         track_sequences = defaultdict(list)
         for rec in sorted_recs:
             track_id = f"{rec.artist}|{rec.track_title}|{rec.shazam_track_id}"
             track_sequences[track_id].append(rec)
-        
+
         clusters = []
-        
+
+        # Create one cluster per track_id (all detections grouped together)
         for track_id, recs in track_sequences.items():
-            current_cluster = [recs[0]]
-            
-            for i in range(1, len(recs)):
-                prev_idx = current_cluster[-1].segment_index
-                curr_idx = recs[i].segment_index
-                gap = curr_idx - prev_idx
-                
-                if gap <= self.max_gap_size:
-                    current_cluster.append(recs[i])
-                else:
-                    # Save current cluster if valid
-                    if len(current_cluster) >= self.min_cluster_size:
-                        clusters.append(self._make_cluster_dict(track_id, current_cluster))
-                    current_cluster = [recs[i]]
-            
-            # Save last cluster
-            if len(current_cluster) >= self.min_cluster_size:
-                clusters.append(self._make_cluster_dict(track_id, current_cluster))
-        
+            artist, title = track_id.split('|')[0:2]
+
+            # Only create cluster if we have minimum detections
+            if len(recs) >= self.min_cluster_size:
+                clusters.append(self._make_cluster_dict(track_id, recs))
+                print(f"✓ Clustered: {artist} - {title} ({len(recs)} detections)")
+            else:
+                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {self.min_cluster_size} minimum)")
+
         clusters.sort(key=lambda c: c['start_segment'])
+        print(f"\nCreated {len(clusters)} initial clusters")
         return clusters
     
     def _make_cluster_dict(self, track_id: str, recognitions: list) -> dict:
@@ -106,7 +111,7 @@ class SetlistBuilder:
         span = end_seg - start_seg + 1
         count = len(recognitions)
         density = count / span
-        
+
         return {
             'track_id': track_id,
             'recognitions': recognitions,
@@ -117,28 +122,135 @@ class SetlistBuilder:
             'detection_count': count,
             'density': density
         }
-    
+
+    def _resolve_overlapping_clusters(self, clusters: list[dict]) -> list[dict]:
+        """When tracks overlap in time, keep the dominant one using multi-criteria scoring.
+
+        Uses multi-criteria scoring (not just density) to choose the winner:
+        - detection_count * 2.0: Primary signal - more detections = stronger
+        - span * 0.5: Secondary - longer span = more dominant
+        - density * 0.3: Tertiary - density helps but doesn't dominate
+
+        This prevents mixing artifacts (short, high-density) from beating real tracks.
+        """
+        if not clusters:
+            return []
+
+        print(f"\n{'='*70}")
+        print(f"OVERLAP RESOLUTION PHASE")
+        print(f"{'='*70}")
+
+        sorted_clusters = sorted(clusters, key=lambda c: c['start_segment'])
+        resolved = []
+        i = 0
+        overlap_count = 0
+
+        while i < len(sorted_clusters):
+            current = sorted_clusters[i]
+            overlapping = [current]
+
+            # Find all clusters that overlap with current
+            for j in range(i + 1, len(sorted_clusters)):
+                next_cluster = sorted_clusters[j]
+
+                # Check if they overlap in time
+                if self._clusters_overlap(current, next_cluster):
+                    overlapping.append(next_cluster)
+                elif next_cluster['start_segment'] > current['end_segment']:
+                    # No more overlaps possible
+                    break
+
+            if len(overlapping) > 1:
+                print(f"\n⚠️  OVERLAP DETECTED: {len(overlapping)} competing tracks")
+
+                # Calculate scores for each track
+                scored = []
+                for c in overlapping:
+                    artist, title = c['track_id'].split('|')[0:2]
+                    score = (
+                        c['detection_count'] * 2.0 +
+                        c['span'] * 0.5 +
+                        c['density'] * 0.3
+                    )
+                    scored.append((c, score, artist, title))
+                    print(f"  📊 {artist} - {title}")
+                    print(f"     └─ {c['detection_count']} detections, span {c['span']}, density {c['density']:.2f}")
+                    print(f"     └─ Score: {score:.1f}")
+
+                # Choose track using MULTI-CRITERIA scoring
+                winner = max(overlapping, key=lambda c: (
+                    c['detection_count'] * 2.0 +
+                    c['span'] * 0.5 +
+                    c['density'] * 0.3
+                ))
+
+                winner_artist, winner_title = winner['track_id'].split('|')[0:2]
+                print(f"  ✅ KEEPING: {winner_artist} - {winner_title}")
+
+                for c in overlapping:
+                    if c != winner:
+                        loser_artist, loser_title = c['track_id'].split('|')[0:2]
+                        print(f"  ❌ REMOVING: {loser_artist} - {loser_title}")
+
+                # Mark winner as having won overlap resolution for more lenient filtering
+                winner['won_overlap_resolution'] = True
+                resolved.append(winner)
+                overlap_count += 1
+
+                # Skip all losing clusters
+                i += len(overlapping)
+            else:
+                resolved.append(current)
+                i += 1
+
+        print(f"\nResolved {overlap_count} overlap conflict(s)")
+        print(f"Clusters after resolution: {len(resolved)} (from {len(sorted_clusters)})")
+
+        return resolved
+
+    def _clusters_overlap(self, cluster1: dict, cluster2: dict) -> bool:
+        """Check if two clusters overlap in time (>= configured threshold overlap)."""
+        start1, end1 = cluster1['start_segment'], cluster1['end_segment']
+        start2, end2 = cluster2['start_segment'], cluster2['end_segment']
+
+        # Calculate overlap
+        overlap_start = max(start1, start2)
+        overlap_end = min(end1, end2)
+        overlap = max(0, overlap_end - overlap_start)
+
+        # Check if overlap is significant (>= configured threshold, default 30%)
+        span1 = end1 - start1
+        span2 = end2 - start2
+
+        return overlap >= min(span1, span2) * Config.OVERLAP_THRESHOLD
+
     def _filter_clusters(self, clusters: list[dict]) -> list[dict]:
         """Filter out noise using multi-factor analysis."""
         if not clusters:
             return []
-        
+
         print(f"\n{'='*70}")
         print(f"CLUSTER FILTERING")
         print(f"{'='*70}")
-        
+
         filtered = []
-        
+
         for cluster in clusters:
             count = cluster['detection_count']
             density = cluster['density']
             span = cluster['span']
-            
+            won_overlap = cluster.get('won_overlap_resolution', False)
+
             # Decision tree for filtering
             keep = False
             reason = ""
-            
-            if count >= 15:
+
+            # Special handling for overlap resolution winners
+            # These tracks beat competing detections, so they're likely real
+            if won_overlap and count >= 3:
+                keep = True
+                reason = "won overlap resolution (dominant track)"
+            elif count >= 15:
                 keep = True
                 reason = "long cluster (15+ detections)"
             elif count >= 10 and density >= 0.5:
@@ -153,9 +265,9 @@ class SetlistBuilder:
             elif count >= 3 and density >= 0.8:
                 keep = True
                 reason = "extremely dense minimal cluster"
-            
+
             artist, title = cluster['track_id'].split('|')[0:2]
-            
+
             if keep:
                 filtered.append(cluster)
                 print(f"✓ KEEP: {artist} - {title}")
@@ -165,7 +277,7 @@ class SetlistBuilder:
                 print(f"✗ FILTER: {artist} - {title}")
                 print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
                 print(f"  └─ Reason: below thresholds")
-        
+
         return filtered
     
     def _cluster_to_track(self, cluster: dict) -> Track:
