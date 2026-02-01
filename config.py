@@ -47,6 +47,21 @@ class Config:
     MAX_GAP_SIZE = int(os.getenv('MAX_GAP_SIZE', '5'))
     MIN_CLUSTER_DENSITY = float(os.getenv('MIN_CLUSTER_DENSITY', '0.4'))
     MIN_UNKNOWN_GAP_SIZE = int(os.getenv('MIN_UNKNOWN_GAP_SIZE', '6'))
+
+    # Adaptive Gap Tolerance (validated via regression testing)
+    ADAPTIVE_GAP_ENABLED = os.getenv('ADAPTIVE_GAP_ENABLED', 'true').lower() == 'true'
+    ADAPTIVE_GAP_STRONG_THRESHOLD = float(os.getenv('ADAPTIVE_GAP_STRONG_THRESHOLD', '0.6'))
+    ADAPTIVE_GAP_STRONG_SIZE = int(os.getenv('ADAPTIVE_GAP_STRONG_SIZE', '8'))
+    ADAPTIVE_GAP_MODERATE_THRESHOLD = float(os.getenv('ADAPTIVE_GAP_MODERATE_THRESHOLD', '0.4'))
+    ADAPTIVE_GAP_MODERATE_SIZE = int(os.getenv('ADAPTIVE_GAP_MODERATE_SIZE', '5'))
+
+    # Duplicate Cluster Merging
+    DUPLICATE_MERGE_ENABLED = os.getenv('DUPLICATE_MERGE_ENABLED', 'true').lower() == 'true'
+    DUPLICATE_MERGE_DISTANCE = int(os.getenv('DUPLICATE_MERGE_DISTANCE', '10'))
+
+    # Temporal Overlap Resolution
+    OVERLAP_RESOLUTION_ENABLED = os.getenv('OVERLAP_RESOLUTION_ENABLED', 'true').lower() == 'true'
+    OVERLAP_THRESHOLD = float(os.getenv('OVERLAP_THRESHOLD', '0.3'))
     
     # Base Paths (changed from TEMP_DIR to ASSETS_DIR)
     ASSETS_DIR = Path('assets')
