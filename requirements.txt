@@ -1,0 +1,7 @@
+yt-dlp>=2024.1.0
+ffmpeg-python>=0.2.0
+pydub>=0.25.1
+shazamio>=0.4.0
+spotipy>=2.23.0
+requests>=2.31.0
+python-dotenv>=1.0.0
