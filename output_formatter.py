@@ -125,8 +125,6 @@ class OutputFormatter:
         # Clustering parameters used
         lines.append("\n## Algorithm Parameters\n")
         lines.append(f"- **Min Cluster Size:** {Config.MIN_CLUSTER_SIZE} detections")
-        lines.append(f"- **Max Gap Size:** {Config.MAX_GAP_SIZE} segments")
-        lines.append(f"- **Min Cluster Density:** {Config.MIN_CLUSTER_DENSITY:.0%}")
         lines.append(f"- **Min Unknown Gap Size:** {Config.MIN_UNKNOWN_GAP_SIZE} segments")
         
         with open(output_path, 'w', encoding='utf-8') as f:

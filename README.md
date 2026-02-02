@@ -111,10 +111,27 @@ CHECKPOINT_INTERVAL=10        # Save progress every N recognitions
 
 ### Shazam Recognition Settings
 ```bash
-RECOGNITION_TIMEOUT=30        # Seconds before timeout per segment
-MAX_RETRIES=3                 # Retry attempts on timeout/error
-BASE_DELAY=1.0                # Seconds between successful recognitions
-BACKOFF_DELAY=5.0             # Seconds to wait after errors before retry
+RECOGNITION_TIMEOUT=15        # Seconds before timeout per segment
+BASE_DELAY=1                  # Random delay range (0 to BASE_DELAY) between requests
+```
+
+### Retry Settings (JitterRetry for 429 handling)
+```bash
+MAX_RETRIES=5                 # Retry attempts before giving up
+BACKOFF_DELAY=1               # Base delay for exponential backoff
+MAX_BACKOFF_DELAY=60          # Maximum backoff cap in seconds
+JITTER_INTERVAL_SIZE=4.0      # Random jitter range is (0, size^2) seconds
+```
+
+### Concurrency Settings
+```bash
+CONCURRENT_RECOGNITIONS=2     # Number of parallel Shazam requests
+BATCH_SIZE=20                 # Segments processed per checkpoint
+```
+
+### Quota Throttling
+```bash
+QUOTA_COOLDOWN_DURATION=180   # Seconds to pause when rate limited (default: 3 min)
 ```
 
 ## Output
@@ -166,8 +183,7 @@ Confidence is based on how many consecutive 30-second segments recognized the sa
 ## File Structure
 
     setlist-generator/
-    ├── .env                      # Your configuration (create from .env.example)
-    ├── .env.example              # Example configuration
+    ├── .env                      # Your configuration
     ├── requirements.txt          # Python dependencies
     ├── README.md                 # This file
     ├── main.py                   # Main entry point
@@ -179,6 +195,7 @@ Confidence is based on how many consecutive 30-second segments recognized the sa
     ├── setlist_builder.py        # Build setlist from recognitions
     ├── metadata_enricher.py      # Fetch Spotify/YouTube/Discogs links
     ├── output_formatter.py       # Generate JSON and Markdown outputs
-    ├── temp/                     # Temporary audio and segment files
-    ├── checkpoints/              # Crash recovery checkpoints
-    └── output/                   # Generated setlists (JSON and Markdown)
+    ├── spotify_playlist_creator.py # Create Spotify playlist from setlist
+    ├── assets/<mix_name>/        # Downloaded audio and segment files
+    ├── checkpoints/<mix_name>/   # Crash recovery checkpoints
+    └── output/<mix_name>/        # Generated setlists (JSON and Markdown)

@@ -28,8 +28,6 @@ class SetlistBuilder:
         
         # Clustering parameters
         self.min_cluster_size = Config.MIN_CLUSTER_SIZE
-        self.max_gap_size = Config.MAX_GAP_SIZE
-        self.min_density = Config.MIN_CLUSTER_DENSITY
         self.min_unknown_gap_size = Config.MIN_UNKNOWN_GAP_SIZE
         
     def build_setlist(self, recognitions: list) -> list[Track]:
@@ -268,13 +266,15 @@ class SetlistBuilder:
 
             artist, title = cluster['track_id'].split('|')[0:2]
 
+            # always add (ignore filtering as it isn't adding value)
+            filtered.append(cluster)
+            
             if keep:
-                filtered.append(cluster)
-                print(f"✓ KEEP: {artist} - {title}")
+                print(f"✓ {artist} - {title}")
                 print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
                 print(f"  └─ Reason: {reason}")
             else:
-                print(f"✗ FILTER: {artist} - {title}")
+                print(f"✗ {artist} - {title}")
                 print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
                 print(f"  └─ Reason: below thresholds")
 

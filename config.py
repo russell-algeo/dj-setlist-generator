@@ -33,10 +33,21 @@ class Config:
     CHECKPOINT_INTERVAL = int(os.getenv('CHECKPOINT_INTERVAL', '10'))
     
     # Shazam Recognition Settings
-    RECOGNITION_TIMEOUT = int(os.getenv('RECOGNITION_TIMEOUT', '30'))
+    RECOGNITION_TIMEOUT = int(os.getenv('RECOGNITION_TIMEOUT', '15'))
+    BASE_DELAY = float(os.getenv('BASE_DELAY', '0.3'))  # Delay between requests
+
+    # Retry Settings (for 429 rate limit handling with JitterRetry)
     MAX_RETRIES = int(os.getenv('MAX_RETRIES', '5'))
-    BASE_DELAY = float(os.getenv('BASE_DELAY', '1.0'))
-    BACKOFF_DELAY = float(os.getenv('BACKOFF_DELAY', '10.0'))
+    BACKOFF_DELAY = float(os.getenv('BACKOFF_DELAY', '5.0'))  # Start backoff
+    MAX_BACKOFF_DELAY = float(os.getenv('MAX_BACKOFF_DELAY', '30.0'))  # Max backoff cap
+    JITTER_INTERVAL_SIZE = float(os.getenv('JITTER_INTERVAL_SIZE', '4.0'))  # Random jitter range is (0, size^2)
+
+    # Concurrency Settings
+    CONCURRENT_RECOGNITIONS = int(os.getenv('CONCURRENT_RECOGNITIONS', '5'))  # Number of parallel requests
+    BATCH_SIZE = int(os.getenv('BATCH_SIZE', '20'))  # Segments per batch for checkpointing
+
+    # Quota-Aware Throttling Settings
+    QUOTA_COOLDOWN_DURATION = int(os.getenv('QUOTA_COOLDOWN_DURATION', '180'))  # Seconds to wait when quota exhausted
     
     # Cleanup Settings
     CLEANUP_TEMP_FILES = os.getenv('CLEANUP_TEMP_FILES', 'true').lower() == 'true'
@@ -44,8 +55,6 @@ class Config:
     
     # Advanced Clustering Settings
     MIN_CLUSTER_SIZE = int(os.getenv('MIN_CLUSTER_SIZE', '3'))
-    MAX_GAP_SIZE = int(os.getenv('MAX_GAP_SIZE', '5'))
-    MIN_CLUSTER_DENSITY = float(os.getenv('MIN_CLUSTER_DENSITY', '0.4'))
     MIN_UNKNOWN_GAP_SIZE = int(os.getenv('MIN_UNKNOWN_GAP_SIZE', '6'))
 
     # Temporal Overlap Resolution

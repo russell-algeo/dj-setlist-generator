@@ -1,11 +1,13 @@
-"""Track recognition using Shazam with checkpoint support."""
+"""Track recognition using Shazam with concurrent processing and checkpoint support."""
 
 import asyncio
-from pathlib import Path
-from shazamio import Shazam
+import random
+import time
+from datetime import datetime
+from shazamio import Shazam, HTTPClient
+from aiohttp_retry import JitterRetry
 from dataclasses import dataclass, asdict
 from typing import Optional
-import json
 from config import Config
 
 @dataclass
@@ -19,48 +21,106 @@ class Recognition:
     raw_data: Optional[dict]
     recognized: bool
     segment_index: int
+    was_rate_limited: bool = False  # True if request failed due to 429 after exhausting retries
+
 
 class TrackRecognizer:
-    """Recognize tracks using Shazam with checkpoint support."""
-    
+    """Recognize tracks using Shazam with concurrent processing and checkpoint support."""
+
     def __init__(self, checkpoint_manager=None):
-        self.shazam = Shazam()
         self.checkpoint_manager = checkpoint_manager
         self.checkpoint_interval = Config.CHECKPOINT_INTERVAL
-        
-        # Rate limiting and retry settings
+
+        # Timing settings
         self.recognition_timeout = Config.RECOGNITION_TIMEOUT
         self.max_retries = Config.MAX_RETRIES
         self.base_delay = Config.BASE_DELAY
         self.backoff_delay = Config.BACKOFF_DELAY
-    
-    async def recognize_segment_with_timeout(self, segment: dict, attempt: int = 1, force_fresh_instance: bool = False) -> Recognition:
+        self.max_backoff_delay = Config.MAX_BACKOFF_DELAY
+        self.jitter_interval_size = Config.JITTER_INTERVAL_SIZE
+
+        # Concurrency settings
+        self.concurrency = Config.CONCURRENT_RECOGNITIONS
+        self.batch_size = Config.BATCH_SIZE
+
+        # Quota-aware throttling settings
+        self.quota_cooldown_duration = Config.QUOTA_COOLDOWN_DURATION
+        self._quota_cooldown_until = 0  # Unix timestamp when cooldown ends
+        self._throttle_lock = asyncio.Lock()
+
+        # Create the Shazam client with proper timeout configuration
+        self.shazam = self._create_shazam_client()
+
+    def _create_shazam_client(self) -> Shazam:
+        """Create a Shazam client with throttle-aware retry settings.
+
+        Uses JitterRetry for exponential backoff with randomness to prevent
+        thundering herd when multiple requests retry simultaneously.
         """
-        Recognize a segment with timeout and retry logic.
-        
-        Args:
-            segment: Segment info dict
-            attempt: Current attempt number
-            force_fresh_instance: If True, create a fresh Shazam instance
-        
-        Returns:
-            Recognition object
-        """
-        try:
-            # Create fresh Shazam instance only if forced (after timeout)
-            if force_fresh_instance:
-                print(f"  🔄 Creating fresh Shazam instance after timeout")
-                shazam = Shazam()
-            else:
-                shazam = self.shazam
-            
-            # Use asyncio.wait_for to add timeout
-            result = await asyncio.wait_for(
-                shazam.recognize(str(segment['file'])),
-                timeout=self.recognition_timeout
+        retry_options = JitterRetry(
+            attempts=self.max_retries,
+            start_timeout=self.backoff_delay,
+            max_timeout=self.max_backoff_delay,
+            random_interval_size=self.jitter_interval_size,
+            statuses={429, 500, 502, 503, 504},
+        )
+
+        http_client = HTTPClient(
+            retry_options=retry_options,
+        )
+
+        return Shazam(
+            http_client=http_client,
+            endpoint_country='US'
             )
-            
-            # Check if recognition was successful
+
+    def _is_rate_limit_error(self, error: Exception) -> bool:
+        """Check if an error indicates rate limiting (429)."""
+        error_str = str(error).lower()
+        cause_str = str(error.__cause__).lower() if error.__cause__ else ""
+        return "429" in error_str or "429" in cause_str
+
+    async def _trigger_quota_cooldown(self):
+        """Trigger a quota cooldown period."""
+        # Only trigger if not already in cooldown
+        if time.time() >= self._quota_cooldown_until:
+            self._quota_cooldown_until = time.time() + self.quota_cooldown_duration
+            print(f"\n  🛑 QUOTA EXHAUSTED! Entering cooldown for {self.quota_cooldown_duration}s")
+
+    async def _wait_for_cooldown(self):
+        """Wait if we're in a quota cooldown period."""
+        async with self._throttle_lock:
+            while True:
+                remaining = self._quota_cooldown_until - time.time()
+                if remaining <= 0:
+                    return
+
+                # Show countdown every 30 seconds
+                if remaining > 30:
+                    print(f"  ⏸️  Quota cooldown: {remaining:.0f}s remaining...")
+                    await asyncio.sleep(30)
+                else:
+                    print(f"  ⏸️  Quota cooldown: {remaining:.0f}s remaining...")
+                    await asyncio.sleep(remaining)
+
+    async def recognize_segment(self, segment: dict) -> Recognition:
+        """
+        Recognize a single audio segment.
+
+        Uses aiohttp's built-in timeout handling instead of asyncio.wait_for
+        to ensure proper connection cleanup.
+
+        Returns:
+            Recognition with was_rate_limited=True if request failed due to 429
+            after exhausting retries.
+        """
+        start_time = time.time()
+        try:
+            result = await self.shazam.recognize(str(segment['file']))
+            elapsed = time.time() - start_time
+
+            print(f"  🔄 [{datetime.now().strftime('%H:%M:%S')}] Segment {segment['index']} took {elapsed:.1f}s")
+
             if 'track' in result:
                 track = result['track']
                 return Recognition(
@@ -71,10 +131,10 @@ class TrackRecognizer:
                     shazam_track_id=track.get('key'),
                     raw_data=result,
                     recognized=True,
-                    segment_index=segment['index']
+                    segment_index=segment['index'],
+                    was_rate_limited=False
                 )
             else:
-                # No match found (but API worked)
                 return Recognition(
                     timestamp=segment['timestamp'],
                     track_title=None,
@@ -83,146 +143,149 @@ class TrackRecognizer:
                     shazam_track_id=None,
                     raw_data=result,
                     recognized=False,
-                    segment_index=segment['index']
+                    segment_index=segment['index'],
+                    was_rate_limited=False
                 )
-        
-        except asyncio.TimeoutError:
-            print(f"  ⏱️  Timeout on attempt {attempt}/{self.max_retries}")
-            
-            if attempt < self.max_retries:
-                # Exponential backoff
-                wait_time = self.backoff_delay * (2 ** (attempt - 1))
-                print(f"  ⏳ Waiting {wait_time:.0f}s before retry...")
-                await asyncio.sleep(wait_time)
-                # Force fresh instance on retry after timeout
-                return await self.recognize_segment_with_timeout(segment, attempt + 1, force_fresh_instance=True)
-            else:
-                print(f"  ❌ Max retries reached, marking as unrecognized")
-                return Recognition(
-                    timestamp=segment['timestamp'],
-                    track_title=None,
-                    artist=None,
-                    shazam_confidence=None,
-                    shazam_track_id=None,
-                    raw_data=None,
-                    recognized=False,
-                    segment_index=segment['index']
-                )
-        
+
         except Exception as e:
-            print(f"  ⚠️  Error on attempt {attempt}/{self.max_retries}: {type(e).__name__}: {e}")
-            
-            if attempt < self.max_retries:
-                wait_time = self.backoff_delay
-                print(f"  ⏳ Waiting {wait_time:.0f}s before retry...")
-                await asyncio.sleep(wait_time)
-                # Don't force fresh instance for general errors, only timeouts
-                return await self.recognize_segment_with_timeout(segment, attempt + 1, force_fresh_instance=False)
-            else:
-                print(f"  ❌ Max retries reached, marking as unrecognized")
-                return Recognition(
-                    timestamp=segment['timestamp'],
-                    track_title=None,
-                    artist=None,
-                    shazam_confidence=None,
-                    shazam_track_id=None,
-                    raw_data=None,
-                    recognized=False,
-                    segment_index=segment['index']
-                )
-    
-    async def recognize_segment(self, segment: dict) -> Recognition:
-        """
-        Recognize a single audio segment with retry logic.
-        
-        Args:
-            segment: Segment info dict with file path and timestamp
-        
-        Returns:
-            Recognition object
-        """
-        return await self.recognize_segment_with_timeout(segment, attempt=1, force_fresh_instance=False)
-    
+            elapsed = time.time() - start_time
+
+            # Check if this was a rate limit error
+            was_rate_limited = self._is_rate_limit_error(e)
+
+            # Enhanced error logging for debugging
+            error_name = type(e).__name__
+            cause = e.__cause__
+            error_details = f"{e} | Cause: {type(cause).__name__}: {cause}" if cause else str(e)
+
+            # Log elapsed time to see if retries happened before failure
+            print(f"  ⚠️  [{datetime.now().strftime('%H:%M:%S')}] Error on segment {segment['index']} after {elapsed:.1f}s: {error_name}: {error_details}")
+
+            return Recognition(
+                timestamp=segment['timestamp'],
+                track_title=None,
+                artist=None,
+                shazam_confidence=None,
+                shazam_track_id=None,
+                raw_data=None,
+                recognized=False,
+                segment_index=segment['index'],
+                was_rate_limited=was_rate_limited
+            )
+
     async def recognize_all_segments(self, segments: list[dict], resume_from_checkpoint: bool = False) -> list[Recognition]:
         """
-        Recognize all segments with progress reporting and checkpoint saving.
-        
-        Args:
-            segments: List of segment info dicts
-            resume_from_checkpoint: If True, try to load previous recognitions
-        
-        Returns:
-            List of Recognition objects
+        Recognize all segments with concurrent processing and checkpoint support.
+
+        Uses asyncio.Semaphore to limit concurrent requests and asyncio.gather
+        for parallel execution within batches.
         """
         recognitions = []
         start_index = 0
-        
+
         # Try to load checkpoint
         if resume_from_checkpoint and self.checkpoint_manager:
             checkpoint = self.checkpoint_manager.load_checkpoint()
             if checkpoint and checkpoint.get('stage') == 'recognizing':
                 saved_recognitions = checkpoint['data'].get('recognitions', [])
                 if saved_recognitions:
-                    # Reconstruct Recognition objects
                     recognitions = [
                         Recognition(**rec) for rec in saved_recognitions
                     ]
                     start_index = len(recognitions)
                     print(f"📂 Resuming from segment {start_index}/{len(segments)}")
-        
+
         total = len(segments)
-        
+        remaining_segments = segments[start_index:]
+
+        if not remaining_segments:
+            print("All segments already processed")
+            return recognitions
+
         if start_index == 0:
-            print(f"\nRecognizing tracks from {total} segments...")
+            print(f"\n🚀 Recognizing tracks from {total} segments (concurrency: {self.concurrency})...")
         else:
-            print(f"\nContinuing recognition from segment {start_index}...")
-        
-        for i in range(start_index, total):
-            segment = segments[i]
-            
-            # print(f"  [{i+1}/{total}] Processing segment at {segment['timestamp']/60:.1f}min...")
-            
-            recognition = await self.recognize_segment(segment)
-            recognitions.append(recognition)
-            
-            status = "✓" if recognition.recognized else "✗"
-            track_info = f"{recognition.artist} - {recognition.track_title}" if recognition.recognized else "Not recognized"
-            
-            print(f"  [{i+1}/{total}] {segment['timestamp']/60:.1f}min {status} {track_info}")
-            
-            # Save checkpoint periodically
-            if self.checkpoint_manager and (i + 1) % self.checkpoint_interval == 0:
+            print(f"\n🚀 Continuing recognition from segment {start_index} (concurrency: {self.concurrency})...")
+
+        # Create semaphore for concurrency control
+        semaphore = asyncio.Semaphore(self.concurrency)
+
+        async def recognize_with_semaphore(segment: dict) -> Recognition:
+
+            async with semaphore:
+                while True:
+                     # Wait for any active cooldown before calling
+                    await self._wait_for_cooldown()
+
+                    # Add random delay to spread out requessts
+                    await asyncio.sleep(random.uniform(0, self.base_delay))
+                    result = await self.recognize_segment(segment)
+
+                    # Exit loop on success or non-throttle error
+                    if not result.was_rate_limited:
+                        return result
+
+                    # Rate limited - trigger cooldown
+                    await self._trigger_quota_cooldown()
+
+        # Process in batches for checkpointing
+        for batch_start in range(0, len(remaining_segments), self.batch_size):
+            batch_end = min(batch_start + self.batch_size, len(remaining_segments))
+            batch = remaining_segments[batch_start:batch_end]
+
+            # Process batch concurrently
+            tasks = [recognize_with_semaphore(seg) for seg in batch]
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results
+            for i, result in enumerate(batch_results):
+                seg = batch[i]
+                global_idx = start_index + batch_start + i + 1
+
+                if isinstance(result, Exception):
+                    # Handle exceptions from gather
+                    print(f"  ⚠️  [{global_idx}/{total}] Exception: {type(result).__name__}")
+                    result = Recognition(
+                        timestamp=seg['timestamp'],
+                        track_title=None,
+                        artist=None,
+                        shazam_confidence=None,
+                        shazam_track_id=None,
+                        raw_data=None,
+                        recognized=False,
+                        segment_index=seg['index']
+                    )
+
+                recognitions.append(result)
+
+                # Print progress
+                status = "✓" if result.recognized else "✗"
+                track_info = f"{result.artist} - {result.track_title}" if result.recognized else "Not recognized"
+                print(f"  [{global_idx}/{total}] {seg['timestamp']/60:.1f}min {status} {track_info}")
+
+            # Save checkpoint after each batch
+            if self.checkpoint_manager:
                 self._save_recognition_checkpoint(recognitions)
-            
-            # Adaptive delay between requests
-            # Longer delay after errors/timeouts, shorter after success
-            if recognition.recognized:
-                await asyncio.sleep(self.base_delay)
-            else:
-                # If not recognized, it might have been a timeout/error
-                # Use longer delay to avoid rate limiting
-                await asyncio.sleep(self.base_delay * 2)
-        
-        # Save final checkpoint
-        if self.checkpoint_manager:
-            self._save_recognition_checkpoint(recognitions)
-        
-        print(f"\nRecognition complete: {sum(1 for r in recognitions if r.recognized)}/{total} segments recognized")
+
+            # Summary for batch
+            batch_recognized = sum(1 for r in batch_results if isinstance(r, Recognition) and r.recognized)
+            print(f"💾 Batch complete: {batch_recognized}/{len(batch)} recognized")
+
+        recognized_count = sum(1 for r in recognitions if r.recognized)
+        print(f"\n✅ Recognition complete: {recognized_count}/{total} segments recognized")
         return recognitions
-    
+
     def _save_recognition_checkpoint(self, recognitions: list[Recognition]):
         """Save recognitions to checkpoint."""
         if not self.checkpoint_manager:
             return
-        
-        # Convert Recognition objects to dicts for JSON serialization
+
         serializable_recognitions = []
         for rec in recognitions:
             rec_dict = asdict(rec)
-            # Remove raw_data to keep checkpoint file size manageable
             rec_dict['raw_data'] = None
             serializable_recognitions.append(rec_dict)
-        
+
         self.checkpoint_manager.save_checkpoint('recognizing', {
             'recognitions': serializable_recognitions,
             'count': len(recognitions)
