@@ -9,14 +9,17 @@ DJ Set Setlist Generator - automatically generates setlists from DJ mixes on You
 ## Commands
 
 ```bash
-# Basic usage
+# Basic usage (single URL)
 python main.py "https://www.youtube.com/watch?v=xxxxx"
 
-# With custom output name
-python main.py "https://www.youtube.com/watch?v=xxxxx" my_mix_name
+# Multiple URLs (processed sequentially)
+python main.py "url1" "url2" "url3"
 
 # Force restart (ignore checkpoints)
 python main.py "https://www.youtube.com/watch?v=xxxxx" --no-resume
+
+# Multiple URLs without resume
+python main.py "url1" "url2" "url3" --no-resume
 ```
 
 **Prerequisite**: FFmpeg must be installed (`brew install ffmpeg` on macOS).
@@ -30,12 +33,12 @@ python main.py "https://www.youtube.com/watch?v=xxxxx" --no-resume
 4. **Build Setlist** - `setlist_builder.py` clusters and deduplicates detections
 5. **Enrich** - `metadata_enricher.py` adds Spotify/YouTube/Discogs links
 6. **Output** - `output_formatter.py` generates JSON and Markdown in `output/<mix_name>/`
-7. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts user for confirmation)
+7. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
 
 ### Core Algorithm (setlist_builder.py)
 The setlist building uses a clustering approach:
 - Groups all detections of the same track (by `artist|title|shazam_id`)
-- Resolves temporal overlaps using multi-criteria scoring: `detection_count * 2.0 + span * 0.5 + density * 0.3`
+- Resolves temporal overlaps using scoring: `detection_count * 2.0 + density * 20.0` (span excluded to prevent scattered detections from winning)
 - Filters noise based on detection count and density thresholds
 - Adds "Unknown Track" entries for unrecognized gaps (configurable via `MIN_UNKNOWN_GAP_SIZE`)
 
@@ -46,12 +49,12 @@ Saves progress during long recognition runs. Checkpoints stored in `checkpoints/
 
 All settings in `.env` file (see `config.py` for defaults):
 - **API credentials**: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN`
-- **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`
+- **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`, `AUTO_CREATE_SPOTIFY_PLAYLIST`
 - **Recognition**: `SEGMENT_DURATION`, `SEGMENT_OVERLAP`, `RECOGNITION_TIMEOUT`, `BASE_DELAY`
 - **Retry (JitterRetry)**: `MAX_RETRIES`, `BACKOFF_DELAY`, `MAX_BACKOFF_DELAY`, `JITTER_INTERVAL_SIZE`
 - **Concurrency**: `CONCURRENT_RECOGNITIONS` (parallel requests), `BATCH_SIZE` (segments per checkpoint)
 - **Quota throttling**: `QUOTA_COOLDOWN_DURATION` (pause duration when rate limited)
-- **Clustering**: `MIN_CLUSTER_SIZE`, `MIN_UNKNOWN_GAP_SIZE`
+- **Clustering**: `MIN_CLUSTER_SIZE`, `MIN_CLUSTER_DENSITY`, `MIN_UNKNOWN_GAP_SIZE`
 - **Overlap resolution**: `OVERLAP_RESOLUTION_ENABLED`, `OVERLAP_THRESHOLD`
 
 ## Directory Structure

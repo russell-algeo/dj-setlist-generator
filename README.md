@@ -91,9 +91,11 @@ Edit `.env` to customize behavior:
 
 ### Feature Toggles
 ```bash
-ENABLE_SPOTIFY=true      # Spotify link enrichment (requires API credentials)
-ENABLE_YOUTUBE=true      # YouTube link enrichment (no API key needed!)
-ENABLE_DISCOGS=false     # Discogs link enrichment (requires token)
+ENABLE_SPOTIFY=true                   # Spotify link enrichment (requires API credentials)
+ENABLE_YOUTUBE=true                   # YouTube link enrichment (no API key needed!)
+ENABLE_DISCOGS=false                  # Discogs link enrichment (requires token)
+ENABLE_SPOTIFY_PLAYLISTS=true         # Enable Spotify playlist creation
+AUTO_CREATE_SPOTIFY_PLAYLIST=false    # Skip prompt, auto-create playlist
 ```
 
 ### Recognition Settings
