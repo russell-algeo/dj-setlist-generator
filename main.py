@@ -36,6 +36,7 @@ class SetlistGenerator:
         print("\n[1/6] Fetching video information...")
         temp_downloader = AudioDownloader()
         mix_info = temp_downloader.get_video_info(url)
+        mix_info['url'] = url  # Store original URL for playlist description
         mix_name = mix_info['title']
         
         print(f"  Title: {mix_name}")
@@ -65,10 +66,7 @@ class SetlistGenerator:
         if resume and Config.ENABLE_CHECKPOINTS:
             checkpoint = checkpoint_manager.load_checkpoint()
             if checkpoint:
-                user_input = input("Resume from checkpoint? (y/n): ").lower()
-                if user_input != 'y':
-                    checkpoint = None
-                    print("Starting fresh...")
+                print(f"📂 Resuming from checkpoint (stage: {checkpoint['stage']})")
         
         # Validate configuration
         issues = Config.validate()
@@ -161,11 +159,17 @@ class SetlistGenerator:
                 print("\n" + "=" * 70)
                 print("SPOTIFY PLAYLIST")
                 print("=" * 70)
-                print("Review the setlist above before creating a Spotify playlist.")
 
-                user_input = input("\nCreate Spotify playlist from this setlist? (y/n): ").lower()
+                # Check if auto-create is enabled or prompt user
+                if Config.AUTO_CREATE_SPOTIFY_PLAYLIST:
+                    print("Auto-creating Spotify playlist...")
+                    create_playlist = True
+                else:
+                    print("Review the setlist above before creating a Spotify playlist.")
+                    user_input = input("\nCreate Spotify playlist from this setlist? (y/n): ").lower()
+                    create_playlist = user_input == 'y'
 
-                if user_input == 'y':
+                if create_playlist:
                     from spotify_playlist_creator import SpotifyPlaylistCreator
 
                     creator = SpotifyPlaylistCreator()
@@ -212,29 +216,64 @@ class SetlistGenerator:
 async def main():
     """CLI entry point."""
     if len(sys.argv) < 2:
-        print("Usage: python main.py <youtube_or_soundcloud_url> [output_name] [--no-resume]")
+        print("Usage: python main.py <url1> [url2] [url3] ... [--no-resume]")
         print("\nExample:")
         print("  python main.py https://www.youtube.com/watch?v=xxxxx")
-        print("  python main.py https://www.youtube.com/watch?v=xxxxx my_custom_name")
-        print("  python main.py https://www.youtube.com/watch?v=xxxxx --no-resume")
+        print("  python main.py url1 url2 url3  # Process multiple URLs sequentially")
+        print("  python main.py url1 url2 --no-resume")
         sys.exit(1)
-    
-    url = sys.argv[1]
-    output_name = None
+
+    urls = []
     resume = True
-    
-    # Parse arguments
-    for arg in sys.argv[2:]:
+
+    # Parse arguments - collect URLs and flags
+    for arg in sys.argv[1:]:
         if arg == '--no-resume':
             resume = False
+        elif arg.startswith('http://') or arg.startswith('https://'):
+            urls.append(arg)
         else:
-            output_name = arg
-    
+            print(f"Warning: Ignoring unrecognized argument: {arg}")
+
+    if not urls:
+        print("Error: No valid URLs provided")
+        sys.exit(1)
+
     # Ensure base directories exist
     Config.ensure_directories()
-    
+
     generator = SetlistGenerator()
-    await generator.generate(url, output_name, resume=resume)
+
+    # Process each URL sequentially
+    results = []
+    for i, url in enumerate(urls, 1):
+        print("\n" + "█" * 70)
+        print(f"█ PROCESSING URL {i}/{len(urls)}")
+        print("█" * 70)
+        print(f"█ {url}")
+        print("█" * 70 + "\n")
+
+        try:
+            await generator.generate(url, output_name=None, resume=resume)
+            results.append((url, "SUCCESS"))
+        except Exception as e:
+            print(f"\n❌ Failed to process: {url}")
+            print(f"   Error: {e}")
+            results.append((url, f"FAILED: {e}"))
+
+    # Print summary if multiple URLs were processed
+    if len(urls) > 1:
+        print("\n" + "=" * 70)
+        print("BATCH PROCESSING SUMMARY")
+        print("=" * 70)
+        for url, status in results:
+            status_icon = "✅" if status == "SUCCESS" else "❌"
+            print(f"{status_icon} {url[:60]}...")
+            if status != "SUCCESS":
+                print(f"   {status}")
+
+        success_count = sum(1 for _, s in results if s == "SUCCESS")
+        print(f"\nCompleted: {success_count}/{len(urls)} successful")
 
 if __name__ == '__main__':
     asyncio.run(main())
