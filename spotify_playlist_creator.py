@@ -136,10 +136,11 @@ class SpotifyPlaylistCreator:
     def _generate_description(self, mix_info: dict, valid_count: int, total_count: int) -> str:
         """Generate playlist description."""
         uploader = mix_info.get('uploader', 'Unknown')
-        duration_min = mix_info.get('duration', 0) / 60
+        url = mix_info.get('url', '')
 
         description = f"Generated from: {uploader} DJ set\n"
-        description += f"Duration: {duration_min:.0f} minutes\n"
-        description += f"Tracks: {valid_count}/{total_count} identified"
+        description += f"{valid_count}/{total_count} tracks identified"
+        if url:
+            description += f"\nSet link: {url}"
 
         return description
