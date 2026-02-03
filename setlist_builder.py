@@ -25,9 +25,10 @@ class SetlistBuilder:
     def __init__(self, min_confidence_threshold: int = None):
         """Initialize builder."""
         self.min_confidence = min_confidence_threshold or Config.MIN_CONFIDENCE_THRESHOLD
-        
+
         # Clustering parameters
         self.min_cluster_size = Config.MIN_CLUSTER_SIZE
+        self.min_cluster_density = Config.MIN_CLUSTER_DENSITY
         self.min_unknown_gap_size = Config.MIN_UNKNOWN_GAP_SIZE
         
     def build_setlist(self, recognitions: list) -> list[Track]:
@@ -90,12 +91,17 @@ class SetlistBuilder:
         for track_id, recs in track_sequences.items():
             artist, title = track_id.split('|')[0:2]
 
-            # Only create cluster if we have minimum detections
-            if len(recs) >= self.min_cluster_size:
-                clusters.append(self._make_cluster_dict(track_id, recs))
-                print(f"✓ Clustered: {artist} - {title} ({len(recs)} detections)")
+            # Only create cluster if we have minimum detections and density
+            cluster = self._make_cluster_dict(track_id, recs)
+            density = cluster['density']
+
+            if len(recs) < self.min_cluster_size:
+                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {self.min_cluster_size} min)")
+            elif density < self.min_cluster_density:
+                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {self.min_cluster_density} min)")
             else:
-                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {self.min_cluster_size} minimum)")
+                clusters.append(cluster)
+                print(f"✓ Clustered: {artist} - {title} ({len(recs)} detections, density {density:.2f})")
 
         clusters.sort(key=lambda c: c['start_segment'])
         print(f"\nCreated {len(clusters)} initial clusters")
@@ -162,25 +168,22 @@ class SetlistBuilder:
                 print(f"\n⚠️  OVERLAP DETECTED: {len(overlapping)} competing tracks")
 
                 # Calculate scores for each track
+                # Score formula: prioritize detection count and density, not span
+                # Span is excluded because scattered detections shouldn't win
+                def calc_score(c):
+                    return c['detection_count'] * 10.0 + c['density'] * 20.0
+
                 scored = []
                 for c in overlapping:
                     artist, title = c['track_id'].split('|')[0:2]
-                    score = (
-                        c['detection_count'] * 2.0 +
-                        c['span'] * 0.5 +
-                        c['density'] * 0.3
-                    )
+                    score = calc_score(c)
                     scored.append((c, score, artist, title))
                     print(f"  📊 {artist} - {title}")
                     print(f"     └─ {c['detection_count']} detections, span {c['span']}, density {c['density']:.2f}")
                     print(f"     └─ Score: {score:.1f}")
 
-                # Choose track using MULTI-CRITERIA scoring
-                winner = max(overlapping, key=lambda c: (
-                    c['detection_count'] * 2.0 +
-                    c['span'] * 0.5 +
-                    c['density'] * 0.3
-                ))
+                # Choose track with highest score
+                winner = max(overlapping, key=calc_score)
 
                 winner_artist, winner_title = winner['track_id'].split('|')[0:2]
                 print(f"  ✅ KEEPING: {winner_artist} - {winner_title}")
