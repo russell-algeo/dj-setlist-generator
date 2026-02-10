@@ -6,7 +6,7 @@ from pathlib import Path
 from config import Config
 from audio_downloader import AudioDownloader
 from audio_segmenter import AudioSegmenter
-from track_recognizer import TrackRecognizer
+from track_recognizer import TrackRecognizer, Recognition
 from setlist_builder import SetlistBuilder
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter
@@ -118,35 +118,49 @@ class SetlistGenerator:
             print()
         
         try:
-            # Step 2: Download audio (or skip if exists)
-            print("\n[2/6] Downloading audio...")
-            audio_path = checkpoint_manager.get_audio_path()
-            audio_file = downloader.download(url, output_path=audio_path)
-            
-            if not checkpoint or checkpoint['stage'] in ['downloaded', 'audio_only']:
-                checkpoint_manager.save_checkpoint('downloaded', {
-                    'audio_file': str(audio_file),
-                    'mix_info': mix_info
-                })
-            
-            # Step 3: Segment audio (or load existing)
-            print("\n[3/6] Segmenting audio...")
-            segments = segmenter.create_segments(audio_file, force_recreate=False)
-            
-            if not checkpoint or checkpoint['stage'] in ['downloaded', 'segmented']:
-                checkpoint_manager.save_checkpoint('segmented', {
-                    'audio_file': str(audio_file),
-                    'segment_count': len(segments),
-                    'mix_info': mix_info
-                })
-            
-            # Step 4: Recognize tracks (with resume support)
-            print("\n[4/6] Recognizing tracks...")
-            should_resume = checkpoint and checkpoint['stage'] == 'recognizing'
-            recognitions = await recognizer.recognize_all_segments(
-                segments, 
-                resume_from_checkpoint=should_resume
-            )
+            # Check if we have complete recognition data from a previous run
+            if checkpoint and checkpoint['stage'] == 'recognized':
+                print("\n✅ Found complete recognition data from previous run!")
+                print("   Skipping download, segmentation, and recognition...")
+
+                saved_recognitions = checkpoint['data'].get('recognitions', [])
+                recognitions = [Recognition(**rec) for rec in saved_recognitions]
+                print(f"   Loaded {len(recognitions)} recognition results")
+
+                audio_file = None
+                segments = None
+            else:
+                # Normal flow: download, segment, recognize
+
+                # Step 2: Download audio (or skip if exists)
+                print("\n[2/6] Downloading audio...")
+                audio_path = checkpoint_manager.get_audio_path()
+                audio_file = downloader.download(url, output_path=audio_path)
+
+                if not checkpoint or checkpoint['stage'] in ['downloaded', 'audio_only']:
+                    checkpoint_manager.save_checkpoint('downloaded', {
+                        'audio_file': str(audio_file),
+                        'mix_info': mix_info
+                    })
+
+                # Step 3: Segment audio (or load existing)
+                print("\n[3/6] Segmenting audio...")
+                segments = segmenter.create_segments(audio_file, force_recreate=False)
+
+                if not checkpoint or checkpoint['stage'] in ['downloaded', 'segmented']:
+                    checkpoint_manager.save_checkpoint('segmented', {
+                        'audio_file': str(audio_file),
+                        'segment_count': len(segments),
+                        'mix_info': mix_info
+                    })
+
+                # Step 4: Recognize tracks (with resume support)
+                print("\n[4/6] Recognizing tracks...")
+                should_resume = checkpoint and checkpoint['stage'] == 'recognizing'
+                recognitions = await recognizer.recognize_all_segments(
+                    segments,
+                    resume_from_checkpoint=should_resume
+                )
             
             # Step 5: Build setlist
             print("\n[5/6] Building setlist...")
@@ -179,13 +193,15 @@ class SetlistGenerator:
             
             # Cleanup
             print("\nCleaning up...")
-            segmenter.cleanup_segments(segments)
+            if segments:
+                segmenter.cleanup_segments(segments)
 
-            if Config.CLEANUP_TEMP_FILES:
-                audio_file.unlink()
-                print("🗑️  Deleted audio file")
-            else:
-                print(f"💾 Kept audio file: {audio_file}")
+            if audio_file:
+                if Config.CLEANUP_TEMP_FILES:
+                    audio_file.unlink()
+                    print("🗑️  Deleted audio file")
+                else:
+                    print(f"💾 Kept audio file: {audio_file}")
 
             checkpoint_manager.clear_checkpoint()
 

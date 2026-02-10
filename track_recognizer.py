@@ -255,9 +255,13 @@ class TrackRecognizer:
 
         recognized_count = sum(1 for r in recognitions if r.recognized)
         print(f"\n✅ Recognition complete: {recognized_count}/{total} segments recognized")
+
+        # Save final checkpoint with 'recognized' stage to enable skipping on re-runs
+        self._save_recognition_checkpoint(recognitions, stage='recognized')
+
         return recognitions
 
-    def _save_recognition_checkpoint(self, recognitions: list[Recognition]):
+    def _save_recognition_checkpoint(self, recognitions: list[Recognition], stage: str = 'recognizing'):
         """Save recognitions to checkpoint."""
         if not self.checkpoint_manager:
             return
@@ -268,7 +272,7 @@ class TrackRecognizer:
             rec_dict['raw_data'] = None
             serializable_recognitions.append(rec_dict)
 
-        self.checkpoint_manager.save_checkpoint('recognizing', {
+        self.checkpoint_manager.save_checkpoint(stage, {
             'recognitions': serializable_recognitions,
             'count': len(recognitions)
         })
