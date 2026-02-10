@@ -23,27 +23,30 @@ class SetlistGenerator:
     async def generate(self, url: str, output_name: str = None, resume: bool = True):
         """
         Generate setlist from URL.
-        
+
         Args:
             url: YouTube or SoundCloud URL
             output_name: Optional custom name for output files
             resume: If True, resume from checkpoint if available
+
+        Returns:
+            Tuple of (mix_name, output_dir_path) on success.
         """
         print("=" * 70)
         print("DJ SET SETLIST GENERATOR")
         print("=" * 70)
-        
+
         # Step 1: Get video info first to get mix name
         print("\n[1/6] Fetching video information...")
         temp_downloader = AudioDownloader()
         mix_info = temp_downloader.get_video_info(url)
         mix_info['url'] = url  # Store original URL for playlist description
         mix_name = mix_info['title']
-        
+
         print(f"  Title: {mix_name}")
         print(f"  Duration: {mix_info['duration']/60:.1f} minutes")
         print(f"  Uploader: {mix_info['uploader']}")
-        
+
         # Initialize checkpoint manager with mix name (single source of truth for paths)
         checkpoint_manager = CheckpointManager(url, mix_name)
         mix_id = checkpoint_manager.mix_id
@@ -58,14 +61,14 @@ class SetlistGenerator:
         segmenter = AudioSegmenter(mix_id=mix_id, assets_dir=checkpoint_manager.assets_dir)
         recognizer = TrackRecognizer(checkpoint_manager=checkpoint_manager)
         formatter = OutputFormatter(output_dir=checkpoint_manager.output_dir)
-        
+
         # Check for existing checkpoint
         checkpoint = None
         if resume and Config.ENABLE_CHECKPOINTS:
             checkpoint = checkpoint_manager.load_checkpoint()
             if checkpoint:
                 print(f"📂 Resuming from checkpoint (stage: {checkpoint['stage']})")
-        
+
         # Validate configuration
         issues = Config.validate()
         if issues:
@@ -73,7 +76,7 @@ class SetlistGenerator:
             for issue in issues:
                 print(f"  - {issue}")
             print()
-        
+
         try:
             # Check if we have complete recognition data from a previous run
             if checkpoint and checkpoint['stage'] == 'recognized':
@@ -118,12 +121,12 @@ class SetlistGenerator:
                     segments,
                     resume_from_checkpoint=should_resume
                 )
-            
+
             # Step 5: Build setlist
             print("\n[5/6] Building setlist...")
             tracks = self.builder.build_setlist(recognitions)
             tracks = self.builder.add_unknown_tracks(tracks, recognitions)
-            
+
             # Print summary
             print("\n" + "=" * 70)
             print("SETLIST SUMMARY")
@@ -135,19 +138,19 @@ class SetlistGenerator:
                     'LOW': '🟠',
                     'UNCERTAIN': '⚪'
                 }.get(track.confidence, '⚪')
-                
+
                 time_str = f"{int(track.start_time//60)}:{int(track.start_time%60):02d}"
                 print(f"{i:2d}. [{time_str}] {confidence_icon} {track.artist} - {track.title}")
-            
+
             # Step 6: Enrich and save
             print("\n[6/6] Enriching metadata and saving...")
             enriched_tracks = self.enricher.enrich_all_tracks(tracks)
-            
+
             # Save outputs (use custom name or mix name)
             final_output_name = output_name or Config._sanitize_filename(mix_name)
             json_file = formatter.save_json(enriched_tracks, mix_info, final_output_name)
             md_file = formatter.save_markdown(enriched_tracks, mix_info, final_output_name)
-            
+
             # Cleanup
             print("\nCleaning up...")
             if segments:
@@ -178,7 +181,7 @@ class SetlistGenerator:
             if not Config.CLEANUP_CHECKPOINTS:
                 print(f"Checkpoint preserved: {checkpoint_manager.checkpoint_file}")
 
-            return mix_name
+            return mix_name, str(checkpoint_manager.output_dir)
 
         except KeyboardInterrupt:
             print("\n\n⚠️  Process interrupted!")
@@ -189,41 +192,27 @@ class SetlistGenerator:
             import traceback
             traceback.print_exc()
             print("\n💾 Progress has been saved. Run again with the same URL to resume.")
-            sys.exit(1)
+            raise
 
-async def main():
-    """CLI entry point."""
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <url1> [url2] [url3] ... [--no-resume]")
-        print("\nExample:")
-        print("  python main.py https://www.youtube.com/watch?v=xxxxx")
-        print("  python main.py url1 url2 url3  # Process multiple URLs sequentially")
-        print("  python main.py url1 url2 --no-resume")
-        sys.exit(1)
 
-    urls = []
-    resume = True
+def _is_url(arg: str) -> bool:
+    """Check if an argument looks like a URL."""
+    return arg.startswith('http://') or arg.startswith('https://')
 
-    # Parse arguments - collect URLs and flags
-    for arg in sys.argv[1:]:
-        if arg == '--no-resume':
-            resume = False
-        elif arg.startswith('http://') or arg.startswith('https://'):
-            urls.append(arg)
-        else:
-            print(f"Warning: Ignoring unrecognized argument: {arg}")
 
-    if not urls:
-        print("Error: No valid URLs provided")
-        sys.exit(1)
+async def process_urls(urls: list[str], resume: bool):
+    """Process a list of URLs through the setlist generation pipeline.
 
-    # Ensure base directories exist
-    Config.ensure_directories()
+    Args:
+        urls: List of YouTube/SoundCloud URLs.
+        resume: Whether to resume from checkpoints.
 
+    Returns:
+        List of result tuples: (url, status, mix_name, output_dir)
+    """
     generator = SetlistGenerator()
-
-    # Process each URL sequentially
     results = []
+
     for i, url in enumerate(urls, 1):
         print("\n" + "█" * 70)
         print(f"█ PROCESSING URL {i}/{len(urls)}")
@@ -232,33 +221,178 @@ async def main():
         print("█" * 70 + "\n")
 
         try:
-            mix_name = await generator.generate(url, output_name=None, resume=resume)
-            results.append((url, "SUCCESS", mix_name))
+            mix_name, output_dir = await generator.generate(url, output_name=None, resume=resume)
+            results.append({"url": url, "status": "SUCCESS", "mix_name": mix_name, "output_dir": output_dir})
             Notifier.notify_url_complete(mix_name or url[:50], i, len(urls), success=True)
         except Exception as e:
             print(f"\n❌ Failed to process: {url}")
             print(f"   Error: {e}")
-            results.append((url, f"FAILED: {e}", None))
+            results.append({"url": url, "status": f"FAILED: {e}", "mix_name": None, "output_dir": None})
             Notifier.notify_url_complete(url[:50], i, len(urls), success=False, error=str(e))
 
-    # Print summary if multiple URLs were processed
-    if len(urls) > 1:
-        print("\n" + "=" * 70)
-        print("BATCH PROCESSING SUMMARY")
-        print("=" * 70)
-        for url, status, mix_name in results:
-            status_icon = "✅" if status == "SUCCESS" else "❌"
-            display_name = mix_name if mix_name else url[:60]
-            print(f"{status_icon} {display_name}")
-            if status != "SUCCESS":
-                print(f"   {status}")
+    return results
 
-        success_count = sum(1 for _, s, _ in results if s == "SUCCESS")
-        print(f"\nCompleted: {success_count}/{len(urls)} successful")
 
-        # Send batch completion notification
-        batch_results = [(url, status) for url, status, _ in results]
-        Notifier.notify_batch_complete(batch_results)
+async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
+    """Discover and process all DJ sets for an artist.
+
+    Args:
+        artist_name: Name of the DJ/artist.
+        resume: Whether to resume from checkpoints.
+        max_sets: Max number of sets to process (0 = no limit).
+    """
+    from dj_set_discovery import discover_dj_sets, print_discovery_results
+    from artist_summary import generate_artist_summary
+
+    print("█" * 70)
+    print(f"█ DJ SET DISCOVERY MODE")
+    print("█" * 70)
+    print(f"█ Artist: {artist_name}")
+    print("█" * 70 + "\n")
+
+    # Artist-level output directory
+    safe_artist_name = Config._sanitize_filename(artist_name)
+    artist_output_dir = Config.OUTPUT_DIR / safe_artist_name
+    artist_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Discover sets (with caching)
+    print("[Discovery] Searching for DJ sets...\n")
+    sets = discover_dj_sets(artist_name, cache_dir=artist_output_dir)
+
+    if not sets:
+        print(f"\nNo DJ sets found for '{artist_name}'.")
+        print("Try using a direct URL instead:")
+        print(f'  python main.py "https://www.youtube.com/watch?v=xxxxx"')
+        return
+
+    # Apply max_sets override (CLI flag takes precedence over config)
+    effective_max = max_sets or Config.MAX_SETS_PER_ARTIST
+    if effective_max > 0 and len(sets) > effective_max:
+        print(f"\nLimiting to {effective_max} of {len(sets)} discovered sets")
+        sets = sets[:effective_max]
+
+    print_discovery_results(sets, artist_name)
+
+    # Step 2: Process each discovered set
+    urls = [s["url"] for s in sets]
+    results = await process_urls(urls, resume=resume)
+
+    # Step 3: Generate artist summary
+    print("\n" + "█" * 70)
+    print(f"█ GENERATING ARTIST SUMMARY")
+    print("█" * 70 + "\n")
+
+    generate_artist_summary(artist_name, artist_output_dir, results)
+
+    # Print final batch summary
+    print("\n" + "=" * 70)
+    print(f"COMPLETE: {artist_name.upper()}")
+    print("=" * 70)
+
+    success_count = sum(1 for r in results if r["status"] == "SUCCESS")
+    fail_count = len(results) - success_count
+
+    for r in results:
+        icon = "✅" if r["status"] == "SUCCESS" else "❌"
+        name = r["mix_name"] or r["url"][:60]
+        print(f"  {icon} {name}")
+        if r["status"] != "SUCCESS":
+            print(f"     {r['status']}")
+
+    print(f"\nResults: {success_count} successful, {fail_count} failed out of {len(results)} sets")
+    print(f"Output directory: {artist_output_dir}")
+    print(f"Artist summary: {artist_output_dir / 'artist_summary.md'}")
+
+    # Send batch notification
+    batch_results = [(r["url"], r["status"]) for r in results]
+    Notifier.notify_batch_complete(batch_results)
+
+
+async def main():
+    """CLI entry point."""
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("  python main.py \"DJ Name\"                    # Discover & process all sets")
+        print("  python main.py \"URL\" [URL2] ...             # Process specific URLs")
+        print("")
+        print("Options:")
+        print("  --no-resume       Ignore checkpoints, start fresh")
+        print("  --max-sets N      Limit number of sets to process (artist mode)")
+        print("")
+        print("Examples:")
+        print("  python main.py \"Dyed Soundorom\"")
+        print("  python main.py \"Peggy Gou\" --max-sets 5")
+        print("  python main.py https://www.youtube.com/watch?v=xxxxx")
+        print("  python main.py url1 url2 url3 --no-resume")
+        sys.exit(1)
+
+    # Parse arguments
+    urls = []
+    artist_parts = []
+    resume = True
+    max_sets = 0
+
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == '--no-resume':
+            resume = False
+        elif arg == '--max-sets':
+            if i + 1 < len(args):
+                try:
+                    max_sets = int(args[i + 1])
+                    i += 1
+                except ValueError:
+                    print(f"Error: --max-sets requires a number, got '{args[i + 1]}'")
+                    sys.exit(1)
+            else:
+                print("Error: --max-sets requires a number argument")
+                sys.exit(1)
+        elif _is_url(arg):
+            urls.append(arg)
+        else:
+            artist_parts.append(arg)
+        i += 1
+
+    # Ensure base directories exist
+    Config.ensure_directories()
+
+    # Determine mode: artist discovery vs direct URL processing
+    if urls and artist_parts:
+        print("Error: Cannot mix URLs and artist names. Use one or the other.")
+        sys.exit(1)
+
+    if urls:
+        # URL mode: existing behavior
+        results = await process_urls(urls, resume=resume)
+
+        if len(urls) > 1:
+            print("\n" + "=" * 70)
+            print("BATCH PROCESSING SUMMARY")
+            print("=" * 70)
+            for r in results:
+                icon = "✅" if r["status"] == "SUCCESS" else "❌"
+                name = r["mix_name"] or r["url"][:60]
+                print(f"{icon} {name}")
+                if r["status"] != "SUCCESS":
+                    print(f"   {r['status']}")
+
+            success_count = sum(1 for r in results if r["status"] == "SUCCESS")
+            print(f"\nCompleted: {success_count}/{len(urls)} successful")
+
+            batch_results = [(r["url"], r["status"]) for r in results]
+            Notifier.notify_batch_complete(batch_results)
+
+    elif artist_parts:
+        # Artist mode: discover + process
+        artist_name = " ".join(artist_parts)
+        await process_artist(artist_name, resume=resume, max_sets=max_sets)
+
+    else:
+        print("Error: No URLs or artist name provided")
+        sys.exit(1)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
