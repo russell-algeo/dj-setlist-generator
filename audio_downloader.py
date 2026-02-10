@@ -1,5 +1,6 @@
 """Audio download and normalization."""
 
+import time
 import yt_dlp
 from pathlib import Path
 from config import Config
@@ -16,7 +17,15 @@ class AudioDownloader:
         """
         self.assets_dir = assets_dir or Config.ASSETS_DIR
         self.assets_dir.mkdir(parents=True, exist_ok=True)
-    
+
+    def _is_bot_detection_error(self, error: Exception) -> bool:
+        """Check if error is YouTube's bot detection."""
+        error_str = str(error).lower()
+        return (
+            "sign in to confirm you're not a bot" in error_str
+            or ("cookies" in error_str and "authentication" in error_str)
+        )
+
     def download(self, url: str, output_path: Path = None, output_filename: str = 'mix') -> Path:
         """
         Download audio from URL and convert to MP3.
@@ -52,10 +61,25 @@ class AudioDownloader:
         }
         
         print(f"Downloading audio from: {url}")
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        
+
+        attempt = 0
+        while True:
+            attempt += 1
+            if attempt > 1:
+                print(f"🔄 Retry attempt {attempt}...")
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                break  # Success - exit loop
+            except Exception as e:
+                if self._is_bot_detection_error(e):
+                    print(f"🤖 YouTube bot detection triggered. Cooling down for {Config.QUOTA_COOLDOWN_DURATION}s...")
+                    time.sleep(Config.QUOTA_COOLDOWN_DURATION)
+                    continue  # Retry
+                else:
+                    raise  # Non-bot errors fail immediately
+
         print(f"Download complete: {output_path}")
         return output_path
     
