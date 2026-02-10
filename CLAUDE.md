@@ -82,11 +82,15 @@ All settings in `.env` file (see `config.py` for defaults):
 
 ## Directory Structure
 
+**URL mode** (`python main.py "https://..."`)
 - `assets/<mix_name>/` - Downloaded audio and segments (temporary)
 - `checkpoints/<mix_name>/` - Crash recovery state
-- `checkpoints/<artist_name>/` - Artist-level checkpoints (discovery mode)
-  - `discovery.json` - Cached discovery results
-- `output/<mix_name>/` - Final JSON and Markdown output per set
-- `output/<artist_name>/` - Artist-level output (discovery mode)
-  - `artist_summary.md` - Aggregate analysis across all sets
-  - `artist_summary.json` - Machine-readable aggregate data
+- `output/<mix_name>/` - Final JSON and Markdown output
+
+**Artist mode** (`python main.py "DJ Name"`) - everything nested under artist:
+- `assets/<artist_name>/<mix_name>/` - Downloaded audio and segments
+- `checkpoints/<artist_name>/discovery.json` - Cached discovery results
+- `checkpoints/<artist_name>/<mix_name>/` - Per-set crash recovery state
+- `output/<artist_name>/artist_summary.md` - Aggregate analysis across all sets
+- `output/<artist_name>/artist_summary.json` - Machine-readable aggregate data
+- `output/<artist_name>/<mix_name>/` - Per-set JSON and Markdown output
