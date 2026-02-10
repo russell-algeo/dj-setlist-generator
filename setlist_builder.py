@@ -25,11 +25,6 @@ class SetlistBuilder:
     def __init__(self, min_confidence_threshold: int = None):
         """Initialize builder."""
         self.min_confidence = min_confidence_threshold or Config.MIN_CONFIDENCE_THRESHOLD
-
-        # Clustering parameters
-        self.min_cluster_size = Config.MIN_CLUSTER_SIZE
-        self.min_cluster_density = Config.MIN_CLUSTER_DENSITY
-        self.min_unknown_gap_size = Config.MIN_UNKNOWN_GAP_SIZE
         
     def build_setlist(self, recognitions: list) -> list[Track]:
         """Build setlist from recognition results."""
@@ -95,10 +90,10 @@ class SetlistBuilder:
             cluster = self._make_cluster_dict(track_id, recs)
             density = cluster['density']
 
-            if len(recs) < self.min_cluster_size:
-                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {self.min_cluster_size} min)")
-            elif density < self.min_cluster_density:
-                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {self.min_cluster_density} min)")
+            if len(recs) < Config.MIN_CLUSTER_SIZE:
+                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {Config.MIN_CLUSTER_SIZE} min)")
+            elif density < Config.MIN_CLUSTER_DENSITY:
+                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {Config.MIN_CLUSTER_DENSITY} min)")
             else:
                 clusters.append(cluster)
                 print(f"✓ Clustered: {artist} - {title} ({len(recs)} detections, density {density:.2f})")
@@ -343,11 +338,11 @@ class SetlistBuilder:
             if not current_gap or seg_idx - current_gap[-1] <= 2:
                 current_gap.append(seg_idx)
             else:
-                if len(current_gap) >= self.min_unknown_gap_size:
+                if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
                     unknown_gaps.append(current_gap)
                 current_gap = [seg_idx]
         
-        if len(current_gap) >= self.min_unknown_gap_size:
+        if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
             unknown_gaps.append(current_gap)
         
         # Create Unknown Track entries

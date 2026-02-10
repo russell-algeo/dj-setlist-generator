@@ -14,11 +14,55 @@ from checkpoint_manager import CheckpointManager
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
-    
+
     def __init__(self):
         self.builder = SetlistBuilder()
         self.enricher = MetadataEnricher()
-    
+
+    def _create_spotify_playlist(self, enriched_tracks: list, mix_info: dict, playlist_name: str):
+        """Handle Spotify playlist creation with user confirmation."""
+        from spotify_playlist_creator import SpotifyPlaylistCreator
+
+        print("\n" + "=" * 70)
+        print("SPOTIFY PLAYLIST")
+        print("=" * 70)
+
+        # Check if auto-create is enabled or prompt user
+        if Config.AUTO_CREATE_SPOTIFY_PLAYLIST:
+            print("Auto-creating Spotify playlist...")
+            create_playlist = True
+        else:
+            print("Review the setlist above before creating a Spotify playlist.")
+            user_input = input("\nCreate Spotify playlist from this setlist? (y/n): ").lower()
+            create_playlist = user_input == 'y'
+
+        if not create_playlist:
+            print("Skipped playlist creation")
+            return
+
+        creator = SpotifyPlaylistCreator()
+        result = creator.create_playlist_from_setlist(
+            enriched_tracks=enriched_tracks,
+            mix_info=mix_info,
+            playlist_name=playlist_name
+        )
+
+        if result:
+            print("\n" + "=" * 70)
+            print("PLAYLIST CREATED SUCCESSFULLY!")
+            print("=" * 70)
+            print(f"Playlist URL: {result['playlist_url']}")
+            print(f"Tracks added: {result['tracks_added']}/{result['tracks_with_spotify_urls']}")
+
+            if result['tracks_failed'] > 0:
+                print(f"Warning: {result['tracks_failed']} tracks failed to add")
+
+            unknown_count = result['total_tracks_in_setlist'] - result['tracks_with_spotify_urls']
+            if unknown_count > 0:
+                print(f"Note: {unknown_count} tracks skipped (unknown or no Spotify URL)")
+        else:
+            print("\nPlaylist creation failed or was cancelled")
+
     async def generate(self, url: str, output_name: str = None, resume: bool = True):
         """
         Generate setlist from URL.
@@ -43,23 +87,20 @@ class SetlistGenerator:
         print(f"  Duration: {mix_info['duration']/60:.1f} minutes")
         print(f"  Uploader: {mix_info['uploader']}")
         
-        # Initialize checkpoint manager with mix name
+        # Initialize checkpoint manager with mix name (single source of truth for paths)
         checkpoint_manager = CheckpointManager(url, mix_name)
         mix_id = checkpoint_manager.mix_id
-        
-        # Get organized directories for this mix
-        dirs = Config.get_mix_directories(mix_name)
-        
+
         print(f"\n📁 Directory structure:")
-        print(f"  Assets: {dirs['assets']}")
-        print(f"  Checkpoints: {dirs['checkpoints']}")
-        print(f"  Output: {dirs['output']}")
-        
+        print(f"  Assets: {checkpoint_manager.assets_dir}")
+        print(f"  Checkpoints: {checkpoint_manager.checkpoint_dir}")
+        print(f"  Output: {checkpoint_manager.output_dir}")
+
         # Initialize components with mix-specific directories
-        downloader = AudioDownloader(assets_dir=dirs['assets'])
-        segmenter = AudioSegmenter(mix_id=mix_id, assets_dir=dirs['assets'])
+        downloader = AudioDownloader(assets_dir=checkpoint_manager.assets_dir)
+        segmenter = AudioSegmenter(mix_id=mix_id, assets_dir=checkpoint_manager.assets_dir)
         recognizer = TrackRecognizer(checkpoint_manager=checkpoint_manager)
-        formatter = OutputFormatter(output_dir=dirs['output'])
+        formatter = OutputFormatter(output_dir=checkpoint_manager.output_dir)
         
         # Check for existing checkpoint
         checkpoint = None
@@ -139,15 +180,15 @@ class SetlistGenerator:
             # Cleanup
             print("\nCleaning up...")
             segmenter.cleanup_segments(segments)
-            
+
             if Config.CLEANUP_TEMP_FILES:
                 audio_file.unlink()
                 print("🗑️  Deleted audio file")
             else:
                 print(f"💾 Kept audio file: {audio_file}")
-            
+
             checkpoint_manager.clear_checkpoint()
-            
+
             print("\n" + "=" * 70)
             print("COMPLETE!")
             print("=" * 70)
@@ -156,52 +197,15 @@ class SetlistGenerator:
 
             # Spotify Playlist Creation
             if Config.ENABLE_SPOTIFY_PLAYLISTS:
-                print("\n" + "=" * 70)
-                print("SPOTIFY PLAYLIST")
-                print("=" * 70)
-
-                # Check if auto-create is enabled or prompt user
-                if Config.AUTO_CREATE_SPOTIFY_PLAYLIST:
-                    print("Auto-creating Spotify playlist...")
-                    create_playlist = True
-                else:
-                    print("Review the setlist above before creating a Spotify playlist.")
-                    user_input = input("\nCreate Spotify playlist from this setlist? (y/n): ").lower()
-                    create_playlist = user_input == 'y'
-
-                if create_playlist:
-                    from spotify_playlist_creator import SpotifyPlaylistCreator
-
-                    creator = SpotifyPlaylistCreator()
-                    result = creator.create_playlist_from_setlist(
-                        enriched_tracks=enriched_tracks,
-                        mix_info=mix_info,
-                        playlist_name=final_output_name
-                    )
-
-                    if result:
-                        print("\n" + "=" * 70)
-                        print("PLAYLIST CREATED SUCCESSFULLY!")
-                        print("=" * 70)
-                        print(f"Playlist URL: {result['playlist_url']}")
-                        print(f"Tracks added: {result['tracks_added']}/{result['tracks_with_spotify_urls']}")
-
-                        if result['tracks_failed'] > 0:
-                            print(f"Warning: {result['tracks_failed']} tracks failed to add")
-
-                        unknown_count = result['total_tracks_in_setlist'] - result['tracks_with_spotify_urls']
-                        if unknown_count > 0:
-                            print(f"Note: {unknown_count} tracks skipped (unknown or no Spotify URL)")
-                    else:
-                        print("\nPlaylist creation failed or was cancelled")
-                else:
-                    print("Skipped playlist creation")
+                self._create_spotify_playlist(enriched_tracks, mix_info, final_output_name)
 
             if not Config.CLEANUP_TEMP_FILES:
-                print(f"\nAssets preserved in: {dirs['assets']}")
+                print(f"\nAssets preserved in: {checkpoint_manager.assets_dir}")
             if not Config.CLEANUP_CHECKPOINTS:
                 print(f"Checkpoint preserved: {checkpoint_manager.checkpoint_file}")
-            
+
+            return mix_name
+
         except KeyboardInterrupt:
             print("\n\n⚠️  Process interrupted!")
             print("Progress has been saved. Run again with the same URL to resume.")
@@ -254,25 +258,26 @@ async def main():
         print("█" * 70 + "\n")
 
         try:
-            await generator.generate(url, output_name=None, resume=resume)
-            results.append((url, "SUCCESS"))
+            mix_name = await generator.generate(url, output_name=None, resume=resume)
+            results.append((url, "SUCCESS", mix_name))
         except Exception as e:
             print(f"\n❌ Failed to process: {url}")
             print(f"   Error: {e}")
-            results.append((url, f"FAILED: {e}"))
+            results.append((url, f"FAILED: {e}", None))
 
     # Print summary if multiple URLs were processed
     if len(urls) > 1:
         print("\n" + "=" * 70)
         print("BATCH PROCESSING SUMMARY")
         print("=" * 70)
-        for url, status in results:
+        for url, status, mix_name in results:
             status_icon = "✅" if status == "SUCCESS" else "❌"
-            print(f"{status_icon} {url[:60]}...")
+            display_name = mix_name if mix_name else url[:60]
+            print(f"{status_icon} {display_name}")
             if status != "SUCCESS":
                 print(f"   {status}")
 
-        success_count = sum(1 for _, s in results if s == "SUCCESS")
+        success_count = sum(1 for _, s, _ in results if s == "SUCCESS")
         print(f"\nCompleted: {success_count}/{len(urls)} successful")
 
 if __name__ == '__main__':

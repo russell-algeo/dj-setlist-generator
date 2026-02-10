@@ -29,26 +29,8 @@ class TrackRecognizer:
 
     def __init__(self, checkpoint_manager=None):
         self.checkpoint_manager = checkpoint_manager
-        self.checkpoint_interval = Config.CHECKPOINT_INTERVAL
-
-        # Timing settings
-        self.recognition_timeout = Config.RECOGNITION_TIMEOUT
-        self.max_retries = Config.MAX_RETRIES
-        self.base_delay = Config.BASE_DELAY
-        self.backoff_delay = Config.BACKOFF_DELAY
-        self.max_backoff_delay = Config.MAX_BACKOFF_DELAY
-        self.jitter_interval_size = Config.JITTER_INTERVAL_SIZE
-
-        # Concurrency settings
-        self.concurrency = Config.CONCURRENT_RECOGNITIONS
-        self.batch_size = Config.BATCH_SIZE
-
-        # Quota-aware throttling settings
-        self.quota_cooldown_duration = Config.QUOTA_COOLDOWN_DURATION
         self._quota_cooldown_until = 0  # Unix timestamp when cooldown ends
         self._throttle_lock = asyncio.Lock()
-
-        # Create the Shazam client with proper timeout configuration
         self.shazam = self._create_shazam_client()
 
     def _create_shazam_client(self) -> Shazam:
@@ -58,10 +40,10 @@ class TrackRecognizer:
         thundering herd when multiple requests retry simultaneously.
         """
         retry_options = JitterRetry(
-            attempts=self.max_retries,
-            start_timeout=self.backoff_delay,
-            max_timeout=self.max_backoff_delay,
-            random_interval_size=self.jitter_interval_size,
+            attempts=Config.MAX_RETRIES,
+            start_timeout=Config.BACKOFF_DELAY,
+            max_timeout=Config.MAX_BACKOFF_DELAY,
+            random_interval_size=Config.JITTER_INTERVAL_SIZE,
             statuses={429, 500, 502, 503, 504},
         )
 
@@ -84,8 +66,8 @@ class TrackRecognizer:
         """Trigger a quota cooldown period."""
         # Only trigger if not already in cooldown
         if time.time() >= self._quota_cooldown_until:
-            self._quota_cooldown_until = time.time() + self.quota_cooldown_duration
-            print(f"\n  🛑 QUOTA EXHAUSTED! Entering cooldown for {self.quota_cooldown_duration}s")
+            self._quota_cooldown_until = time.time() + Config.QUOTA_COOLDOWN_DURATION
+            print(f"\n  🛑 QUOTA EXHAUSTED! Entering cooldown for {Config.QUOTA_COOLDOWN_DURATION}s")
 
     async def _wait_for_cooldown(self):
         """Wait if we're in a quota cooldown period."""
@@ -203,12 +185,12 @@ class TrackRecognizer:
             return recognitions
 
         if start_index == 0:
-            print(f"\n🚀 Recognizing tracks from {total} segments (concurrency: {self.concurrency})...")
+            print(f"\n🚀 Recognizing tracks from {total} segments (concurrency: {Config.CONCURRENT_RECOGNITIONS})...")
         else:
-            print(f"\n🚀 Continuing recognition from segment {start_index} (concurrency: {self.concurrency})...")
+            print(f"\n🚀 Continuing recognition from segment {start_index} (concurrency: {Config.CONCURRENT_RECOGNITIONS})...")
 
         # Create semaphore for concurrency control
-        semaphore = asyncio.Semaphore(self.concurrency)
+        semaphore = asyncio.Semaphore(Config.CONCURRENT_RECOGNITIONS)
 
         async def recognize_with_semaphore(segment: dict) -> Recognition:
 
@@ -217,8 +199,8 @@ class TrackRecognizer:
                      # Wait for any active cooldown before calling
                     await self._wait_for_cooldown()
 
-                    # Add random delay to spread out requessts
-                    await asyncio.sleep(random.uniform(0, self.base_delay))
+                    # Add random delay to spread out requests
+                    await asyncio.sleep(random.uniform(0, Config.BASE_DELAY))
                     result = await self.recognize_segment(segment)
 
                     # Exit loop on success or non-throttle error
@@ -229,8 +211,8 @@ class TrackRecognizer:
                     await self._trigger_quota_cooldown()
 
         # Process in batches for checkpointing
-        for batch_start in range(0, len(remaining_segments), self.batch_size):
-            batch_end = min(batch_start + self.batch_size, len(remaining_segments))
+        for batch_start in range(0, len(remaining_segments), Config.BATCH_SIZE):
+            batch_end = min(batch_start + Config.BATCH_SIZE, len(remaining_segments))
             batch = remaining_segments[batch_start:batch_end]
 
             # Process batch concurrently

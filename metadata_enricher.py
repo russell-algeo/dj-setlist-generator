@@ -6,7 +6,7 @@ from typing import Optional
 from config import Config
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-from urllib.parse import quote
+
 
 class MetadataEnricher:
     """Fetch metadata from various platforms."""
