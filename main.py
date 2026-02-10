@@ -4,6 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 from config import Config
+from notifier import Notifier
 from audio_downloader import AudioDownloader
 from audio_segmenter import AudioSegmenter
 from track_recognizer import TrackRecognizer, Recognition
@@ -276,10 +277,12 @@ async def main():
         try:
             mix_name = await generator.generate(url, output_name=None, resume=resume)
             results.append((url, "SUCCESS", mix_name))
+            Notifier.notify_url_complete(mix_name or url[:50], i, len(urls), success=True)
         except Exception as e:
             print(f"\n❌ Failed to process: {url}")
             print(f"   Error: {e}")
             results.append((url, f"FAILED: {e}", None))
+            Notifier.notify_url_complete(url[:50], i, len(urls), success=False, error=str(e))
 
     # Print summary if multiple URLs were processed
     if len(urls) > 1:
@@ -295,6 +298,10 @@ async def main():
 
         success_count = sum(1 for _, s, _ in results if s == "SUCCESS")
         print(f"\nCompleted: {success_count}/{len(urls)} successful")
+
+        # Send batch completion notification
+        batch_results = [(url, status) for url, status, _ in results]
+        Notifier.notify_batch_complete(batch_results)
 
 if __name__ == '__main__':
     asyncio.run(main())
