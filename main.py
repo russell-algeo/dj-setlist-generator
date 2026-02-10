@@ -166,7 +166,15 @@ class SetlistGenerator:
                 else:
                     print(f"💾 Kept audio file: {audio_file}")
 
+            # Remove empty asset directories after file cleanup
+            if Config.CLEANUP_TEMP_FILES:
+                _remove_empty_parents(checkpoint_manager.assets_dir, Config.ASSETS_DIR)
+
             checkpoint_manager.clear_checkpoint()
+
+            # Remove empty checkpoint directories after checkpoint cleanup
+            if Config.CLEANUP_CHECKPOINTS:
+                _remove_empty_parents(checkpoint_manager.checkpoint_dir, Config.CHECKPOINT_DIR)
 
             print("\n" + "=" * 70)
             print("COMPLETE!")
@@ -201,6 +209,21 @@ class SetlistGenerator:
 def _is_url(arg: str) -> bool:
     """Check if an argument looks like a URL."""
     return arg.startswith('http://') or arg.startswith('https://')
+
+
+def _remove_empty_parents(directory: Path, stop_at: Path):
+    """Remove directory and its empty parents up to (but not including) stop_at.
+
+    Walks upward from *directory*, removing each dir only if it's empty.
+    Stops as soon as it reaches *stop_at* or encounters a non-empty directory.
+    """
+    current = directory
+    while current != stop_at and current.is_dir():
+        try:
+            current.rmdir()  # only succeeds if empty
+        except OSError:
+            break
+        current = current.parent
 
 
 async def process_urls(urls: list[str], resume: bool, artist_name: str = None):
