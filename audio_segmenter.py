@@ -112,14 +112,3 @@ class AudioSegmenter:
         
         return sorted(segments, key=lambda x: x['index'])
     
-    def cleanup_segments(self, segments: list[dict]):
-        """Delete temporary segment files."""
-        if not Config.CLEANUP_TEMP_FILES:
-            print(f"💾 Keeping {len(segments)} segment files in {self.assets_dir}")
-            return
-
-        for segment in segments:
-            try:
-                segment['file'].unlink()
-            except Exception as e:
-                print(f"Warning: Could not delete {segment['file']}: {e}")

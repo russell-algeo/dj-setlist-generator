@@ -90,16 +90,60 @@ class CheckpointManager:
             print(f"⚠️  Could not load checkpoint: {e}")
             return None
     
-    def clear_checkpoint(self):
-        """Delete checkpoint file after successful completion."""
-        if not Config.CLEANUP_CHECKPOINTS:
-            print(f"💾 Keeping checkpoint file: {self.checkpoint_file}")
+    def cleanup_assets(self, segments: list[dict] = None):
+        """Delete temporary audio/segment files and empty directories.
+
+        Controlled by Config.CLEANUP_TEMP_FILES.
+
+        Args:
+            segments: List of segment dicts (each with a 'file' key).
+        """
+        if not Config.CLEANUP_TEMP_FILES:
+            print(f"💾 Kept assets in: {self.assets_dir}")
             return
-        
+
+        # Delete segment files
+        if segments:
+            for segment in segments:
+                try:
+                    segment['file'].unlink()
+                except Exception as e:
+                    print(f"Warning: Could not delete {segment['file']}: {e}")
+
+        # Delete audio file
+        if self.audio_file.exists():
+            self.audio_file.unlink()
+            print("🗑️  Deleted audio file")
+
+        # Remove empty directories up to base
+        self._remove_empty_parents(self.assets_dir, Config.ASSETS_DIR)
+
+    def cleanup_checkpoint(self):
+        """Delete checkpoint file and empty directories.
+
+        Controlled by Config.CLEANUP_CHECKPOINTS.
+        """
+        if not Config.CLEANUP_CHECKPOINTS:
+            print(f"💾 Kept checkpoint: {self.checkpoint_file}")
+            return
+
         if self.checkpoint_file.exists():
             self.checkpoint_file.unlink()
             print("🗑️  Checkpoint cleared")
-    
+
+        self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
+
+    @staticmethod
+    def _remove_empty_parents(directory: Path, stop_at: Path):
+        """Remove directory and empty parents up to (not including) stop_at."""
+        current = directory
+        while current != stop_at and current.is_dir():
+            try:
+                current.rmdir()  # only succeeds if empty
+            except OSError:
+                break
+            current = current.parent
+
     def get_audio_path(self) -> Path:
         """Get the path where audio should be saved/loaded."""
         return self.audio_file
