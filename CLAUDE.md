@@ -55,7 +55,7 @@ python main.py "url1" "url2" "url3" --no-resume
 7. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
 
 ### DJ Set Discovery (dj_set_discovery.py)
-Uses the Anthropic Python SDK to call Claude with the `web_search` tool. Claude intelligently searches across multiple platforms (YouTube, SoundCloud) and known DJ set channels (Boiler Room, HOR Berlin, Cercle, etc.) to find all recorded sets by a given artist. Results are cached to `output/<artist>/discovery.json` so re-runs don't repeat the search.
+Uses the Anthropic Python SDK to call Claude with the `web_search` tool. Claude intelligently searches across multiple platforms (YouTube, SoundCloud) and known DJ set channels (Boiler Room, HOR Berlin, Cercle, etc.) to find all recorded sets by a given artist. Results are cached to `checkpoints/<artist>/discovery.json` so re-runs don't repeat the search.
 
 ### Core Algorithm (setlist_builder.py)
 The setlist building uses a clustering approach:
@@ -84,8 +84,9 @@ All settings in `.env` file (see `config.py` for defaults):
 
 - `assets/<mix_name>/` - Downloaded audio and segments (temporary)
 - `checkpoints/<mix_name>/` - Crash recovery state
+- `checkpoints/<artist_name>/` - Artist-level checkpoints (discovery mode)
+  - `discovery.json` - Cached discovery results
 - `output/<mix_name>/` - Final JSON and Markdown output per set
 - `output/<artist_name>/` - Artist-level output (discovery mode)
-  - `discovery.json` - Cached discovery results
   - `artist_summary.md` - Aggregate analysis across all sets
   - `artist_summary.json` - Machine-readable aggregate data

@@ -250,14 +250,16 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ Artist: {artist_name}")
     print("█" * 70 + "\n")
 
-    # Artist-level output directory
+    # Artist-level directories
     safe_artist_name = Config._sanitize_filename(artist_name)
     artist_output_dir = Config.OUTPUT_DIR / safe_artist_name
     artist_output_dir.mkdir(parents=True, exist_ok=True)
+    artist_checkpoint_dir = Config.CHECKPOINT_DIR / safe_artist_name
+    artist_checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Discover sets (with caching)
+    # Step 1: Discover sets (cached in checkpoints dir)
     print("[Discovery] Searching for DJ sets...\n")
-    sets = discover_dj_sets(artist_name, cache_dir=artist_output_dir)
+    sets = discover_dj_sets(artist_name, cache_dir=artist_checkpoint_dir)
 
     if not sets:
         print(f"\nNo DJ sets found for '{artist_name}'.")
