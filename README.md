@@ -28,6 +28,11 @@ pip install -r requirements.txt
 
 ### 3. Configure API credentials
 
+Copy the example environment file and fill in your credentials:
+```bash
+cp .env.example .env
+```
+
 Edit `.env` and add your credentials:
 
 #### Spotify (Required for Spotify links)
@@ -185,7 +190,8 @@ Confidence is based on how many consecutive 30-second segments recognized the sa
 ## File Structure
 
     setlist-generator/
-    ├── .env                      # Your configuration
+    ├── .env.example               # Template configuration (copy to .env)
+    ├── .env                      # Your configuration (git-ignored)
     ├── requirements.txt          # Python dependencies
     ├── README.md                 # This file
     ├── main.py                   # Main entry point
