@@ -90,25 +90,21 @@ class CheckpointManager:
             print(f"⚠️  Could not load checkpoint: {e}")
             return None
     
-    def cleanup_assets(self, segments: list[dict] = None):
+    def cleanup_assets(self):
         """Delete temporary audio/segment files and empty directories.
 
         Controlled by Config.CLEANUP_TEMP_FILES.
-
-        Args:
-            segments: List of segment dicts (each with a 'file' key).
         """
         if not Config.CLEANUP_TEMP_FILES:
             print(f"💾 Kept assets in: {self.assets_dir}")
             return
 
         # Delete segment files
-        if segments:
-            for segment in segments:
-                try:
-                    segment['file'].unlink()
-                except Exception as e:
-                    print(f"Warning: Could not delete {segment['file']}: {e}")
+        for segment_file in self.list_existing_segments():
+            try:
+                segment_file.unlink()
+            except Exception as e:
+                print(f"Warning: Could not delete {segment_file}: {e}")
 
         # Delete audio file
         if self.audio_file.exists():

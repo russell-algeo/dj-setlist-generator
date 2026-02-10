@@ -156,7 +156,7 @@ class SetlistGenerator:
 
             # Cleanup
             print("\nCleaning up...")
-            checkpoint_manager.cleanup_assets(segments)
+            checkpoint_manager.cleanup_assets()
             checkpoint_manager.cleanup_checkpoint()
 
             print("\n" + "=" * 70)
