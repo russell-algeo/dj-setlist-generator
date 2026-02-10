@@ -41,7 +41,7 @@ class TrackRecognizer:
         """
         retry_options = JitterRetry(
             attempts=Config.MAX_RETRIES,
-            start_timeout=Config.BACKOFF_DELAY,
+            start_timeout=Config.BASE_DELAY,
             max_timeout=Config.MAX_BACKOFF_DELAY,
             random_interval_size=Config.JITTER_INTERVAL_SIZE,
             statuses={429, 500, 502, 503, 504},

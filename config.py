@@ -42,7 +42,6 @@ class Config:
 
     # Retry Settings (for 429 rate limit handling with JitterRetry)
     MAX_RETRIES = int(os.getenv('MAX_RETRIES', '5'))
-    BACKOFF_DELAY = float(os.getenv('BACKOFF_DELAY', '5.0'))  # Start backoff
     MAX_BACKOFF_DELAY = float(os.getenv('MAX_BACKOFF_DELAY', '30.0'))  # Max backoff cap
     JITTER_INTERVAL_SIZE = float(os.getenv('JITTER_INTERVAL_SIZE', '4.0'))  # Random jitter range is (0, size^2)
 

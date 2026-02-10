@@ -20,50 +20,6 @@ class SetlistGenerator:
         self.builder = SetlistBuilder()
         self.enricher = MetadataEnricher()
 
-    def _create_spotify_playlist(self, enriched_tracks: list, mix_info: dict, playlist_name: str):
-        """Handle Spotify playlist creation with user confirmation."""
-        from spotify_playlist_creator import SpotifyPlaylistCreator
-
-        print("\n" + "=" * 70)
-        print("SPOTIFY PLAYLIST")
-        print("=" * 70)
-
-        # Check if auto-create is enabled or prompt user
-        if Config.AUTO_CREATE_SPOTIFY_PLAYLIST:
-            print("Auto-creating Spotify playlist...")
-            create_playlist = True
-        else:
-            print("Review the setlist above before creating a Spotify playlist.")
-            user_input = input("\nCreate Spotify playlist from this setlist? (y/n): ").lower()
-            create_playlist = user_input == 'y'
-
-        if not create_playlist:
-            print("Skipped playlist creation")
-            return
-
-        creator = SpotifyPlaylistCreator()
-        result = creator.create_playlist_from_setlist(
-            enriched_tracks=enriched_tracks,
-            mix_info=mix_info,
-            playlist_name=playlist_name
-        )
-
-        if result:
-            print("\n" + "=" * 70)
-            print("PLAYLIST CREATED SUCCESSFULLY!")
-            print("=" * 70)
-            print(f"Playlist URL: {result['playlist_url']}")
-            print(f"Tracks added: {result['tracks_added']}/{result['tracks_with_spotify_urls']}")
-
-            if result['tracks_failed'] > 0:
-                print(f"Warning: {result['tracks_failed']} tracks failed to add")
-
-            unknown_count = result['total_tracks_in_setlist'] - result['tracks_with_spotify_urls']
-            if unknown_count > 0:
-                print(f"Note: {unknown_count} tracks skipped (unknown or no Spotify URL)")
-        else:
-            print("\nPlaylist creation failed or was cancelled")
-
     async def generate(self, url: str, output_name: str = None, resume: bool = True):
         """
         Generate setlist from URL.
@@ -214,7 +170,8 @@ class SetlistGenerator:
 
             # Spotify Playlist Creation
             if Config.ENABLE_SPOTIFY_PLAYLISTS:
-                self._create_spotify_playlist(enriched_tracks, mix_info, final_output_name)
+                from spotify_playlist_creator import SpotifyPlaylistCreator
+                SpotifyPlaylistCreator.create_with_confirmation(enriched_tracks, mix_info, final_output_name)
 
             if not Config.CLEANUP_TEMP_FILES:
                 print(f"\nAssets preserved in: {checkpoint_manager.assets_dir}")
