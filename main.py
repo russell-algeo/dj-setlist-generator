@@ -20,7 +20,8 @@ class SetlistGenerator:
         self.builder = SetlistBuilder()
         self.enricher = MetadataEnricher()
 
-    async def generate(self, url: str, output_name: str = None, resume: bool = True):
+    async def generate(self, url: str, output_name: str = None, resume: bool = True,
+                       artist_name: str = None):
         """
         Generate setlist from URL.
 
@@ -28,6 +29,8 @@ class SetlistGenerator:
             url: YouTube or SoundCloud URL
             output_name: Optional custom name for output files
             resume: If True, resume from checkpoint if available
+            artist_name: Optional artist name (artist discovery mode).
+                         When provided, nests checkpoints under the artist directory.
 
         Returns:
             Tuple of (mix_name, output_dir_path) on success.
@@ -48,7 +51,7 @@ class SetlistGenerator:
         print(f"  Uploader: {mix_info['uploader']}")
 
         # Initialize checkpoint manager with mix name (single source of truth for paths)
-        checkpoint_manager = CheckpointManager(url, mix_name)
+        checkpoint_manager = CheckpointManager(url, mix_name, artist_name=artist_name)
         mix_id = checkpoint_manager.mix_id
 
         print(f"\n📁 Directory structure:")
@@ -200,15 +203,16 @@ def _is_url(arg: str) -> bool:
     return arg.startswith('http://') or arg.startswith('https://')
 
 
-async def process_urls(urls: list[str], resume: bool):
+async def process_urls(urls: list[str], resume: bool, artist_name: str = None):
     """Process a list of URLs through the setlist generation pipeline.
 
     Args:
         urls: List of YouTube/SoundCloud URLs.
         resume: Whether to resume from checkpoints.
+        artist_name: Optional artist name (artist discovery mode).
 
     Returns:
-        List of result tuples: (url, status, mix_name, output_dir)
+        List of result dicts with keys: url, status, mix_name, output_dir
     """
     generator = SetlistGenerator()
     results = []
@@ -221,7 +225,9 @@ async def process_urls(urls: list[str], resume: bool):
         print("█" * 70 + "\n")
 
         try:
-            mix_name, output_dir = await generator.generate(url, output_name=None, resume=resume)
+            mix_name, output_dir = await generator.generate(
+                url, output_name=None, resume=resume, artist_name=artist_name
+            )
             results.append({"url": url, "status": "SUCCESS", "mix_name": mix_name, "output_dir": output_dir})
             Notifier.notify_url_complete(mix_name or url[:50], i, len(urls), success=True)
         except Exception as e:
@@ -277,7 +283,7 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
 
     # Step 2: Process each discovered set
     urls = [s["url"] for s in sets]
-    results = await process_urls(urls, resume=resume)
+    results = await process_urls(urls, resume=resume, artist_name=artist_name)
 
     # Step 3: Generate artist summary
     print("\n" + "█" * 70)

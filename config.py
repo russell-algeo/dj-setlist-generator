@@ -99,29 +99,35 @@ class Config:
         cls.CHECKPOINT_DIR.mkdir(exist_ok=True)
     
     @classmethod
-    def get_mix_directories(cls, mix_name: str) -> dict:
+    def get_mix_directories(cls, mix_name: str, artist_name: str = None) -> dict:
         """
         Get organized directory structure for a specific mix.
-        
+
         Args:
             mix_name: Name of the mix (from video title or user input)
-        
+            artist_name: Optional artist name. When provided, nests
+                         checkpoints under an artist subdirectory.
+
         Returns:
             Dictionary with paths for assets, checkpoints, and output
         """
         # Sanitize mix name for filesystem
         safe_name = cls._sanitize_filename(mix_name)
-        
+
+        checkpoint_base = cls.CHECKPOINT_DIR
+        if artist_name:
+            checkpoint_base = checkpoint_base / cls._sanitize_filename(artist_name)
+
         return {
             'assets': cls.ASSETS_DIR / safe_name,
-            'checkpoints': cls.CHECKPOINT_DIR / safe_name,
+            'checkpoints': checkpoint_base / safe_name,
             'output': cls.OUTPUT_DIR / safe_name,
         }
-    
+
     @classmethod
-    def ensure_mix_directories(cls, mix_name: str):
+    def ensure_mix_directories(cls, mix_name: str, artist_name: str = None):
         """Create directory structure for a specific mix."""
-        dirs = cls.get_mix_directories(mix_name)
+        dirs = cls.get_mix_directories(mix_name, artist_name=artist_name)
         for path in dirs.values():
             path.mkdir(parents=True, exist_ok=True)
     

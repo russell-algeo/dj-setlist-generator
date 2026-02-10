@@ -10,28 +10,30 @@ from typing import Optional
 class CheckpointManager:
     """Manage checkpoints for crash recovery with organized directory structure."""
     
-    def __init__(self, url: str, mix_name: str):
+    def __init__(self, url: str, mix_name: str, artist_name: str = None):
         """
         Initialize checkpoint manager.
-        
+
         Args:
             url: URL of the mix
             mix_name: Name of the mix (from video title)
+            artist_name: Optional artist name. When provided, nests
+                         checkpoints under an artist subdirectory.
         """
         self.url = url
         self.mix_name = mix_name
-        
+
         # Create unique identifier for this mix based on URL
         self.mix_id = hashlib.md5(url.encode()).hexdigest()[:12]
-        
+
         # Get organized directory structure
-        dirs = Config.get_mix_directories(mix_name)
+        dirs = Config.get_mix_directories(mix_name, artist_name=artist_name)
         self.assets_dir = dirs['assets']
         self.checkpoint_dir = dirs['checkpoints']
         self.output_dir = dirs['output']
-        
+
         # Ensure directories exist
-        Config.ensure_mix_directories(mix_name)
+        Config.ensure_mix_directories(mix_name, artist_name=artist_name)
         
         # File paths
         self.checkpoint_file = self.checkpoint_dir / f"checkpoint_{self.mix_id}.json"
