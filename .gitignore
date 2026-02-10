@@ -1,5 +1,9 @@
 # Spotify OAuth cache
 .spotify_cache
+.cache
+
+# Claude Code local settings
+.claude/
 
 # Environment variables (contains API credentials)
 .env
