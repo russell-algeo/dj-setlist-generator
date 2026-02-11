@@ -137,7 +137,11 @@ def discover_dj_sets(artist_name: str, cache_dir: Path = None) -> list[dict]:
 
 
 def _parse_response_text(text: str) -> list[dict]:
-    """Extract the structured set list from Claude's text output."""
+    """Extract the structured set list from Claude's text output.
+
+    Handles non-deterministic output where the JSON array may be surrounded
+    by preamble text and summary analysis.
+    """
     text = text.strip()
     if not text:
         return []
@@ -151,21 +155,66 @@ def _parse_response_text(text: str) -> list[dict]:
         text = text[:-3]
     text = text.strip()
 
-    # Try direct parse first
-    parsed = _try_parse_json_array(text)
-    if parsed is not None:
-        return parsed
+    # Try direct parse (pure JSON response)
+    result = _try_parse_json_array(text)
+    if result is not None:
+        return result
 
-    # Try to find a JSON array embedded in surrounding text
-    start = text.find("[")
-    end = text.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        parsed = _try_parse_json_array(text[start:end + 1])
-        if parsed is not None:
-            return parsed
+    # Extract the first balanced JSON array from surrounding text
+    array_text = _extract_json_array(text)
+    if array_text:
+        result = _try_parse_json_array(array_text)
+        if result is not None:
+            return result
 
     print("  ⚠ Could not parse discovery results from Claude's response.")
     return []
+
+
+def _extract_json_array(text: str) -> str | None:
+    """Find the first balanced top-level JSON array in text.
+
+    Uses bracket-depth counting with string-literal awareness so that
+    brackets inside JSON strings or in surrounding prose don't confuse
+    the extraction.
+
+    Returns the substring from '[' to its matching ']', or None.
+    """
+    start = text.find("[")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+
+    for i in range(start, len(text)):
+        ch = text[i]
+
+        if escape:
+            escape = False
+            continue
+
+        if ch == "\\":
+            if in_string:
+                escape = True
+            continue
+
+        if ch == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+
+    return None
 
 
 def _try_parse_json_array(text: str) -> list[dict] | None:
