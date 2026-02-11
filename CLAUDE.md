@@ -8,7 +8,7 @@ DJ Set Setlist Generator - automatically generates setlists from DJ mixes on You
 
 Supports two modes:
 - **URL mode**: Pass YouTube/SoundCloud URLs directly for processing
-- **Artist discovery mode**: Pass a DJ name and the tool uses Claude API with web search to discover all their recorded sets, then processes each one
+- **Artist discovery mode**: Pass a DJ name and the tool uses the Claude CLI (`claude -p`) with web search to discover all their recorded sets, then processes each one
 
 ## Commands
 
@@ -34,7 +34,7 @@ python main.py "url1" "url2" "url3" --no-resume
 
 **Prerequisites**:
 - FFmpeg must be installed (`brew install ffmpeg` on macOS)
-- `ANTHROPIC_API_KEY` in `.env` (required for artist discovery mode)
+- Claude Code CLI must be installed and authenticated (required for artist discovery mode)
 
 ## Architecture
 
@@ -55,7 +55,7 @@ python main.py "url1" "url2" "url3" --no-resume
 7. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
 
 ### DJ Set Discovery (dj_set_discovery.py)
-Uses the Anthropic Python SDK to call Claude with the `web_search` tool. Claude intelligently searches across multiple platforms (YouTube, SoundCloud) and known DJ set channels (Boiler Room, HOR Berlin, Cercle, etc.) to find all recorded sets by a given artist. Results are cached to `checkpoints/<artist>/discovery.json` so re-runs don't repeat the search.
+Uses the Claude CLI (`claude -p`) with web search to intelligently search across multiple platforms (YouTube, SoundCloud) and known DJ set channels (Boiler Room, HOR Berlin, Cercle, etc.) to find all recorded sets by a given artist. Results are cached to `checkpoints/<artist>/discovery.json` so re-runs don't repeat the search.
 
 ### Core Algorithm (setlist_builder.py)
 The setlist building uses a clustering approach:
@@ -70,7 +70,7 @@ Saves progress during long recognition runs. Checkpoints stored in `checkpoints/
 ## Configuration
 
 All settings in `.env` file (see `config.py` for defaults):
-- **API credentials**: `ANTHROPIC_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN`
+- **API credentials**: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN`
 - **Discovery**: `DISCOVERY_MODEL` (default: `claude-opus-4-6`), `MAX_SETS_PER_ARTIST`
 - **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`, `AUTO_CREATE_SPOTIFY_PLAYLIST`
 - **Recognition**: `SEGMENT_DURATION`, `SEGMENT_OVERLAP`, `RECOGNITION_TIMEOUT`, `BASE_DELAY`

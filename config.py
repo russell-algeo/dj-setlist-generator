@@ -16,7 +16,6 @@ class Config:
     SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://127.0.0.1:8888/callback')
     YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
     DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
-    ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
 
     # DJ Set Discovery Settings
     DISCOVERY_MODEL = os.getenv('DISCOVERY_MODEL', 'claude-opus-4-6')
@@ -85,9 +84,6 @@ class Config:
         
         if cls.ENABLE_DISCOGS and not cls.DISCOGS_TOKEN:
             issues.append("Discogs enabled but token missing")
-
-        if not cls.ANTHROPIC_API_KEY:
-            issues.append("ANTHROPIC_API_KEY not set (required for DJ name discovery mode)")
 
         return issues
     
