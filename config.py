@@ -16,6 +16,10 @@ class Config:
     SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://127.0.0.1:8888/callback')
     YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
     DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
+
+    # DJ Set Discovery Settings
+    DISCOVERY_MODEL = os.getenv('DISCOVERY_MODEL', 'claude-opus-4-6')
+    MAX_SETS_PER_ARTIST = int(os.getenv('MAX_SETS_PER_ARTIST', '0'))  # 0 = no limit
     
     # Feature Toggles
     ENABLE_SPOTIFY = os.getenv('ENABLE_SPOTIFY', 'true').lower() == 'true'
@@ -80,7 +84,7 @@ class Config:
         
         if cls.ENABLE_DISCOGS and not cls.DISCOGS_TOKEN:
             issues.append("Discogs enabled but token missing")
-        
+
         return issues
     
     @classmethod
@@ -91,29 +95,40 @@ class Config:
         cls.CHECKPOINT_DIR.mkdir(exist_ok=True)
     
     @classmethod
-    def get_mix_directories(cls, mix_name: str) -> dict:
+    def get_mix_directories(cls, mix_name: str, artist_name: str = None) -> dict:
         """
         Get organized directory structure for a specific mix.
-        
+
         Args:
             mix_name: Name of the mix (from video title or user input)
-        
+            artist_name: Optional artist name. When provided, nests
+                         directories under an artist subdirectory.
+
         Returns:
             Dictionary with paths for assets, checkpoints, and output
         """
         # Sanitize mix name for filesystem
         safe_name = cls._sanitize_filename(mix_name)
-        
+
+        assets_base = cls.ASSETS_DIR
+        checkpoint_base = cls.CHECKPOINT_DIR
+        output_base = cls.OUTPUT_DIR
+        if artist_name:
+            safe_artist = cls._sanitize_filename(artist_name)
+            assets_base = assets_base / safe_artist
+            checkpoint_base = checkpoint_base / safe_artist
+            output_base = output_base / safe_artist
+
         return {
-            'assets': cls.ASSETS_DIR / safe_name,
-            'checkpoints': cls.CHECKPOINT_DIR / safe_name,
-            'output': cls.OUTPUT_DIR / safe_name,
+            'assets': assets_base / safe_name,
+            'checkpoints': checkpoint_base / safe_name,
+            'output': output_base / safe_name,
         }
-    
+
     @classmethod
-    def ensure_mix_directories(cls, mix_name: str):
+    def ensure_mix_directories(cls, mix_name: str, artist_name: str = None):
         """Create directory structure for a specific mix."""
-        dirs = cls.get_mix_directories(mix_name)
+        dirs = cls.get_mix_directories(mix_name, artist_name=artist_name)
         for path in dirs.values():
             path.mkdir(parents=True, exist_ok=True)
     
