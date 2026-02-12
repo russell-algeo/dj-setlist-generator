@@ -26,12 +26,6 @@ class SetlistBuilder:
         """Initialize builder."""
         self.min_confidence = min_confidence_threshold or Config.MIN_CONFIDENCE_THRESHOLD
         
-        # Clustering parameters
-        self.min_cluster_size = Config.MIN_CLUSTER_SIZE
-        self.max_gap_size = Config.MAX_GAP_SIZE
-        self.min_density = Config.MIN_CLUSTER_DENSITY
-        self.min_unknown_gap_size = Config.MIN_UNKNOWN_GAP_SIZE
-        
     def build_setlist(self, recognitions: list) -> list[Track]:
         """Build setlist from recognition results."""
         valid_recognitions = [r for r in recognitions if r.recognized]
@@ -40,20 +34,15 @@ class SetlistBuilder:
             print("No tracks recognized")
             return []
 
-        # Step 1: Create clusters with adaptive gap tolerance
-    clusters = self._create_clusters(valid_recognitions)
+        # Step 1: Create clusters (group all detections by track_id)
+        clusters = self._create_clusters(valid_recognitions)
 
-        # Step 2: Merge duplicate clusters (same track detected nearby)
-        # Do this BEFORE filtering so merged clusters can pass quality thresholds
-        if Config.DUPLICATE_MERGE_ENABLED:
-            clusters = self._merge_duplicate_clusters(clusters)
-
-        # Step 3: Resolve temporal overlaps (competing tracks at same time)
+        # Step 2: Resolve temporal overlaps (competing tracks at same time)
         # Do this BEFORE filtering to choose dominant track among competitors
         if Config.OVERLAP_RESOLUTION_ENABLED:
             clusters = self._resolve_overlapping_clusters(clusters)
 
-        # Step 4: Filter noise (now that duplicates are merged and overlaps resolved)
+        # Step 3: Filter noise (now that overlaps are resolved)
         filtered_clusters = self._filter_clusters(clusters)
 
         # Convert to tracks
@@ -71,17 +60,21 @@ class SetlistBuilder:
         return tracks
     
     def _create_clusters(self, recognitions: list) -> list[dict]:
-        """Group recognitions into clusters with adaptive gap tolerance."""
+        """Group ALL detections by track_id (simplified approach - no gap splitting).
+
+        This simplified algorithm groups all detections of the same track together,
+        regardless of gap size. Overlap resolution will handle competing detections.
+        """
         if not recognitions:
             return []
 
         print(f"\n{'='*70}")
-        print(f"CLUSTERING PHASE")
+        print(f"CLUSTERING PHASE (Simplified)")
         print(f"{'='*70}")
 
         sorted_recs = sorted(recognitions, key=lambda x: x.segment_index)
 
-        # Group by track ID
+        # Group by track ID - collect ALL detections for each track
         track_sequences = defaultdict(list)
         for rec in sorted_recs:
             track_id = f"{rec.artist}|{rec.track_title}|{rec.shazam_track_id}"
@@ -89,141 +82,55 @@ class SetlistBuilder:
 
         clusters = []
 
+        # Create one cluster per track_id (all detections grouped together)
         for track_id, recs in track_sequences.items():
             artist, title = track_id.split('|')[0:2]
-            current_cluster = [recs[0]]
 
-            for i in range(1, len(recs)):
-                prev_idx = current_cluster[-1].segment_index
-                curr_idx = recs[i].segment_index
-                gap = curr_idx - prev_idx
+            # Only create cluster if we have minimum detections and density
+            cluster = self._make_cluster_dict(track_id, recs)
+            density = cluster['density']
 
-                # Use adaptive gap tolerance if enabled
-                if Config.ADAPTIVE_GAP_ENABLED:
-                    allowed_gap = self._calculate_allowed_gap(current_cluster)
-                else:
-                    allowed_gap = self.max_gap_size
-
-                if gap <= allowed_gap:
-                    current_cluster.append(recs[i])
-                else:
-                    # Gap too large - split into new cluster
-                    print(f"\n🔀 SPLIT: {artist} - {title}")
-                    print(f"  └─ Gap of {gap} segments exceeds allowed {allowed_gap}")
-                    print(f"  └─ Saving cluster with {len(current_cluster)} detections")
-
-                    # Save current cluster if valid
-                    if len(current_cluster) >= self.min_cluster_size:
-                        clusters.append(self._make_cluster_dict(track_id, current_cluster))
-                    current_cluster = [recs[i]]
-
-            # Save last cluster
-            if len(current_cluster) >= self.min_cluster_size:
-                clusters.append(self._make_cluster_dict(track_id, current_cluster))
+            if len(recs) < Config.MIN_CLUSTER_SIZE:
+                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {Config.MIN_CLUSTER_SIZE} min)")
+            elif density < Config.MIN_CLUSTER_DENSITY:
+                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {Config.MIN_CLUSTER_DENSITY} min)")
+            else:
+                clusters.append(cluster)
+                print(f"✓ Clustered: {artist} - {title} ({len(recs)} detections, density {density:.2f})")
 
         clusters.sort(key=lambda c: c['start_segment'])
         print(f"\nCreated {len(clusters)} initial clusters")
         return clusters
+    
+    def _make_cluster_dict(self, track_id: str, recognitions: list) -> dict:
+        """Create cluster dictionary from recognitions."""
+        segment_indices = [r.segment_index for r in recognitions]
+        start_seg = min(segment_indices)
+        end_seg = max(segment_indices)
+        span = end_seg - start_seg + 1
+        count = len(recognitions)
+        density = count / span
 
-    def _calculate_allowed_gap(self, current_cluster: list) -> int:
-        """Calculate allowed gap based on recent detection density.
-
-        Uses revised thresholds from regression testing:
-        - density >= 0.6: allow gap up to 8 segments (2 minutes)
-        - density >= 0.4: allow gap up to 5 segments (75 seconds)
-        - otherwise: strict gap of 5 segments (75 seconds)
-
-        FIX: Allow adaptive gap tolerance to work with 2+ detections (not just 3+)
-        to avoid catch-22 where you need 3 detections to get adaptive tolerance,
-        but need adaptive tolerance to bridge the gap to get the 3rd detection.
-        """
-        if len(current_cluster) < 2:
-            return self.max_gap_size  # Base case: single detection uses default
-
-        # Calculate recent density (last 10 segments or all if fewer)
-        recent_count = min(10, len(current_cluster))
-        recent_recs = current_cluster[-recent_count:]
-
-        # Calculate span of recent detections
-        recent_indices = [r.segment_index for r in recent_recs]
-        recent_span = max(recent_indices) - min(recent_indices) + 1
-        recent_density = len(recent_recs) / recent_span
-
-        # Adaptive thresholds (validated via regression testing)
-        if recent_density >= Config.ADAPTIVE_GAP_STRONG_THRESHOLD:
-            print(f"  ⚡ ADAPTIVE GAP: Strong density {recent_density:.2f} → allowing {Config.ADAPTIVE_GAP_STRONG_SIZE} segment gap")
-            return Config.ADAPTIVE_GAP_STRONG_SIZE
-        elif recent_density >= Config.ADAPTIVE_GAP_MODERATE_THRESHOLD:
-            print(f"  ⚡ ADAPTIVE GAP: Moderate density {recent_density:.2f} → allowing {Config.ADAPTIVE_GAP_MODERATE_SIZE} segment gap")
-            return Config.ADAPTIVE_GAP_MODERATE_SIZE
-        else:
-            return self.max_gap_size
-
-    def _merge_duplicate_clusters(self, clusters: list[dict]) -> list[dict]:
-        """Merge clusters of same track_id if they're close together.
-
-        Validated via regression testing to fix duplicates like 'Rock da echo'
-        in Yoyaku set (split into clusters at 44:45 and 48:00 with 6-segment gap).
-        """
-        if not clusters:
-            return []
-
-        print(f"\n{'='*70}")
-        print(f"DUPLICATE MERGING PHASE")
-        print(f"{'='*70}")
-
-        # Group by track_id
-        by_track = defaultdict(list)
-        for cluster in clusters:
-            by_track[cluster['track_id']].append(cluster)
-
-        merged = []
-        merge_count = 0
-
-        for track_id, track_clusters in by_track.items():
-            # Sort by start time
-            track_clusters.sort(key=lambda c: c['start_segment'])
-
-            if len(track_clusters) > 1:
-                artist, title = track_id.split('|')[0:2]
-                print(f"\n📋 Checking {len(track_clusters)} clusters for: {artist} - {title}")
-
-            current_merged = [track_clusters[0]]
-
-            for next_cluster in track_clusters[1:]:
-                last = current_merged[-1]
-                gap = next_cluster['start_segment'] - last['end_segment']
-
-                # Merge if gap <= configured distance (default 10 segments = 2.5 minutes)
-                if gap <= Config.DUPLICATE_MERGE_DISTANCE:
-                    # Combine clusters
-                    artist, title = track_id.split('|')[0:2]
-                    print(f"  🔗 MERGE: Gap of {gap} segments (≤ {Config.DUPLICATE_MERGE_DISTANCE})")
-                    print(f"    └─ Combining {last['detection_count']} + {next_cluster['detection_count']} detections")
-
-                    combined_recs = last['recognitions'] + next_cluster['recognitions']
-                    current_merged[-1] = self._make_cluster_dict(track_id, combined_recs)
-                    merge_count += 1
-                else:
-                    # Keep as separate (might be played twice in set)
-                    print(f"  ⏭️  KEEP SEPARATE: Gap of {gap} segments (> {Config.DUPLICATE_MERGE_DISTANCE})")
-                    current_merged.append(next_cluster)
-
-            merged.extend(current_merged)
-
-        print(f"\nMerged {merge_count} duplicate cluster(s)")
-        print(f"Clusters after merging: {len(merged)} (from {len(clusters)})")
-
-        # Sort by start time
-        return sorted(merged, key=lambda c: c['start_segment'])
+        return {
+            'track_id': track_id,
+            'recognitions': recognitions,
+            'segment_indices': segment_indices,
+            'start_segment': start_seg,
+            'end_segment': end_seg,
+            'span': span,
+            'detection_count': count,
+            'density': density
+        }
 
     def _resolve_overlapping_clusters(self, clusters: list[dict]) -> list[dict]:
         """When tracks overlap in time, keep the dominant one using multi-criteria scoring.
 
-        Validated via regression testing. Example from Yoyaku:
-        - "Closer" (6 detections, 195s span) vs "Machine lernt" (5 detections, 75s span)
-        - Using multi-criteria: Closer scores 19.1 vs Machine lernt 13.3
-        - Correctly keeps "Closer" (the real track) and removes "Machine lernt" (mixing artifact)
+        Uses multi-criteria scoring (not just density) to choose the winner:
+        - detection_count * 2.0: Primary signal - more detections = stronger
+        - span * 0.5: Secondary - longer span = more dominant
+        - density * 0.3: Tertiary - density helps but doesn't dominate
+
+        This prevents mixing artifacts (short, high-density) from beating real tracks.
         """
         if not clusters:
             return []
@@ -256,28 +163,22 @@ class SetlistBuilder:
                 print(f"\n⚠️  OVERLAP DETECTED: {len(overlapping)} competing tracks")
 
                 # Calculate scores for each track
+                # Score formula: prioritize detection count and density, not span
+                # Span is excluded because scattered detections shouldn't win
+                def calc_score(c):
+                    return c['detection_count'] * 10.0 + c['density'] * 20.0
+
                 scored = []
                 for c in overlapping:
                     artist, title = c['track_id'].split('|')[0:2]
-                    score = (
-                        c['detection_count'] * 2.0 +
-                        c['span'] * 0.5 +
-                        c['density'] * 0.3
-                    )
+                    score = calc_score(c)
                     scored.append((c, score, artist, title))
                     print(f"  📊 {artist} - {title}")
                     print(f"     └─ {c['detection_count']} detections, span {c['span']}, density {c['density']:.2f}")
                     print(f"     └─ Score: {score:.1f}")
 
-                # Choose track using MULTI-CRITERIA scoring (not just density!)
-                # detection_count * 2.0: Primary signal - more detections = stronger
-                # span * 0.5: Secondary - longer span = more dominant
-                # density * 0.3: Tertiary - density helps but doesn't dominate
-                winner = max(overlapping, key=lambda c: (
-                    c['detection_count'] * 2.0 +
-                    c['span'] * 0.5 +
-                    c['density'] * 0.3
-                ))
+                # Choose track with highest score
+                winner = max(overlapping, key=calc_score)
 
                 winner_artist, winner_title = winner['track_id'].split('|')[0:2]
                 print(f"  ✅ KEEPING: {winner_artist} - {winner_title}")
@@ -304,7 +205,7 @@ class SetlistBuilder:
         return resolved
 
     def _clusters_overlap(self, cluster1: dict, cluster2: dict) -> bool:
-        """Check if two clusters overlap in time (>= 30% overlap)."""
+        """Check if two clusters overlap in time (>= configured threshold overlap)."""
         start1, end1 = cluster1['start_segment'], cluster1['end_segment']
         start2, end2 = cluster2['start_segment'], cluster2['end_segment']
 
@@ -318,38 +219,18 @@ class SetlistBuilder:
         span2 = end2 - start2
 
         return overlap >= min(span1, span2) * Config.OVERLAP_THRESHOLD
-    
-    def _make_cluster_dict(self, track_id: str, recognitions: list) -> dict:
-        """Create cluster dictionary from recognitions."""
-        segment_indices = [r.segment_index for r in recognitions]
-        start_seg = min(segment_indices)
-        end_seg = max(segment_indices)
-        span = end_seg - start_seg + 1
-        count = len(recognitions)
-        density = count / span
-        
-        return {
-            'track_id': track_id,
-            'recognitions': recognitions,
-            'segment_indices': segment_indices,
-            'start_segment': start_seg,
-            'end_segment': end_seg,
-            'span': span,
-            'detection_count': count,
-            'density': density
-        }
-    
+
     def _filter_clusters(self, clusters: list[dict]) -> list[dict]:
         """Filter out noise using multi-factor analysis."""
         if not clusters:
             return []
-        
+
         print(f"\n{'='*70}")
         print(f"CLUSTER FILTERING")
         print(f"{'='*70}")
-        
+
         filtered = []
-        
+
         for cluster in clusters:
             count = cluster['detection_count']
             density = cluster['density']
@@ -383,16 +264,18 @@ class SetlistBuilder:
 
             artist, title = cluster['track_id'].split('|')[0:2]
 
+            # always add (ignore filtering as it isn't adding value)
+            filtered.append(cluster)
+            
             if keep:
-                filtered.append(cluster)
-                print(f"✓ KEEP: {artist} - {title}")
+                print(f"✓ {artist} - {title}")
                 print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
                 print(f"  └─ Reason: {reason}")
             else:
-                print(f"✗ FILTER: {artist} - {title}")
+                print(f"✗ {artist} - {title}")
                 print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
                 print(f"  └─ Reason: below thresholds")
-        
+
         return filtered
     
     def _cluster_to_track(self, cluster: dict) -> Track:
@@ -455,11 +338,11 @@ class SetlistBuilder:
             if not current_gap or seg_idx - current_gap[-1] <= 2:
                 current_gap.append(seg_idx)
             else:
-                if len(current_gap) >= self.min_unknown_gap_size:
+                if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
                     unknown_gaps.append(current_gap)
                 current_gap = [seg_idx]
         
-        if len(current_gap) >= self.min_unknown_gap_size:
+        if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
             unknown_gaps.append(current_gap)
         
         # Create Unknown Track entries

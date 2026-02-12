@@ -16,13 +16,22 @@ class Config:
     SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://127.0.0.1:8888/callback')
     YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
     DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
+
+    # DJ Set Discovery Settings
+    DISCOVERY_RESULTS_PER_QUERY = int(os.getenv('DISCOVERY_RESULTS_PER_QUERY', '20'))
+    MIN_SET_DURATION_MINUTES = int(os.getenv('MIN_SET_DURATION_MINUTES', '20'))
+    MAX_SETS_PER_ARTIST = int(os.getenv('MAX_SETS_PER_ARTIST', '0'))  # 0 = no limit
     
     # Feature Toggles
     ENABLE_SPOTIFY = os.getenv('ENABLE_SPOTIFY', 'true').lower() == 'true'
     ENABLE_YOUTUBE = os.getenv('ENABLE_YOUTUBE', 'true').lower() == 'true'
     ENABLE_DISCOGS = os.getenv('ENABLE_DISCOGS', 'false').lower() == 'true'
     ENABLE_SPOTIFY_PLAYLISTS = os.getenv('ENABLE_SPOTIFY_PLAYLISTS', 'true').lower() == 'true'
-    
+    AUTO_CREATE_SPOTIFY_PLAYLIST = os.getenv('AUTO_CREATE_SPOTIFY_PLAYLIST', 'false').lower() == 'true'
+
+    # Notifications (ntfy.sh)
+    NTFY_TOPIC = os.getenv('NTFY_TOPIC', '')  # Set to your ntfy topic to enable notifications
+
     # Recognition Settings
     SEGMENT_DURATION = int(os.getenv('SEGMENT_DURATION', '30'))
     SEGMENT_OVERLAP = int(os.getenv('SEGMENT_OVERLAP', '15'))
@@ -33,10 +42,20 @@ class Config:
     CHECKPOINT_INTERVAL = int(os.getenv('CHECKPOINT_INTERVAL', '10'))
     
     # Shazam Recognition Settings
-    RECOGNITION_TIMEOUT = int(os.getenv('RECOGNITION_TIMEOUT', '30'))
+    RECOGNITION_TIMEOUT = int(os.getenv('RECOGNITION_TIMEOUT', '15'))
+    BASE_DELAY = float(os.getenv('BASE_DELAY', '0.3'))  # Delay between requests
+
+    # Retry Settings (for 429 rate limit handling with JitterRetry)
     MAX_RETRIES = int(os.getenv('MAX_RETRIES', '5'))
-    BASE_DELAY = float(os.getenv('BASE_DELAY', '1.0'))
-    BACKOFF_DELAY = float(os.getenv('BACKOFF_DELAY', '10.0'))
+    MAX_BACKOFF_DELAY = float(os.getenv('MAX_BACKOFF_DELAY', '30.0'))  # Max backoff cap
+    JITTER_INTERVAL_SIZE = float(os.getenv('JITTER_INTERVAL_SIZE', '4.0'))  # Random jitter range is (0, size^2)
+
+    # Concurrency Settings
+    CONCURRENT_RECOGNITIONS = int(os.getenv('CONCURRENT_RECOGNITIONS', '5'))  # Number of parallel requests
+    BATCH_SIZE = int(os.getenv('BATCH_SIZE', '20'))  # Segments per batch for checkpointing
+
+    # Quota-Aware Throttling Settings
+    QUOTA_COOLDOWN_DURATION = int(os.getenv('QUOTA_COOLDOWN_DURATION', '180'))  # Seconds to wait when quota exhausted
     
     # Cleanup Settings
     CLEANUP_TEMP_FILES = os.getenv('CLEANUP_TEMP_FILES', 'true').lower() == 'true'
@@ -44,25 +63,13 @@ class Config:
     
     # Advanced Clustering Settings
     MIN_CLUSTER_SIZE = int(os.getenv('MIN_CLUSTER_SIZE', '3'))
-    MAX_GAP_SIZE = int(os.getenv('MAX_GAP_SIZE', '5'))
-    MIN_CLUSTER_DENSITY = float(os.getenv('MIN_CLUSTER_DENSITY', '0.4'))
+    MIN_CLUSTER_DENSITY = float(os.getenv('MIN_CLUSTER_DENSITY', '0.25'))
     MIN_UNKNOWN_GAP_SIZE = int(os.getenv('MIN_UNKNOWN_GAP_SIZE', '6'))
-
-    # Adaptive Gap Tolerance (validated via regression testing)
-    ADAPTIVE_GAP_ENABLED = os.getenv('ADAPTIVE_GAP_ENABLED', 'true').lower() == 'true'
-    ADAPTIVE_GAP_STRONG_THRESHOLD = float(os.getenv('ADAPTIVE_GAP_STRONG_THRESHOLD', '0.6'))
-    ADAPTIVE_GAP_STRONG_SIZE = int(os.getenv('ADAPTIVE_GAP_STRONG_SIZE', '8'))
-    ADAPTIVE_GAP_MODERATE_THRESHOLD = float(os.getenv('ADAPTIVE_GAP_MODERATE_THRESHOLD', '0.4'))
-    ADAPTIVE_GAP_MODERATE_SIZE = int(os.getenv('ADAPTIVE_GAP_MODERATE_SIZE', '5'))
-
-    # Duplicate Cluster Merging
-    DUPLICATE_MERGE_ENABLED = os.getenv('DUPLICATE_MERGE_ENABLED', 'true').lower() == 'true'
-    DUPLICATE_MERGE_DISTANCE = int(os.getenv('DUPLICATE_MERGE_DISTANCE', '10'))
 
     # Temporal Overlap Resolution
     OVERLAP_RESOLUTION_ENABLED = os.getenv('OVERLAP_RESOLUTION_ENABLED', 'true').lower() == 'true'
     OVERLAP_THRESHOLD = float(os.getenv('OVERLAP_THRESHOLD', '0.3'))
-    
+
     # Base Paths (changed from TEMP_DIR to ASSETS_DIR)
     ASSETS_DIR = Path('assets')
     OUTPUT_DIR = Path('output')
@@ -78,7 +85,7 @@ class Config:
         
         if cls.ENABLE_DISCOGS and not cls.DISCOGS_TOKEN:
             issues.append("Discogs enabled but token missing")
-        
+
         return issues
     
     @classmethod
@@ -89,29 +96,40 @@ class Config:
         cls.CHECKPOINT_DIR.mkdir(exist_ok=True)
     
     @classmethod
-    def get_mix_directories(cls, mix_name: str) -> dict:
+    def get_mix_directories(cls, mix_name: str, artist_name: str = None) -> dict:
         """
         Get organized directory structure for a specific mix.
-        
+
         Args:
             mix_name: Name of the mix (from video title or user input)
-        
+            artist_name: Optional artist name. When provided, nests
+                         directories under an artist subdirectory.
+
         Returns:
             Dictionary with paths for assets, checkpoints, and output
         """
         # Sanitize mix name for filesystem
         safe_name = cls._sanitize_filename(mix_name)
-        
+
+        assets_base = cls.ASSETS_DIR
+        checkpoint_base = cls.CHECKPOINT_DIR
+        output_base = cls.OUTPUT_DIR
+        if artist_name:
+            safe_artist = cls._sanitize_filename(artist_name)
+            assets_base = assets_base / safe_artist
+            checkpoint_base = checkpoint_base / safe_artist
+            output_base = output_base / safe_artist
+
         return {
-            'assets': cls.ASSETS_DIR / safe_name,
-            'checkpoints': cls.CHECKPOINT_DIR / safe_name,
-            'output': cls.OUTPUT_DIR / safe_name,
+            'assets': assets_base / safe_name,
+            'checkpoints': checkpoint_base / safe_name,
+            'output': output_base / safe_name,
         }
-    
+
     @classmethod
-    def ensure_mix_directories(cls, mix_name: str):
+    def ensure_mix_directories(cls, mix_name: str, artist_name: str = None):
         """Create directory structure for a specific mix."""
-        dirs = cls.get_mix_directories(mix_name)
+        dirs = cls.get_mix_directories(mix_name, artist_name=artist_name)
         for path in dirs.values():
             path.mkdir(parents=True, exist_ok=True)
     

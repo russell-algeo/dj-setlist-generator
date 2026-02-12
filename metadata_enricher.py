@@ -6,7 +6,7 @@ from typing import Optional
 from config import Config
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-from urllib.parse import quote
+
 
 class MetadataEnricher:
     """Fetch metadata from various platforms."""
@@ -102,20 +102,53 @@ class MetadataEnricher:
         return enriched_tracks
     
     def _search_spotify(self, title: str, artist: str) -> Optional[str]:
-        """Search Spotify for track."""
+        """Search Spotify for track with logging and validation."""
         if not self.spotify:
             return None
-        
+
         try:
-            query = f"track:{title} artist:{artist}"
-            results = self.spotify.search(q=query, type='track', limit=1)
-            
-            if results['tracks']['items']:
-                return results['tracks']['items'][0]['external_urls']['spotify']
-        
+            query = f"{artist} - {title}"        
+            results = self.spotify.search(q=query, type='track', limit=5)
+
+            if not results or not results['tracks']['items']:
+                print(f"[Spotify] No results found for query: {query}")
+                return None
+
+            # Score all results by number of matching words
+            expected_artist_words = set(w for w in artist.lower().split() if len(w) > 2)
+            expected_title_words = set(w for w in title.lower().split() if len(w) > 2)
+
+            scored_results = []
+            for item in results['tracks']['items']:
+                observed_artist = item['artists'][0]['name']
+                observed_title = item['name']
+                observed_url = item['external_urls']['spotify']
+
+                # Count matching words for artist and title
+                observed_artist_words = set(w for w in observed_artist.lower().split() if len(w) > 2)
+                observed_title_words = set(w for w in observed_title.lower().split() if len(w) > 2)
+
+                artist_matches = len(expected_artist_words & observed_artist_words)
+                title_matches = len(expected_title_words & observed_title_words)
+
+                # Only consider if both artist and title have at least one match
+                if artist_matches > 0 and title_matches > 0:
+                    total_matches = artist_matches + title_matches
+                    scored_results.append((total_matches, observed_url, observed_artist, observed_title))
+
+            if scored_results:
+                # Sort by match count (descending) and return best match
+                scored_results.sort(key=lambda x: x[0], reverse=True)
+                best_match = scored_results[0]
+                return best_match[1]  # Return URL of best match
+
+            # No match found
+            print(f"[Spotify] ✗ No artist+title match for query: '{query}', skipping")
+            return None
+
         except Exception as e:
-            print(f"    Spotify search error: {e}")
-        
+            print(f"[Spotify] Error: {e}")
+
         return None
     
     def _search_youtube(self, title: str, artist: str) -> Optional[str]:
