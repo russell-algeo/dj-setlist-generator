@@ -1,75 +1,25 @@
-"""DJ set discovery using Claude CLI with web search.
+"""DJ set discovery using yt-dlp direct search.
 
-Uses `claude -p` to intelligently search the web for all recorded DJ sets
-by a given artist, returning structured URLs for processing.
+Searches YouTube and SoundCloud directly via yt-dlp to find all recorded
+DJ sets by a given artist, returning structured URLs for processing.
 """
 
 import json
-import shutil
+import re
 import subprocess
-import sys
 from pathlib import Path
 from config import Config
 
-DISCOVERY_PROMPT = """You are a DJ set research assistant. Your job is to find every publicly available recorded DJ set (audio or video) for a given artist on YouTube and SoundCloud.
-
-Search the web extensively for sets. Perform MANY searches with different strategies:
-
-1. Direct searches:
-   - "{artist}" DJ set
-   - "{artist}" live set
-   - "{artist}" mix
-
-2. Known DJ set platforms/channels:
-   - "{artist}" Boiler Room
-   - "{artist}" HÖR Berlin
-   - "{artist}" Cercle
-   - "{artist}" Resident Advisor
-   - "{artist}" fabric
-   - "{artist}" Dekmantel
-   - "{artist}" Mixmag
-   - "{artist}" DJ Mag
-   - "{artist}" Possession
-   - "{artist}" HATE
-   - "{artist}" Nuits Sonores
-
-3. Platform-specific:
-   - site:youtube.com "{artist}" DJ set
-   - site:soundcloud.com "{artist}" DJ set
-   - site:youtube.com "{artist}" live
-   - site:soundcloud.com "{artist}" mix
-
-4. Event/festival searches:
-   - "{artist}" festival set
-   - "{artist}" club set
-   - "{artist}" warehouse
-
-5. If the artist has known aliases or alternate names, search those too.
-
-IMPORTANT RULES:
-- Only include URLs from youtube.com or soundcloud.com
-- Only include actual DJ sets/mixes (NOT interviews, track premieres, music videos, or short clips)
-- DJ sets are typically 30+ minutes long
-- Deduplicate: if the same set appears on multiple channels, prefer the official/highest quality one
-- For each result, extract: URL, title, platform, approximate duration if visible, event/venue name, year
-
-Return your results as a JSON array. Each entry must have these fields:
-{{
-  "url": "https://...",
-  "title": "descriptive title of the set",
-  "platform": "youtube" or "soundcloud",
-  "event": "event or venue name if known, otherwise null",
-  "year": "year if known, otherwise null",
-  "duration_minutes": estimated duration in minutes if known, otherwise null
-}}
-
-Be thorough. Search at least 8-10 different queries. The user wants EVERY available recorded set.
-
-Find every publicly available recorded DJ set by {artist}. Search YouTube and SoundCloud thoroughly using many different search queries. Return ONLY the JSON array of results, no other text."""
+# Title keywords that indicate a result is NOT a DJ set
+_EXCLUDE_KEYWORDS = [
+    "interview", "premiere", "panel", "review", "trailer", "reaction",
+    "tutorial", "official video", "music video", "teaser",
+    "behind the scenes", "unboxing", "podcast",
+]
 
 
-def discover_dj_sets(artist_name: str, cache_dir: Path = None) -> list[dict]:
-    """Discover DJ sets for an artist using the Claude CLI with web search.
+def discover_dj_sets(artist_name: str, cache_dir: Path | None = None) -> list[dict]:
+    """Discover DJ sets for an artist using yt-dlp search.
 
     Args:
         artist_name: Name of the DJ/artist to search for.
@@ -89,35 +39,33 @@ def discover_dj_sets(artist_name: str, cache_dir: Path = None) -> list[dict]:
             print(f"  Loaded {len(cached['sets'])} previously discovered sets")
             return cached["sets"]
 
-    if not shutil.which("claude"):
-        print("\n❌ 'claude' CLI not found on PATH.")
-        print("   Install Claude Code: https://docs.anthropic.com/en/docs/claude-code")
-        sys.exit(1)
+    queries = _build_search_queries(artist_name)
 
-    prompt = DISCOVERY_PROMPT.replace("{artist}", artist_name)
+    print(f"  Searching YouTube & SoundCloud for DJ sets by '{artist_name}'...")
+    print(f"  Running {len(queries)} search queries...\n")
 
-    print(f"  Searching the web for DJ sets by '{artist_name}'...")
-    print(f"  Using model: {Config.DISCOVERY_MODEL}")
-    print(f"  This may take a minute as Claude searches multiple platforms...\n")
+    # Run all searches and collect raw results
+    seen_ids: set[str] = set()
+    all_results: list[dict] = []
 
-    cmd = [
-        "claude", "-p", prompt,
-        "--model", Config.DISCOVERY_MODEL,
-        "--allowedTools", "WebSearch,WebFetch",
-    ]
+    for i, query in enumerate(queries, 1):
+        print(f"  [{i}/{len(queries)}] {query}")
+        results = _search_yt_dlp(query)
+        for entry in results:
+            entry_id = entry.get("id", "")
+            if entry_id and entry_id not in seen_ids:
+                seen_ids.add(entry_id)
+                all_results.append(entry)
+        print(f"           → {len(results)} results ({len(all_results)} unique total)")
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    print(f"\n  Found {len(all_results)} unique results before filtering")
 
-    if result.returncode != 0:
-        print(f"  ❌ claude CLI returned exit code {result.returncode}")
-        if result.stderr:
-            print(f"  stderr: {result.stderr[:500]}")
-        return []
-
-    sets = _parse_response_text(result.stdout)
+    # Filter and map to output format
+    sets = _filter_and_map(all_results, artist_name)
+    print(f"  After filtering: {len(sets)} DJ sets")
 
     if not sets:
-        print("  ⚠ No DJ sets found. Claude may need more specific search terms.")
+        print("  No DJ sets found matching criteria.")
         return []
 
     # Apply max sets limit
@@ -131,114 +79,145 @@ def discover_dj_sets(artist_name: str, cache_dir: Path = None) -> list[dict]:
         cache_file = cache_dir / "discovery.json"
         with open(cache_file, "w") as f:
             json.dump({"artist": artist_name, "sets": sets}, f, indent=2)
-        print(f"  💾 Cached discovery results to {cache_file}")
+        print(f"  Cached discovery results to {cache_file}")
 
     return sets
 
 
-def _parse_response_text(text: str) -> list[dict]:
-    """Extract the structured set list from Claude's text output.
+def _build_search_queries(artist_name: str) -> list[str]:
+    """Build the list of yt-dlp search queries for an artist."""
+    n = Config.DISCOVERY_RESULTS_PER_QUERY
 
-    Handles non-deterministic output where the JSON array may be surrounded
-    by preamble text and summary analysis.
+    # YouTube searches
+    yt_terms = [
+        f'"{artist_name}" DJ set',
+        f'"{artist_name}" live set',
+        f'"{artist_name}" mix',
+        f'"{artist_name}" Boiler Room',
+        f'"{artist_name}" HÖR Berlin',
+        f'"{artist_name}" Cercle',
+        f'"{artist_name}" Resident Advisor',
+        f'"{artist_name}" Dekmantel',
+        f'"{artist_name}" Mixmag',
+    ]
+
+    # SoundCloud searches
+    sc_terms = [
+        f'"{artist_name}" DJ set',
+        f'"{artist_name}" mix',
+        f'"{artist_name}" live',
+    ]
+
+    queries = [f"ytsearch{n}:{term}" for term in yt_terms]
+    queries += [f"scsearch{n}:{term}" for term in sc_terms]
+    return queries
+
+
+def _search_yt_dlp(query: str) -> list[dict]:
+    """Run a single yt-dlp search query and return parsed results.
+
+    Uses --flat-playlist to get metadata without downloading.
     """
-    text = text.strip()
-    if not text:
+    cmd = [
+        "yt-dlp",
+        "--dump-json",
+        "--flat-playlist",
+        "--no-download",
+        "--no-warnings",
+        query,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"           Search timed out")
         return []
 
-    # Strip markdown code fences if present
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
+    if result.returncode != 0:
+        return []
 
-    # Try direct parse (pure JSON response)
-    result = _try_parse_json_array(text)
-    if result is not None:
-        return result
-
-    # Extract the first balanced JSON array from surrounding text
-    array_text = _extract_json_array(text)
-    if array_text:
-        result = _try_parse_json_array(array_text)
-        if result is not None:
-            return result
-
-    print("  ⚠ Could not parse discovery results from Claude's response.")
-    return []
+    entries = []
+    for line in result.stdout.strip().splitlines():
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries
 
 
-def _extract_json_array(text: str) -> str | None:
-    """Find the first balanced top-level JSON array in text.
+def _normalize(text: str) -> str:
+    """Normalize text for artist name matching.
 
-    Uses bracket-depth counting with string-literal awareness so that
-    brackets inside JSON strings or in surrounding prose don't confuse
-    the extraction.
-
-    Returns the substring from '[' to its matching ']', or None.
+    Replaces common separators with spaces, collapses whitespace, lowercases.
     """
-    start = text.find("[")
-    if start == -1:
-        return None
+    text = re.sub(r"[_\-.]", " ", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
 
-    depth = 0
-    in_string = False
-    escape = False
 
-    for i in range(start, len(text)):
-        ch = text[i]
+def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[dict]:
+    """Filter raw yt-dlp results and map to the discovery output format."""
+    min_duration_seconds = Config.MIN_SET_DURATION_MINUTES * 60
+    artist_norm = _normalize(artist_name)
+    seen_titles: set[str] = set()
+    sets = []
 
-        if escape:
-            escape = False
+    for entry in raw_results:
+        title = entry.get("title", "")
+        channel = entry.get("channel") or ""
+        uploader = entry.get("uploader") or ""
+        duration = entry.get("duration")
+
+        # Filter: artist name must appear in title, channel, or uploader
+        if not any(
+            artist_norm in _normalize(field)
+            for field in (title, channel, uploader)
+        ):
             continue
 
-        if ch == "\\":
-            if in_string:
-                escape = True
+        # Filter by duration
+        if duration is not None and duration < min_duration_seconds:
             continue
 
-        if ch == '"':
-            in_string = not in_string
+        # Filter by title keywords
+        title_lower = title.lower()
+        if any(kw in title_lower for kw in _EXCLUDE_KEYWORDS):
             continue
 
-        if in_string:
+        # Build URL
+        url = entry.get("webpage_url") or entry.get("url", "")
+        if not url:
             continue
 
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
+        # Cross-platform dedup by normalized title
+        title_norm = _normalize(title)
+        if title_norm in seen_titles:
+            continue
+        seen_titles.add(title_norm)
 
-    return None
+        # Extract year from upload_date (YYYYMMDD)
+        upload_date = entry.get("upload_date") or ""
+        year = upload_date[:4] if len(upload_date) >= 4 else None
 
+        # Duration in minutes
+        duration_minutes = round(duration / 60) if duration else None
 
-def _try_parse_json_array(text: str) -> list[dict] | None:
-    """Try to parse text as a JSON array of set dicts. Returns None on failure."""
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return None
+        # Try to extract event/venue from uploader or channel
+        event = entry.get("channel") or entry.get("uploader")
 
-    if not isinstance(data, list):
-        return None
+        sets.append({
+            "url": url,
+            "title": title or "Unknown Set",
+            "platform": _detect_platform(url),
+            "event": event,
+            "year": year,
+            "duration_minutes": duration_minutes,
+        })
 
-    validated = []
-    for entry in data:
-        if isinstance(entry, dict) and "url" in entry:
-            validated.append({
-                "url": entry["url"],
-                "title": entry.get("title", "Unknown Set"),
-                "platform": entry.get("platform", _detect_platform(entry["url"])),
-                "event": entry.get("event"),
-                "year": entry.get("year"),
-                "duration_minutes": entry.get("duration_minutes"),
-            })
-    return validated
+    return sets
 
 
 def _detect_platform(url: str) -> str:
@@ -258,11 +237,11 @@ def print_discovery_results(sets: list[dict], artist_name: str):
     print(f"Found {len(sets)} sets\n")
 
     for i, s in enumerate(sets, 1):
-        platform_icon = "🎬" if s["platform"] == "youtube" else "🔊"
+        platform_icon = "YT" if s["platform"] == "youtube" else "SC"
         duration = f" ({s['duration_minutes']}min)" if s.get("duration_minutes") else ""
         event = f" @ {s['event']}" if s.get("event") else ""
         year = f" [{s['year']}]" if s.get("year") else ""
-        print(f"  {i:2d}. {platform_icon} {s['title']}{event}{year}{duration}")
+        print(f"  {i:2d}. [{platform_icon}] {s['title']}{event}{year}{duration}")
         print(f"      {s['url']}")
 
     yt_count = sum(1 for s in sets if s["platform"] == "youtube")

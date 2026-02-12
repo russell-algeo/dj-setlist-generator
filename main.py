@@ -278,6 +278,9 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
 
     generate_artist_summary(artist_name, artist_output_dir, results)
 
+    # Clean up discovery cache
+    CheckpointManager.cleanup_discovery_cache(artist_checkpoint_dir)
+
     # Print final batch summary
     print("\n" + "=" * 70)
     print(f"COMPLETE: {artist_name.upper()}")

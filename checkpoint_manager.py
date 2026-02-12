@@ -130,6 +130,23 @@ class CheckpointManager:
         self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
 
     @staticmethod
+    def cleanup_discovery_cache(cache_dir: Path):
+        """Delete discovery cache file and empty directories.
+
+        Controlled by Config.CLEANUP_CHECKPOINTS.
+        """
+        if not Config.CLEANUP_CHECKPOINTS:
+            print(f"  Kept discovery cache in: {cache_dir}")
+            return
+
+        discovery_file = cache_dir / "discovery.json"
+        if discovery_file.exists():
+            discovery_file.unlink()
+            print("  Cleaned up discovery cache")
+
+        CheckpointManager._remove_empty_parents(cache_dir, Config.CHECKPOINT_DIR)
+
+    @staticmethod
     def _remove_empty_parents(directory: Path, stop_at: Path):
         """Remove directory and empty parents up to (not including) stop_at."""
         current = directory

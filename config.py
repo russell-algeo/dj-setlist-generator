@@ -18,7 +18,8 @@ class Config:
     DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
 
     # DJ Set Discovery Settings
-    DISCOVERY_MODEL = os.getenv('DISCOVERY_MODEL', 'claude-opus-4-6')
+    DISCOVERY_RESULTS_PER_QUERY = int(os.getenv('DISCOVERY_RESULTS_PER_QUERY', '20'))
+    MIN_SET_DURATION_MINUTES = int(os.getenv('MIN_SET_DURATION_MINUTES', '20'))
     MAX_SETS_PER_ARTIST = int(os.getenv('MAX_SETS_PER_ARTIST', '0'))  # 0 = no limit
     
     # Feature Toggles

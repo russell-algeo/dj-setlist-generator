@@ -8,7 +8,7 @@ DJ Set Setlist Generator - automatically generates setlists from DJ mixes on You
 
 Supports two modes:
 - **URL mode**: Pass YouTube/SoundCloud URLs directly for processing
-- **Artist discovery mode**: Pass a DJ name and the tool uses the Claude CLI (`claude -p`) with web search to discover all their recorded sets, then processes each one
+- **Artist discovery mode**: Pass a DJ name and the tool uses yt-dlp to search YouTube and SoundCloud directly for all their recorded sets, then processes each one
 
 ## Commands
 
@@ -34,14 +34,14 @@ python main.py "url1" "url2" "url3" --no-resume
 
 **Prerequisites**:
 - FFmpeg must be installed (`brew install ffmpeg` on macOS)
-- Claude Code CLI must be installed and authenticated (required for artist discovery mode)
+- yt-dlp must be installed (`pip install yt-dlp`)
 
 ## Architecture
 
 ### Pipeline Flow (main.py)
 
 **Artist Discovery Mode** (when given a DJ name):
-1. **Discover** - `dj_set_discovery.py` uses Claude API + web search to find all YouTube/SoundCloud URLs
+1. **Discover** - `dj_set_discovery.py` uses yt-dlp search to find all YouTube/SoundCloud URLs
 2. **Process** - Each discovered URL goes through the standard pipeline below
 3. **Summarize** - `artist_summary.py` generates aggregate analysis across all sets
 
@@ -55,7 +55,7 @@ python main.py "url1" "url2" "url3" --no-resume
 7. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
 
 ### DJ Set Discovery (dj_set_discovery.py)
-Uses the Claude CLI (`claude -p`) with web search to intelligently search across multiple platforms (YouTube, SoundCloud) and known DJ set channels (Boiler Room, HOR Berlin, Cercle, etc.) to find all recorded sets by a given artist. Results are cached to `checkpoints/<artist>/discovery.json` so re-runs don't repeat the search.
+Uses yt-dlp to search YouTube (`ytsearch`) and SoundCloud (`scsearch`) directly with multiple query strategies (generic searches, known DJ set channels like Boiler Room, HOR Berlin, Cercle, etc.). Results are filtered by duration (>= `MIN_SET_DURATION_MINUTES`) and title keywords to exclude non-sets. Results are cached to `checkpoints/<artist>/discovery.json` during processing and cleaned up after completion (controlled by `CLEANUP_CHECKPOINTS`).
 
 ### Core Algorithm (setlist_builder.py)
 The setlist building uses a clustering approach:
@@ -71,7 +71,7 @@ Saves progress during long recognition runs. Checkpoints stored in `checkpoints/
 
 All settings in `.env` file (see `config.py` for defaults):
 - **API credentials**: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN`
-- **Discovery**: `DISCOVERY_MODEL` (default: `claude-opus-4-6`), `MAX_SETS_PER_ARTIST`
+- **Discovery**: `DISCOVERY_RESULTS_PER_QUERY` (default: `20`), `MIN_SET_DURATION_MINUTES` (default: `20`), `MAX_SETS_PER_ARTIST`
 - **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`, `AUTO_CREATE_SPOTIFY_PLAYLIST`
 - **Recognition**: `SEGMENT_DURATION`, `SEGMENT_OVERLAP`, `RECOGNITION_TIMEOUT`, `BASE_DELAY`
 - **Retry (JitterRetry)**: `MAX_RETRIES`, `BACKOFF_DELAY`, `MAX_BACKOFF_DELAY`, `JITTER_INTERVAL_SIZE`
@@ -89,7 +89,7 @@ All settings in `.env` file (see `config.py` for defaults):
 
 **Artist mode** (`python main.py "DJ Name"`) - everything nested under artist:
 - `assets/<artist_name>/<mix_name>/` - Downloaded audio and segments
-- `checkpoints/<artist_name>/discovery.json` - Cached discovery results
+- `checkpoints/<artist_name>/discovery.json` - Cached discovery results (cleaned up after processing)
 - `checkpoints/<artist_name>/<mix_name>/` - Per-set crash recovery state
 - `output/<artist_name>/artist_summary.md` - Aggregate analysis across all sets
 - `output/<artist_name>/artist_summary.json` - Machine-readable aggregate data
