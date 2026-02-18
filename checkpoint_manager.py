@@ -176,23 +176,6 @@ class CheckpointManager:
                 break
             current = current.parent
 
-    def get_audio_path(self) -> Path:
-        """Get the path where audio should be saved/loaded."""
-        return self.audio_file
-    
-    def audio_exists(self) -> bool:
-        """Check if audio file already exists."""
-        return self.audio_file.exists()
-    
-    def segments_exist(self) -> bool:
-        """Check if segment files exist."""
-        segment_files = list(self.assets_dir.glob(f"segment_{self.mix_id}_*.mp3"))
-        return len(segment_files) > 0
-    
     def list_existing_segments(self) -> list[Path]:
         """List all existing segment files for this mix."""
         return sorted(self.assets_dir.glob(f"segment_{self.mix_id}_*.mp3"))
-    
-    def get_output_dir(self) -> Path:
-        """Get the output directory for this mix."""
-        return self.output_dir

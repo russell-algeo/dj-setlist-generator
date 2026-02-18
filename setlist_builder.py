@@ -5,6 +5,13 @@ from typing import Optional, List
 from config import Config
 from collections import defaultdict
 
+CONFIDENCE_ICONS = {
+    'HIGH': '🟢',
+    'MEDIUM': '🟡',
+    'LOW': '🟠',
+    'UNCERTAIN': '⚪',
+}
+
 @dataclass
 class Track:
     """Represents a track in the setlist."""
@@ -42,11 +49,11 @@ class SetlistBuilder:
         if Config.OVERLAP_RESOLUTION_ENABLED:
             clusters = self._resolve_overlapping_clusters(clusters)
 
-        # Step 3: Filter noise (now that overlaps are resolved)
-        filtered_clusters = self._filter_clusters(clusters)
+        # Log cluster details for diagnostics
+        self._log_clusters(clusters)
 
         # Convert to tracks
-        tracks = [self._cluster_to_track(cluster) for cluster in filtered_clusters]
+        tracks = [self._cluster_to_track(cluster) for cluster in clusters]
 
         # Calculate confidence
         tracks = self._calculate_confidence(tracks)
@@ -55,7 +62,6 @@ class SetlistBuilder:
         print(f"CLUSTERING RESULTS")
         print(f"{'='*70}")
         print(f"Built setlist with {len(tracks)} tracks")
-        print(f"Filtered out {len(clusters) - len(filtered_clusters)} noise detections")
 
         return tracks
     
@@ -125,12 +131,8 @@ class SetlistBuilder:
     def _resolve_overlapping_clusters(self, clusters: list[dict]) -> list[dict]:
         """When tracks overlap in time, keep the dominant one using multi-criteria scoring.
 
-        Uses multi-criteria scoring (not just density) to choose the winner:
-        - detection_count * 2.0: Primary signal - more detections = stronger
-        - span * 0.5: Secondary - longer span = more dominant
-        - density * 0.3: Tertiary - density helps but doesn't dominate
-
-        This prevents mixing artifacts (short, high-density) from beating real tracks.
+        Score formula: detection_count * 10.0 + density * 20.0
+        Span is excluded to prevent scattered detections from winning.
         """
         if not clusters:
             return []
@@ -168,11 +170,9 @@ class SetlistBuilder:
                 def calc_score(c):
                     return c['detection_count'] * 10.0 + c['density'] * 20.0
 
-                scored = []
                 for c in overlapping:
                     artist, title = c['track_id'].split('|')[0:2]
                     score = calc_score(c)
-                    scored.append((c, score, artist, title))
                     print(f"  📊 {artist} - {title}")
                     print(f"     └─ {c['detection_count']} detections, span {c['span']}, density {c['density']:.2f}")
                     print(f"     └─ Score: {score:.1f}")
@@ -188,8 +188,6 @@ class SetlistBuilder:
                         loser_artist, loser_title = c['track_id'].split('|')[0:2]
                         print(f"  ❌ REMOVING: {loser_artist} - {loser_title}")
 
-                # Mark winner as having won overlap resolution for more lenient filtering
-                winner['won_overlap_resolution'] = True
                 resolved.append(winner)
                 overlap_count += 1
 
@@ -220,63 +218,22 @@ class SetlistBuilder:
 
         return overlap >= min(span1, span2) * Config.OVERLAP_THRESHOLD
 
-    def _filter_clusters(self, clusters: list[dict]) -> list[dict]:
-        """Filter out noise using multi-factor analysis."""
+    def _log_clusters(self, clusters: list[dict]):
+        """Log diagnostic details for each cluster."""
         if not clusters:
-            return []
+            return
 
         print(f"\n{'='*70}")
-        print(f"CLUSTER FILTERING")
+        print(f"CLUSTER DETAILS")
         print(f"{'='*70}")
 
-        filtered = []
-
         for cluster in clusters:
+            artist, title = cluster['track_id'].split('|')[0:2]
             count = cluster['detection_count']
             density = cluster['density']
             span = cluster['span']
-            won_overlap = cluster.get('won_overlap_resolution', False)
-
-            # Decision tree for filtering
-            keep = False
-            reason = ""
-
-            # Special handling for overlap resolution winners
-            # These tracks beat competing detections, so they're likely real
-            if won_overlap and count >= 3:
-                keep = True
-                reason = "won overlap resolution (dominant track)"
-            elif count >= 15:
-                keep = True
-                reason = "long cluster (15+ detections)"
-            elif count >= 10 and density >= 0.5:
-                keep = True
-                reason = "medium cluster with good density"
-            elif count >= 8 and density >= 0.6:
-                keep = True
-                reason = "dense cluster"
-            elif count >= 5 and density >= 0.7:
-                keep = True
-                reason = "very dense short cluster"
-            elif count >= 3 and density >= 0.8:
-                keep = True
-                reason = "extremely dense minimal cluster"
-
-            artist, title = cluster['track_id'].split('|')[0:2]
-
-            # always add (ignore filtering as it isn't adding value)
-            filtered.append(cluster)
-            
-            if keep:
-                print(f"✓ {artist} - {title}")
-                print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
-                print(f"  └─ Reason: {reason}")
-            else:
-                print(f"✗ {artist} - {title}")
-                print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
-                print(f"  └─ Reason: below thresholds")
-
-        return filtered
+            print(f"  {artist} - {title}")
+            print(f"  └─ {count} detections, {density:.0%} density, span {span} segments")
     
     def _cluster_to_track(self, cluster: dict) -> Track:
         """Convert cluster to Track object."""
