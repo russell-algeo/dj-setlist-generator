@@ -8,13 +8,35 @@ from datetime import datetime
 from config import Config
 from typing import Optional
 
-class CheckpointManager:
-    """Manage checkpoints for crash recovery with organized directory structure.
 
-    Two construction modes:
-        Mix mode:    ``CheckpointManager(url, mix_name, artist_name=...)``
-        Artist mode: ``CheckpointManager.for_artist(artist_name)``
-    """
+class ArtistManager:
+    """Manage artist-level directories and discovery cache."""
+
+    def __init__(self, artist_name: str):
+        self.artist_name = artist_name
+        safe_name = Config._sanitize_filename(artist_name)
+        self.checkpoint_dir = Config.CHECKPOINT_DIR / safe_name
+        self.output_dir = Config.OUTPUT_DIR / safe_name
+
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def cleanup_discovery_cache(self):
+        """Delete discovery cache file and empty directories."""
+        if not Config.CLEANUP_CHECKPOINTS:
+            print(f"  Kept discovery cache in: {self.checkpoint_dir}")
+            return
+
+        discovery_file = self.checkpoint_dir / "discovery.json"
+        if discovery_file.exists():
+            discovery_file.unlink()
+            print("  Cleaned up discovery cache")
+
+        CheckpointManager._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
+
+
+class CheckpointManager:
+    """Manage checkpoints for crash recovery with organized directory structure."""
 
     def __init__(self, url: str, mix_name: str, artist_name: str = None):
         """
@@ -46,41 +68,17 @@ class CheckpointManager:
         self.checkpoint_file = self.checkpoint_dir / f"checkpoint_{self.mix_id}.json"
         self.audio_file = self.assets_dir / f"mix_{self.mix_id}.mp3"
 
-    @classmethod
-    def for_artist(cls, artist_name: str) -> 'CheckpointManager':
-        """Create a CheckpointManager for artist-level directory management.
-
-        Artist mode only uses checkpoint_dir and output_dir (no mix-specific
-        attributes like audio_file or checkpoint_file).
-        """
-        instance = cls.__new__(cls)
-        instance.artist_name = artist_name
-        instance.url = None
-        instance.mix_name = None
-        instance.mix_id = None
-        instance.assets_dir = None
-        instance.checkpoint_file = None
-        instance.audio_file = None
-
-        safe_name = Config._sanitize_filename(artist_name)
-        instance.checkpoint_dir = Config.CHECKPOINT_DIR / safe_name
-        instance.output_dir = Config.OUTPUT_DIR / safe_name
-
-        instance.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        instance.output_dir.mkdir(parents=True, exist_ok=True)
-        return instance
-    
     def save_checkpoint(self, stage: str, data: dict):
         """
         Save checkpoint data.
-        
+
         Args:
             stage: Current stage (e.g., 'downloaded', 'segmented', 'recognized')
             data: Data to save
         """
         if not Config.ENABLE_CHECKPOINTS:
             return
-        
+
         checkpoint = {
             'mix_id': self.mix_id,
             'mix_name': self.mix_name,
@@ -89,10 +87,10 @@ class CheckpointManager:
             'timestamp': datetime.now().isoformat(),
             'data': data
         }
-        
+
         with open(self.checkpoint_file, 'w') as f:
             json.dump(checkpoint, f, indent=2)
-        
+
         print(f"💾 Checkpoint saved: {stage}")
 
     def save_recognition_checkpoint(self, recognitions: list, stage: str):
@@ -116,29 +114,29 @@ class CheckpointManager:
     def load_checkpoint(self) -> Optional[dict]:
         """
         Load existing checkpoint if it exists.
-        
+
         Returns:
             Checkpoint data or None
         """
         if not Config.ENABLE_CHECKPOINTS:
             return None
-        
+
         if not self.checkpoint_file.exists():
             return None
-        
+
         try:
             with open(self.checkpoint_file, 'r') as f:
                 checkpoint = json.load(f)
-            
+
             print(f"📂 Found checkpoint from {checkpoint['timestamp']}")
             print(f"   Mix: {checkpoint.get('mix_name', 'Unknown')}")
             print(f"   Stage: {checkpoint['stage']}")
             return checkpoint
-        
+
         except Exception as e:
             print(f"⚠️  Could not load checkpoint: {e}")
             return None
-    
+
     def cleanup_assets(self):
         """Delete temporary audio/segment files and empty directories.
 
@@ -175,19 +173,6 @@ class CheckpointManager:
         if self.checkpoint_file.exists():
             self.checkpoint_file.unlink()
             print("🗑️  Checkpoint cleared")
-
-        self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
-
-    def cleanup_discovery_cache(self):
-        """Delete discovery cache file and empty directories."""
-        if not Config.CLEANUP_CHECKPOINTS:
-            print(f"  Kept discovery cache in: {self.checkpoint_dir}")
-            return
-
-        discovery_file = self.checkpoint_dir / "discovery.json"
-        if discovery_file.exists():
-            discovery_file.unlink()
-            print("  Cleaned up discovery cache")
 
         self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
 
