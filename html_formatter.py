@@ -40,6 +40,7 @@ def _build_track_data(enriched_tracks: list, total_duration: float, source_url: 
             'start_time':     track.start_time,
             'end_time':       end_t,
             'start_fmt':      format_time(track.start_time),
+            'end_fmt':        format_time(end_t),
             'confidence':     track.confidence,
             'detections':     track.detection_count,
             'density':        track.cluster_density,
@@ -60,8 +61,8 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
         conf   = t['confidence']
         cfg    = CONFIDENCE_CONFIG.get(conf, CONFIDENCE_CONFIG['UNCERTAIN'])
         color  = cfg[2]
-        label  = _esc(f"{t['artist']} — {t['title']}")
-        time_l = _esc(t['start_fmt'])
+        label    = _esc(f"{t['artist']} — {t['title']}")
+        time_l   = _esc(f"{t['start_fmt']} \u2013 {t['end_fmt']}")
 
         segments_html.append(
             f'<div class="tl-segment" '
@@ -105,15 +106,23 @@ def _render_track_cards(tracks: list) -> str:
         density_pct = f"{t['density']:.0%}"
 
         deep_link = t.get('source_deep_link') or ''
+        start_esc = _esc(t['start_fmt'])
+        end_esc   = _esc(t['end_fmt'])
         if deep_link:
             time_cell = (
-                f'<a class="track-time track-time-link" '
+                f'<div class="track-time">'
+                f'<a class="track-time-link" '
                 f'href="{_esc(deep_link)}" target="_blank" rel="noopener" '
-                f'title="Open in YouTube at this timestamp">'
-                f'{_esc(t["start_fmt"])}</a>'
+                f'title="Open in YouTube at this timestamp">{start_esc}</a>'
+                f'<span class="track-time-sep"> \u2013 </span>{end_esc}'
+                f'</div>'
             )
         else:
-            time_cell = f'<div class="track-time">{_esc(t["start_fmt"])}</div>'
+            time_cell = (
+                f'<div class="track-time">'
+                f'{start_esc}<span class="track-time-sep"> \u2013 </span>{end_esc}'
+                f'</div>'
+            )
 
         cards.append(f'''
 <div class="track-card" data-conf="{_esc(conf)}" data-search="{artist_esc.lower()} {title_esc.lower()}">
@@ -317,7 +326,7 @@ a { color: inherit; text-decoration: none; }
 
 .track-card {
   display: grid;
-  grid-template-columns: 36px 52px 1fr auto;
+  grid-template-columns: 36px max-content 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -348,12 +357,14 @@ a { color: inherit; text-decoration: none; }
 .track-time-link {
   color: #00e676;
   text-decoration: none;
-  display: block;
+  display: inline;
 }
 .track-time-link:hover {
   text-decoration: underline;
   opacity: 0.8;
 }
+
+.track-time-sep { color: #333; }
 
 .track-info { min-width: 0; }
 
@@ -462,7 +473,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ── Responsive ── */
 @media (max-width: 600px) {
-  .track-card { grid-template-columns: 28px 44px 1fr; }
+  .track-card { grid-template-columns: 28px max-content 1fr; }
   .track-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .track-num { display: none; }
 }

@@ -112,6 +112,7 @@ class OutputFormatter:
                     'start_time': item['track'].start_time,
                     'end_time': item['track'].end_time,
                     'start_time_formatted': format_time(item['track'].start_time),
+                    'end_time_formatted': format_time(item['track'].end_time) if item['track'].end_time is not None else None,
                     'confidence': item['track'].confidence,
                     'detection_count': item['track'].detection_count,
                     'cluster_density': item['track'].cluster_density,
@@ -157,11 +158,12 @@ class OutputFormatter:
             lines.append(f"\n### {i}. {track.artist} - {track.title} {icon}")
 
             time_str = format_time(track.start_time)
+            end_str = f" \u2013 {format_time(track.end_time)}" if track.end_time is not None else ""
             deep_link = make_source_url(source_url, track.start_time)
             if deep_link:
-                lines.append(f"**Time:** [{time_str}]({deep_link})")
+                lines.append(f"**Time:** [{time_str}]({deep_link}){end_str}")
             else:
-                lines.append(f"**Time:** {time_str}")
+                lines.append(f"**Time:** {time_str}{end_str}")
             lines.append(f"**Confidence:** {track.confidence} ({track.detection_count} detections, {track.cluster_density:.0%} density)")
             
             # Links

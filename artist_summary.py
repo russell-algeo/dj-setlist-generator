@@ -72,13 +72,18 @@ class ArtistSummarizer:
                 "set_html_rel": set_html_rel,
             })
 
+            set_title = mix_info.get("title", "Unknown")
             for track in tracks:
                 if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
+                    start_fmt = track.get("start_time_formatted", "")
+                    end_fmt   = track.get("end_time_formatted") or ""
+                    time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
                     all_tracks.append({
-                        "artist": track["artist"],
-                        "title": track["title"],
+                        "artist":    track["artist"],
+                        "title":     track["title"],
                         "spotify_url": track.get("spotify_url"),
-                        "from_set": mix_info.get("title", "Unknown"),
+                        "from_set":  set_title,
+                        "time_range": time_range,
                     })
 
         track_counter = Counter()
@@ -87,7 +92,16 @@ class ArtistSummarizer:
             key = f"{t['artist']} - {t['title']}"
             track_counter[key] += 1
             if key not in track_info:
-                track_info[key] = t
+                track_info[key] = {
+                    "artist":     t["artist"],
+                    "title":      t["title"],
+                    "spotify_url": t.get("spotify_url"),
+                    "appearances": [],
+                }
+            track_info[key]["appearances"].append({
+                "set_title":  t["from_set"],
+                "time_range": t.get("time_range", ""),
+            })
 
         _save_summary_markdown(
             self._artist_name, self._output_dir, set_summaries, track_counter,
@@ -131,6 +145,9 @@ def _save_summary_markdown(
             info = track_info[track_key]
             spotify = f" | [Spotify]({info['spotify_url']})" if info.get("spotify_url") else ""
             lines.append(f"{rank}. **{track_key}** - played in {count} set(s){spotify}")
+            for app in info.get("appearances", []):
+                time_part = f" ({app['time_range']})" if app.get("time_range") else ""
+                lines.append(f"   - {app['set_title']}{time_part}")
 
     # Failed sets
     if failed:
@@ -362,9 +379,15 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
-.track-info {
+.track-body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.track-info {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -373,6 +396,34 @@ h2 {
 .track-artist { font-weight: 600; color: #fff; }
 .track-sep    { color: #444; }
 .track-title  { color: #ccc; }
+
+/* ── Per-set appearance chips ── */
+.appearances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.app-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid #2a2a2a;
+  font-size: 10px;
+  color: #666;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-time {
+  color: #00e676;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+}
 
 .track-actions {
   display: flex;
@@ -508,10 +559,27 @@ def _render_most_played(track_counter: Counter, track_info: dict) -> str:
             f'target="_blank" rel="noopener">Spotify</a>'
         ) if spotify_url else ''
 
+        appearances = info.get('appearances', [])
+        app_chips = ''
+        if appearances:
+            chips = []
+            for app in appearances:
+                time_part = (
+                    f'<span class="app-time">\u00a0{_h(app["time_range"])}</span>'
+                    if app.get('time_range') else ''
+                )
+                chips.append(
+                    f'<span class="app-chip">{_h(app["set_title"])}{time_part}</span>'
+                )
+            app_chips = f'<div class="appearances">{"".join(chips)}</div>'
+
         rows.append(f'''<div class="track-row">
   <span class="track-rank">#{rank}</span>
-  <div class="track-info">
-    <span class="track-artist">{artist_esc}</span><span class="track-sep"> — </span><span class="track-title">{title_esc}</span>
+  <div class="track-body">
+    <div class="track-info">
+      <span class="track-artist">{artist_esc}</span><span class="track-sep"> — </span><span class="track-title">{title_esc}</span>
+    </div>
+    {app_chips}
   </div>
   <div class="track-actions">
     <span class="count-badge {count_class}">{_h(count_label)}</span>
