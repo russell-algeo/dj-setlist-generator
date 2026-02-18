@@ -16,9 +16,6 @@ Supports two modes:
 # Artist discovery mode - find and process all sets by a DJ
 python main.py "Dyed Soundorom"
 
-# Limit number of sets to process
-python main.py "Peggy Gou" --max-sets 5
-
 # Basic usage (single URL)
 python main.py "https://www.youtube.com/watch?v=xxxxx"
 
@@ -71,7 +68,7 @@ Saves progress during long recognition runs. Checkpoints stored in `checkpoints/
 
 All settings in `.env` file (see `config.py` for defaults):
 - **API credentials**: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN`
-- **Discovery**: `DISCOVERY_RESULTS_PER_QUERY` (default: `20`), `MIN_SET_DURATION_MINUTES` (default: `20`), `MAX_SETS_PER_ARTIST`
+- **Discovery**: `DISCOVERY_RESULTS_PER_QUERY` (default: `20`), `MIN_SET_DURATION_MINUTES` (default: `20`), `MAX_SETS_PER_ARTIST` (limit sets per artist; replaces the old `--max-sets` CLI flag)
 - **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`, `AUTO_CREATE_SPOTIFY_PLAYLIST`
 - **Recognition**: `SEGMENT_DURATION`, `SEGMENT_OVERLAP`, `RECOGNITION_TIMEOUT`, `BASE_DELAY`
 - **Retry (JitterRetry)**: `MAX_RETRIES`, `BACKOFF_DELAY`, `MAX_BACKOFF_DELAY`, `JITTER_INTERVAL_SIZE`
