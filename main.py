@@ -249,11 +249,9 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print("█" * 70 + "\n")
 
     # Artist-level directories
-    safe_artist_name = Config._sanitize_filename(artist_name)
-    artist_output_dir = Config.OUTPUT_DIR / safe_artist_name
-    artist_output_dir.mkdir(parents=True, exist_ok=True)
-    artist_checkpoint_dir = Config.CHECKPOINT_DIR / safe_artist_name
-    artist_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    artist_dirs = Config.ensure_artist_directories(artist_name)
+    artist_output_dir = artist_dirs['output']
+    artist_checkpoint_dir = artist_dirs['checkpoints']
 
     # Step 1: Discover sets (cached in checkpoints dir)
     print("[Discovery] Searching for DJ sets...\n")
@@ -274,7 +272,7 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print_discovery_results(sets, artist_name)
 
     # Step 2: Process each discovered set
-    urls = [s["url"] for s in sets]
+    urls = [s.url for s in sets]
     results = await process_urls(urls, resume=resume, artist_name=artist_name)
 
     # Step 3: Generate artist summary

@@ -12,6 +12,20 @@ CONFIDENCE_ICONS = {
     'UNCERTAIN': '⚪',
 }
 
+TRACK_ID_SEPARATOR = '|'
+
+
+def make_track_id(artist: str, title: str, shazam_id: str) -> str:
+    """Build a track_id string from its components."""
+    return f"{artist}{TRACK_ID_SEPARATOR}{title}{TRACK_ID_SEPARATOR}{shazam_id}"
+
+
+def parse_track_id(track_id: str) -> tuple[str, str, str]:
+    """Parse a track_id string into (artist, title, shazam_id)."""
+    parts = track_id.split(TRACK_ID_SEPARATOR)
+    return parts[0], parts[1], parts[2]
+
+
 @dataclass
 class Track:
     """Represents a track in the setlist."""
@@ -28,10 +42,14 @@ class Track:
 
 class SetlistBuilder:
     """Build deduplicated setlist from recognitions."""
-    
-    def __init__(self, min_confidence_threshold: int = None):
-        """Initialize builder."""
-        self.min_confidence = min_confidence_threshold or Config.MIN_CONFIDENCE_THRESHOLD
+
+    def __init__(self):
+        """Initialize builder with config values."""
+        self.min_cluster_size = Config.MIN_CLUSTER_SIZE
+        self.min_cluster_density = Config.MIN_CLUSTER_DENSITY
+        self.overlap_resolution_enabled = Config.OVERLAP_RESOLUTION_ENABLED
+        self.overlap_threshold = Config.OVERLAP_THRESHOLD
+        self.min_unknown_gap_size = Config.MIN_UNKNOWN_GAP_SIZE
         
     def build_setlist(self, recognitions: list) -> list[Track]:
         """Build setlist from recognition results."""
@@ -46,7 +64,7 @@ class SetlistBuilder:
 
         # Step 2: Resolve temporal overlaps (competing tracks at same time)
         # Do this BEFORE filtering to choose dominant track among competitors
-        if Config.OVERLAP_RESOLUTION_ENABLED:
+        if self.overlap_resolution_enabled:
             clusters = self._resolve_overlapping_clusters(clusters)
 
         # Log cluster details for diagnostics
@@ -83,23 +101,23 @@ class SetlistBuilder:
         # Group by track ID - collect ALL detections for each track
         track_sequences = defaultdict(list)
         for rec in sorted_recs:
-            track_id = f"{rec.artist}|{rec.track_title}|{rec.shazam_track_id}"
+            track_id = make_track_id(rec.artist, rec.track_title, rec.shazam_track_id)
             track_sequences[track_id].append(rec)
 
         clusters = []
 
         # Create one cluster per track_id (all detections grouped together)
         for track_id, recs in track_sequences.items():
-            artist, title = track_id.split('|')[0:2]
+            artist, title, _ = parse_track_id(track_id)
 
             # Only create cluster if we have minimum detections and density
             cluster = self._make_cluster_dict(track_id, recs)
             density = cluster['density']
 
-            if len(recs) < Config.MIN_CLUSTER_SIZE:
-                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {Config.MIN_CLUSTER_SIZE} min)")
-            elif density < Config.MIN_CLUSTER_DENSITY:
-                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {Config.MIN_CLUSTER_DENSITY} min)")
+            if len(recs) < self.min_cluster_size:
+                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {self.min_cluster_size} min)")
+            elif density < self.min_cluster_density:
+                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {self.min_cluster_density} min)")
             else:
                 clusters.append(cluster)
                 print(f"✓ Clustered: {artist} - {title} ({len(recs)} detections, density {density:.2f})")
@@ -171,7 +189,7 @@ class SetlistBuilder:
                     return c['detection_count'] * 10.0 + c['density'] * 20.0
 
                 for c in overlapping:
-                    artist, title = c['track_id'].split('|')[0:2]
+                    artist, title, _ = parse_track_id(c['track_id'])
                     score = calc_score(c)
                     print(f"  📊 {artist} - {title}")
                     print(f"     └─ {c['detection_count']} detections, span {c['span']}, density {c['density']:.2f}")
@@ -180,12 +198,12 @@ class SetlistBuilder:
                 # Choose track with highest score
                 winner = max(overlapping, key=calc_score)
 
-                winner_artist, winner_title = winner['track_id'].split('|')[0:2]
+                winner_artist, winner_title, _ = parse_track_id(winner['track_id'])
                 print(f"  ✅ KEEPING: {winner_artist} - {winner_title}")
 
                 for c in overlapping:
                     if c != winner:
-                        loser_artist, loser_title = c['track_id'].split('|')[0:2]
+                        loser_artist, loser_title, _ = parse_track_id(c['track_id'])
                         print(f"  ❌ REMOVING: {loser_artist} - {loser_title}")
 
                 resolved.append(winner)
@@ -216,7 +234,7 @@ class SetlistBuilder:
         span1 = end1 - start1
         span2 = end2 - start2
 
-        return overlap >= min(span1, span2) * Config.OVERLAP_THRESHOLD
+        return overlap >= min(span1, span2) * self.overlap_threshold
 
     def _log_clusters(self, clusters: list[dict]):
         """Log diagnostic details for each cluster."""
@@ -228,7 +246,7 @@ class SetlistBuilder:
         print(f"{'='*70}")
 
         for cluster in clusters:
-            artist, title = cluster['track_id'].split('|')[0:2]
+            artist, title, _ = parse_track_id(cluster['track_id'])
             count = cluster['detection_count']
             density = cluster['density']
             span = cluster['span']
@@ -239,7 +257,7 @@ class SetlistBuilder:
         """Convert cluster to Track object."""
         first = cluster['recognitions'][0]
         last = cluster['recognitions'][-1]
-        artist, title, shazam_id = cluster['track_id'].split('|')
+        artist, title, shazam_id = parse_track_id(cluster['track_id'])
         
         return Track(
             title=title,
@@ -295,11 +313,11 @@ class SetlistBuilder:
             if not current_gap or seg_idx - current_gap[-1] <= 2:
                 current_gap.append(seg_idx)
             else:
-                if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
+                if len(current_gap) >= self.min_unknown_gap_size:
                     unknown_gaps.append(current_gap)
                 current_gap = [seg_idx]
         
-        if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
+        if len(current_gap) >= self.min_unknown_gap_size:
             unknown_gaps.append(current_gap)
         
         # Create Unknown Track entries

@@ -7,8 +7,32 @@ DJ sets by a given artist, returning structured URLs for processing.
 import json
 import re
 import subprocess
+from dataclasses import dataclass, asdict
 from pathlib import Path
+from typing import Optional
 from config import Config
+
+
+@dataclass
+class DiscoveredSet:
+    """A DJ set discovered via search."""
+    url: str
+    title: str
+    platform: str
+    event: Optional[str]
+    year: Optional[str]
+    duration_minutes: Optional[int]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DiscoveredSet':
+        return cls(
+            url=data["url"],
+            title=data["title"],
+            platform=data["platform"],
+            event=data.get("event"),
+            year=data.get("year"),
+            duration_minutes=data.get("duration_minutes"),
+        )
 
 # Title keywords that indicate a result is NOT a DJ set
 _EXCLUDE_KEYWORDS = [
@@ -18,7 +42,7 @@ _EXCLUDE_KEYWORDS = [
 ]
 
 
-def discover_dj_sets(artist_name: str, cache_dir: Path | None = None) -> list[dict]:
+def discover_dj_sets(artist_name: str, cache_dir: Path | None = None) -> list[DiscoveredSet]:
     """Discover DJ sets for an artist using yt-dlp search.
 
     Args:
@@ -27,7 +51,7 @@ def discover_dj_sets(artist_name: str, cache_dir: Path | None = None) -> list[di
                    exists here, returns cached results.
 
     Returns:
-        List of dicts with keys: url, title, platform, event, year, duration_minutes
+        List of DiscoveredSet instances.
     """
     # Check for cached discovery results
     if cache_dir:
@@ -37,7 +61,7 @@ def discover_dj_sets(artist_name: str, cache_dir: Path | None = None) -> list[di
             with open(cache_file) as f:
                 cached = json.load(f)
             print(f"  Loaded {len(cached['sets'])} previously discovered sets")
-            return cached["sets"]
+            return [DiscoveredSet.from_dict(s) for s in cached["sets"]]
 
     queries = _build_search_queries(artist_name)
 
@@ -78,35 +102,27 @@ def discover_dj_sets(artist_name: str, cache_dir: Path | None = None) -> list[di
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / "discovery.json"
         with open(cache_file, "w") as f:
-            json.dump({"artist": artist_name, "sets": sets}, f, indent=2)
+            json.dump({"artist": artist_name, "sets": [asdict(s) for s in sets]}, f, indent=2)
         print(f"  Cached discovery results to {cache_file}")
 
     return sets
 
 
+_YT_GENERIC_TERMS = ["DJ set", "live set", "mix"]
+_YT_CHANNELS = [
+    "Boiler Room", "HÖR Berlin", "Cercle",
+    "Resident Advisor", "Dekmantel", "Mixmag",
+]
+_SC_TERMS = ["DJ set", "mix", "live"]
+
+
 def _build_search_queries(artist_name: str) -> list[str]:
     """Build the list of yt-dlp search queries for an artist."""
     n = Config.DISCOVERY_RESULTS_PER_QUERY
+    quoted = f'"{artist_name}"'
 
-    # YouTube searches
-    yt_terms = [
-        f'"{artist_name}" DJ set',
-        f'"{artist_name}" live set',
-        f'"{artist_name}" mix',
-        f'"{artist_name}" Boiler Room',
-        f'"{artist_name}" HÖR Berlin',
-        f'"{artist_name}" Cercle',
-        f'"{artist_name}" Resident Advisor',
-        f'"{artist_name}" Dekmantel',
-        f'"{artist_name}" Mixmag',
-    ]
-
-    # SoundCloud searches
-    sc_terms = [
-        f'"{artist_name}" DJ set',
-        f'"{artist_name}" mix',
-        f'"{artist_name}" live',
-    ]
+    yt_terms = [f"{quoted} {t}" for t in _YT_GENERIC_TERMS + _YT_CHANNELS]
+    sc_terms = [f"{quoted} {t}" for t in _SC_TERMS]
 
     queries = [f"ytsearch{n}:{term}" for term in yt_terms]
     queries += [f"scsearch{n}:{term}" for term in sc_terms]
@@ -158,12 +174,12 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[dict]:
-    """Filter raw yt-dlp results and map to the discovery output format."""
+def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[DiscoveredSet]:
+    """Filter raw yt-dlp results and map to DiscoveredSet instances."""
     min_duration_seconds = Config.MIN_SET_DURATION_MINUTES * 60
     artist_norm = _normalize(artist_name)
     seen_titles: set[str] = set()
-    sets = []
+    sets: list[DiscoveredSet] = []
 
     for entry in raw_results:
         title = entry.get("title", "")
@@ -208,14 +224,14 @@ def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[dict]:
         # Try to extract event/venue from uploader or channel
         event = entry.get("channel") or entry.get("uploader")
 
-        sets.append({
-            "url": url,
-            "title": title or "Unknown Set",
-            "platform": _detect_platform(url),
-            "event": event,
-            "year": year,
-            "duration_minutes": duration_minutes,
-        })
+        sets.append(DiscoveredSet(
+            url=url,
+            title=title or "Unknown Set",
+            platform=_detect_platform(url),
+            event=event,
+            year=year,
+            duration_minutes=duration_minutes,
+        ))
 
     return sets
 
@@ -229,7 +245,7 @@ def _detect_platform(url: str) -> str:
     return "unknown"
 
 
-def print_discovery_results(sets: list[dict], artist_name: str):
+def print_discovery_results(sets: list[DiscoveredSet], artist_name: str):
     """Print a formatted summary of discovered sets."""
     print(f"\n{'=' * 70}")
     print(f"DISCOVERED DJ SETS FOR: {artist_name.upper()}")
@@ -237,14 +253,14 @@ def print_discovery_results(sets: list[dict], artist_name: str):
     print(f"Found {len(sets)} sets\n")
 
     for i, s in enumerate(sets, 1):
-        platform_icon = "YT" if s["platform"] == "youtube" else "SC"
-        duration = f" ({s['duration_minutes']}min)" if s.get("duration_minutes") else ""
-        event = f" @ {s['event']}" if s.get("event") else ""
-        year = f" [{s['year']}]" if s.get("year") else ""
-        print(f"  {i:2d}. [{platform_icon}] {s['title']}{event}{year}{duration}")
-        print(f"      {s['url']}")
+        platform_icon = "YT" if s.platform == "youtube" else "SC"
+        duration = f" ({s.duration_minutes}min)" if s.duration_minutes else ""
+        event = f" @ {s.event}" if s.event else ""
+        year = f" [{s.year}]" if s.year else ""
+        print(f"  {i:2d}. [{platform_icon}] {s.title}{event}{year}{duration}")
+        print(f"      {s.url}")
 
-    yt_count = sum(1 for s in sets if s["platform"] == "youtube")
-    sc_count = sum(1 for s in sets if s["platform"] == "soundcloud")
+    yt_count = sum(1 for s in sets if s.platform == "youtube")
+    sc_count = sum(1 for s in sets if s.platform == "soundcloud")
     print(f"\n  YouTube: {yt_count} | SoundCloud: {sc_count}")
     print()

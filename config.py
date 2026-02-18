@@ -131,6 +131,37 @@ class Config:
         dirs = cls.get_mix_directories(mix_name, artist_name=artist_name)
         for path in dirs.values():
             path.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def get_artist_directories(cls, artist_name: str) -> dict:
+        """Get artist-level directory paths.
+
+        Args:
+            artist_name: Name of the DJ/artist.
+
+        Returns:
+            Dictionary with paths for output and checkpoints.
+        """
+        safe_artist = cls._sanitize_filename(artist_name)
+        return {
+            'output': cls.OUTPUT_DIR / safe_artist,
+            'checkpoints': cls.CHECKPOINT_DIR / safe_artist,
+        }
+
+    @classmethod
+    def ensure_artist_directories(cls, artist_name: str) -> dict:
+        """Create artist-level directories and return their paths.
+
+        Args:
+            artist_name: Name of the DJ/artist.
+
+        Returns:
+            Dictionary with paths for output and checkpoints.
+        """
+        dirs = cls.get_artist_directories(artist_name)
+        for path in dirs.values():
+            path.mkdir(parents=True, exist_ok=True)
+        return dirs
     
     @staticmethod
     def _sanitize_filename(name: str) -> str:
