@@ -10,6 +10,7 @@ from track_recognizer import TrackRecognizer, Recognition
 from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
+from html_formatter import HtmlFormatter
 from checkpoint_manager import ArtistManager, CheckpointManager, sanitize_filename
 
 class SetlistGenerator:
@@ -63,6 +64,7 @@ class SetlistGenerator:
         segmenter = AudioSegmenter(checkpoint_manager=checkpoint_manager)
         recognizer = TrackRecognizer(checkpoint_manager=checkpoint_manager)
         formatter = OutputFormatter(checkpoint_manager=checkpoint_manager)
+        html_formatter = HtmlFormatter(checkpoint_manager=checkpoint_manager)
 
         # Check for existing checkpoint
         checkpoint = None
@@ -154,12 +156,15 @@ class SetlistGenerator:
             final_output_name = output_name or sanitize_filename(mix_name)
             json_file = formatter.save_json(enriched_tracks, mix_info, final_output_name)
             md_file = formatter.save_markdown(enriched_tracks, mix_info, final_output_name)
+            html_file = html_formatter.save_html(enriched_tracks, mix_info, final_output_name) if Config.ENABLE_HTML_OUTPUT else None
 
             print("\n" + "=" * 70)
             print("COMPLETE!")
             print("=" * 70)
-            print(f"JSON output: {json_file}")
+            print(f"JSON output:     {json_file}")
             print(f"Markdown output: {md_file}")
+            if html_file:
+                print(f"HTML output:     {html_file}")
 
             # Spotify Playlist Creation
             if Config.ENABLE_SPOTIFY_PLAYLISTS:
