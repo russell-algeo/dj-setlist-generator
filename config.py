@@ -14,7 +14,6 @@ class Config:
     SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID', '')
     SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET', '')
     SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://127.0.0.1:8888/callback')
-    YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
     DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
 
     # DJ Set Discovery Settings

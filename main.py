@@ -7,9 +7,9 @@ from notifier import Notifier
 from audio_downloader import AudioDownloader
 from audio_segmenter import AudioSegmenter
 from track_recognizer import TrackRecognizer, Recognition
-from setlist_builder import SetlistBuilder
+from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
-from output_formatter import OutputFormatter
+from output_formatter import OutputFormatter, format_time
 from checkpoint_manager import CheckpointManager
 
 class SetlistGenerator:
@@ -92,7 +92,7 @@ class SetlistGenerator:
                 print("   Skipping download, segmentation, and recognition...")
 
                 saved_recognitions = checkpoint['data'].get('recognitions', [])
-                recognitions = [Recognition(**rec) for rec in saved_recognitions]
+                recognitions = [Recognition.from_checkpoint(rec) for rec in saved_recognitions]
                 print(f"   Loaded {len(recognitions)} recognition results")
 
                 audio_file = None
@@ -102,7 +102,7 @@ class SetlistGenerator:
 
                 # Step 2: Download audio (or skip if exists)
                 print("\n[2/6] Downloading audio...")
-                audio_path = checkpoint_manager.get_audio_path()
+                audio_path = checkpoint_manager.audio_file
                 audio_file = downloader.download(url, output_path=audio_path)
 
                 if not checkpoint or checkpoint['stage'] in ['downloaded', 'audio_only']:
@@ -144,15 +144,8 @@ class SetlistGenerator:
             print("SETLIST SUMMARY")
             print("=" * 70)
             for i, track in enumerate(tracks, 1):
-                confidence_icon = {
-                    'HIGH': '🟢',
-                    'MEDIUM': '🟡',
-                    'LOW': '🟠',
-                    'UNCERTAIN': '⚪'
-                }.get(track.confidence, '⚪')
-
-                time_str = f"{int(track.start_time//60)}:{int(track.start_time%60):02d}"
-                print(f"{i:2d}. [{time_str}] {confidence_icon} {track.artist} - {track.title}")
+                icon = CONFIDENCE_ICONS.get(track.confidence, '⚪')
+                print(f"{i:2d}. [{format_time(track.start_time)}] {icon} {track.artist} - {track.title}")
 
             # Step 6: Enrich and save
             print("\n[6/6] Enriching metadata and saving...")

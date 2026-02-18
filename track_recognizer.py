@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from shazamio import Shazam, HTTPClient
 from aiohttp_retry import JitterRetry
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Optional
 from config import Config
 
@@ -16,12 +16,17 @@ class Recognition:
     timestamp: float
     track_title: Optional[str]
     artist: Optional[str]
-    shazam_confidence: Optional[float]
     shazam_track_id: Optional[str]
     raw_data: Optional[dict]
     recognized: bool
     segment_index: int
     was_rate_limited: bool = False  # True if request failed due to 429 after exhausting retries
+
+    @classmethod
+    def from_checkpoint(cls, data: dict) -> 'Recognition':
+        """Create a Recognition from checkpoint data, ignoring unknown fields."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class TrackRecognizer:
@@ -109,7 +114,6 @@ class TrackRecognizer:
                     timestamp=segment['timestamp'],
                     track_title=track.get('title'),
                     artist=track.get('subtitle'),
-                    shazam_confidence=None,
                     shazam_track_id=track.get('key'),
                     raw_data=result,
                     recognized=True,
@@ -121,7 +125,6 @@ class TrackRecognizer:
                     timestamp=segment['timestamp'],
                     track_title=None,
                     artist=None,
-                    shazam_confidence=None,
                     shazam_track_id=None,
                     raw_data=result,
                     recognized=False,
@@ -147,7 +150,6 @@ class TrackRecognizer:
                 timestamp=segment['timestamp'],
                 track_title=None,
                 artist=None,
-                shazam_confidence=None,
                 shazam_track_id=None,
                 raw_data=None,
                 recognized=False,
@@ -172,7 +174,7 @@ class TrackRecognizer:
                 saved_recognitions = checkpoint['data'].get('recognitions', [])
                 if saved_recognitions:
                     recognitions = [
-                        Recognition(**rec) for rec in saved_recognitions
+                        Recognition.from_checkpoint(rec) for rec in saved_recognitions
                     ]
                     start_index = len(recognitions)
                     print(f"📂 Resuming from segment {start_index}/{len(segments)}")
@@ -231,7 +233,6 @@ class TrackRecognizer:
                         timestamp=seg['timestamp'],
                         track_title=None,
                         artist=None,
-                        shazam_confidence=None,
                         shazam_track_id=None,
                         raw_data=None,
                         recognized=False,

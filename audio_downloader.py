@@ -26,20 +26,19 @@ class AudioDownloader:
             or ("cookies" in error_str and "authentication" in error_str)
         )
 
-    def download(self, url: str, output_path: Path = None, output_filename: str = 'mix') -> Path:
+    def download(self, url: str, output_path: Path = None) -> Path:
         """
         Download audio from URL and convert to MP3.
-        
+
         Args:
             url: YouTube or SoundCloud URL
-            output_path: Specific path to save to (if provided)
-            output_filename: Name for output file (without extension)
-        
+            output_path: Specific path to save to (if None, saves as mix.mp3 in assets_dir)
+
         Returns:
             Path to downloaded MP3 file
         """
         if output_path is None:
-            output_path = self.assets_dir / f"{output_filename}.mp3"
+            output_path = self.assets_dir / "mix.mp3"
         
         # If file already exists, skip download
         if output_path.exists():
