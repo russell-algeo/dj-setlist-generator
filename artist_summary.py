@@ -6,77 +6,76 @@ from datetime import datetime
 from collections import Counter
 
 
-def generate_artist_summary(artist_name: str, artist_output_dir: Path, results: list[dict]):
-    """Generate a summary markdown and JSON across all processed sets.
+class ArtistSummarizer:
+    """Generate aggregate artist summary across all processed DJ sets."""
 
-    Args:
-        artist_name: Name of the DJ/artist.
-        artist_output_dir: The artist-level output directory.
-        results: List of dicts with keys: url, status, mix_name, output_dir
-    """
-    successful = [r for r in results if r["status"] == "SUCCESS"]
-    failed = [r for r in results if r["status"] != "SUCCESS"]
+    def __init__(self, artist_manager):
+        self._artist_name = artist_manager.artist_name
+        self._output_dir = artist_manager.output_dir
 
-    # Collect all tracks across all sets
-    all_tracks = []
-    set_summaries = []
+    def generate(self, results: list[dict]):
+        """Generate artist_summary.md and artist_summary.json.
 
-    for result in successful:
-        set_output_dir = result.get("output_dir")
-        if not set_output_dir:
-            continue
+        Args:
+            results: List of dicts with keys: url, status, mix_name, output_dir
+        """
+        successful = [r for r in results if r["status"] == "SUCCESS"]
+        failed = [r for r in results if r["status"] != "SUCCESS"]
 
-        # Find the JSON output file in this set's output directory
-        json_files = list(Path(set_output_dir).glob("*.json"))
-        if not json_files:
-            continue
+        all_tracks = []
+        set_summaries = []
 
-        try:
-            with open(json_files[0]) as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
+        for result in successful:
+            set_output_dir = result.get("output_dir")
+            if not set_output_dir:
+                continue
 
-        tracks = data.get("tracks", [])
-        mix_info = data.get("mix_info", {})
-        metadata = data.get("metadata", {})
+            json_files = list(Path(set_output_dir).glob("*.json"))
+            if not json_files:
+                continue
 
-        set_summaries.append({
-            "title": mix_info.get("title", result.get("mix_name", "Unknown")),
-            "url": result["url"],
-            "total_tracks": metadata.get("total_tracks", len(tracks)),
-            "high_confidence": metadata.get("high_confidence_tracks", 0),
-        })
+            try:
+                with open(json_files[0]) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
 
-        for track in tracks:
-            if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
-                all_tracks.append({
-                    "artist": track["artist"],
-                    "title": track["title"],
-                    "spotify_url": track.get("spotify_url"),
-                    "from_set": mix_info.get("title", "Unknown"),
-                })
+            tracks = data.get("tracks", [])
+            mix_info = data.get("mix_info", {})
+            metadata = data.get("metadata", {})
 
-    # Count track frequencies across all sets
-    track_counter = Counter()
-    track_info = {}
-    for t in all_tracks:
-        key = f"{t['artist']} - {t['title']}"
-        track_counter[key] += 1
-        if key not in track_info:
-            track_info[key] = t
+            set_summaries.append({
+                "title": mix_info.get("title", result.get("mix_name", "Unknown")),
+                "url": result["url"],
+                "total_tracks": metadata.get("total_tracks", len(tracks)),
+                "high_confidence": metadata.get("high_confidence_tracks", 0),
+            })
 
-    # Generate markdown summary
-    _save_summary_markdown(
-        artist_name, artist_output_dir, set_summaries, track_counter,
-        track_info, successful, failed
-    )
+            for track in tracks:
+                if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
+                    all_tracks.append({
+                        "artist": track["artist"],
+                        "title": track["title"],
+                        "spotify_url": track.get("spotify_url"),
+                        "from_set": mix_info.get("title", "Unknown"),
+                    })
 
-    # Generate JSON summary
-    _save_summary_json(
-        artist_name, artist_output_dir, set_summaries, track_counter,
-        track_info, all_tracks, successful, failed
-    )
+        track_counter = Counter()
+        track_info = {}
+        for t in all_tracks:
+            key = f"{t['artist']} - {t['title']}"
+            track_counter[key] += 1
+            if key not in track_info:
+                track_info[key] = t
+
+        _save_summary_markdown(
+            self._artist_name, self._output_dir, set_summaries, track_counter,
+            track_info, successful, failed
+        )
+        _save_summary_json(
+            self._artist_name, self._output_dir, set_summaries, track_counter,
+            track_info, all_tracks, successful, failed
+        )
 
 
 def _save_summary_markdown(
