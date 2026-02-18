@@ -5,7 +5,7 @@ from html import escape
 from pathlib import Path
 from datetime import datetime
 from config import Config
-from output_formatter import format_time
+from output_formatter import format_time, make_source_url
 
 
 # Confidence level configuration: label, CSS class, hex color
@@ -22,7 +22,7 @@ def _esc(text: str) -> str:
     return escape(str(text), quote=True)
 
 
-def _build_track_data(enriched_tracks: list, total_duration: float) -> list:
+def _build_track_data(enriched_tracks: list, total_duration: float, source_url: str = '') -> list:
     """Convert enriched tracks to a list of plain dicts for rendering."""
     rows = []
     for i, item in enumerate(enriched_tracks, 1):
@@ -34,20 +34,21 @@ def _build_track_data(enriched_tracks: list, total_duration: float) -> list:
         width_pct  = max(0.5, ((end_t - track.start_time) / total_duration * 100)) if total_duration else 0
 
         rows.append({
-            'position':    i,
-            'title':       track.title,
-            'artist':      track.artist,
-            'start_time':  track.start_time,
-            'end_time':    end_t,
-            'start_fmt':   format_time(track.start_time),
-            'confidence':  track.confidence,
-            'detections':  track.detection_count,
-            'density':     track.cluster_density,
-            'spotify_url': meta.get('spotify_url') or '',
-            'youtube_url': meta.get('youtube_url') or '',
-            'discogs_url': meta.get('discogs_url') or '',
-            'start_pct':   start_pct,
-            'width_pct':   width_pct,
+            'position':       i,
+            'title':          track.title,
+            'artist':         track.artist,
+            'start_time':     track.start_time,
+            'end_time':       end_t,
+            'start_fmt':      format_time(track.start_time),
+            'confidence':     track.confidence,
+            'detections':     track.detection_count,
+            'density':        track.cluster_density,
+            'spotify_url':    meta.get('spotify_url') or '',
+            'youtube_url':    meta.get('youtube_url') or '',
+            'discogs_url':    meta.get('discogs_url') or '',
+            'source_deep_link': make_source_url(source_url, track.start_time),
+            'start_pct':      start_pct,
+            'width_pct':      width_pct,
         })
     return rows
 
@@ -103,10 +104,21 @@ def _render_track_cards(tracks: list) -> str:
 
         density_pct = f"{t['density']:.0%}"
 
+        deep_link = t.get('source_deep_link') or ''
+        if deep_link:
+            time_cell = (
+                f'<a class="track-time track-time-link" '
+                f'href="{_esc(deep_link)}" target="_blank" rel="noopener" '
+                f'title="Open in YouTube at this timestamp">'
+                f'{_esc(t["start_fmt"])}</a>'
+            )
+        else:
+            time_cell = f'<div class="track-time">{_esc(t["start_fmt"])}</div>'
+
         cards.append(f'''
 <div class="track-card" data-conf="{_esc(conf)}" data-search="{artist_esc.lower()} {title_esc.lower()}">
   <div class="track-num">{t["position"]}</div>
-  <div class="track-time">{_esc(t["start_fmt"])}</div>
+  {time_cell}
   <div class="track-info">
     <div class="track-title-row">
       <span class="track-artist">{artist_esc}</span>
@@ -333,6 +345,16 @@ a { color: inherit; text-decoration: none; }
   white-space: nowrap;
 }
 
+.track-time-link {
+  color: #00e676;
+  text-decoration: none;
+  display: block;
+}
+.track-time-link:hover {
+  text-decoration: underline;
+  opacity: 0.8;
+}
+
 .track-info { min-width: 0; }
 
 .track-title-row {
@@ -546,7 +568,8 @@ class HtmlFormatter:
         output_path = self.output_dir / f"{filename}.html"
 
         total_duration = mix_info.get('duration', 0) or 1  # avoid div/0
-        tracks = _build_track_data(enriched_tracks, total_duration)
+        source_url = mix_info.get('url', '')
+        tracks = _build_track_data(enriched_tracks, total_duration, source_url=source_url)
 
         # Confidence counts
         from collections import Counter

@@ -4,6 +4,8 @@ import json
 from collections import Counter
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
+from urllib.parse import urlparse, parse_qs
 from config import Config
 from setlist_builder import CONFIDENCE_ICONS
 
@@ -13,6 +15,53 @@ def format_time(seconds: float) -> str:
     minutes = int(seconds // 60)
     secs = int(seconds % 60)
     return f"{minutes}:{secs:02d}"
+
+
+def make_source_url(source_url: str, timestamp_seconds: float) -> Optional[str]:
+    """Generate a platform deep-link to a specific timestamp.
+
+    Supports YouTube (youtube.com/watch and youtu.be short links).
+    Returns None for SoundCloud and other platforms — no reliable
+    timestamp anchor format exists for them.
+
+    Args:
+        source_url: The original mix URL stored in mix_info['url'].
+        timestamp_seconds: Seconds from the start of the video.
+                           Derived from segment_index * step, so it maps
+                           1-to-1 to video time with no additional offset.
+
+    Returns:
+        Deep-link URL string, or None if the platform isn't supported.
+    """
+    if not source_url:
+        return None
+
+    try:
+        parsed = urlparse(source_url)
+    except Exception:
+        return None
+
+    host = parsed.netloc.lower()
+    # Normalise: strip www. and m. prefixes
+    host = host.removeprefix('www.').removeprefix('m.')
+
+    t = int(timestamp_seconds)
+
+    if host == 'youtube.com':
+        params = parse_qs(parsed.query)
+        video_id = params.get('v', [None])[0]
+        if not video_id:
+            return None
+        return f"https://www.youtube.com/watch?v={video_id}&t={t}"
+
+    if host == 'youtu.be':
+        video_id = parsed.path.lstrip('/')
+        if not video_id:
+            return None
+        return f"https://www.youtube.com/watch?v={video_id}&t={t}"
+
+    # SoundCloud and everything else: not supported
+    return None
 
 
 class OutputFormatter:
@@ -52,6 +101,7 @@ class OutputFormatter:
         
         output_path = self.output_dir / f"{filename}.json"
         
+        source_url = mix_info.get('url', '')
         output_data = {
             'mix_info': mix_info,
             'tracks': [
@@ -66,6 +116,7 @@ class OutputFormatter:
                     'detection_count': item['track'].detection_count,
                     'cluster_density': item['track'].cluster_density,
                     'cluster_span': item['track'].cluster_span,
+                    'source_deep_link': make_source_url(source_url, item['track'].start_time),
                     'spotify_url': item['metadata']['spotify_url'],
                     'youtube_url': item['metadata']['youtube_url'],
                     'discogs_url': item['metadata']['discogs_url'],
@@ -97,13 +148,20 @@ class OutputFormatter:
         lines.append(f"\n---\n")
         lines.append(f"\n## Tracklist\n")
         
+        source_url = mix_info.get('url', '')
         for i, item in enumerate(enriched_tracks, 1):
             track = item['track']
             metadata = item['metadata']
-            
+
             icon = CONFIDENCE_ICONS.get(track.confidence, '⚪')
             lines.append(f"\n### {i}. {track.artist} - {track.title} {icon}")
-            lines.append(f"**Time:** {format_time(track.start_time)}")
+
+            time_str = format_time(track.start_time)
+            deep_link = make_source_url(source_url, track.start_time)
+            if deep_link:
+                lines.append(f"**Time:** [{time_str}]({deep_link})")
+            else:
+                lines.append(f"**Time:** {time_str}")
             lines.append(f"**Confidence:** {track.confidence} ({track.detection_count} detections, {track.cluster_density:.0%} density)")
             
             # Links
