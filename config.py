@@ -132,22 +132,6 @@ class Config:
         for path in dirs.values():
             path.mkdir(parents=True, exist_ok=True)
 
-    @classmethod
-    def artist_output_dir(cls, artist_name: str) -> Path:
-        """Get the output directory for an artist."""
-        return cls.OUTPUT_DIR / cls._sanitize_filename(artist_name)
-
-    @classmethod
-    def artist_checkpoint_dir(cls, artist_name: str) -> Path:
-        """Get the checkpoint directory for an artist."""
-        return cls.CHECKPOINT_DIR / cls._sanitize_filename(artist_name)
-
-    @classmethod
-    def ensure_artist_directories(cls, artist_name: str):
-        """Create artist-level output and checkpoint directories."""
-        cls.artist_output_dir(artist_name).mkdir(parents=True, exist_ok=True)
-        cls.artist_checkpoint_dir(artist_name).mkdir(parents=True, exist_ok=True)
-    
     @staticmethod
     def _sanitize_filename(name: str) -> str:
         """

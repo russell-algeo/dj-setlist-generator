@@ -148,6 +148,20 @@ class CheckpointManager:
 
         self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
 
+    @classmethod
+    def artist_checkpoint_dir(cls, artist_name: str) -> Path:
+        """Get the artist-level checkpoint directory, creating it if needed."""
+        d = Config.CHECKPOINT_DIR / Config._sanitize_filename(artist_name)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @classmethod
+    def artist_output_dir(cls, artist_name: str) -> Path:
+        """Get the artist-level output directory, creating it if needed."""
+        d = Config.OUTPUT_DIR / Config._sanitize_filename(artist_name)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     @staticmethod
     def cleanup_discovery_cache(cache_dir: Path):
         """Delete discovery cache file and empty directories.
