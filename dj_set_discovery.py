@@ -8,7 +8,6 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass, asdict
-from pathlib import Path
 from typing import Optional
 from config import Config
 
@@ -34,6 +33,93 @@ class DiscoveredSet:
             duration_minutes=data.get("duration_minutes"),
         )
 
+
+class DjSetDiscoverer:
+    """Discover DJ sets for an artist using yt-dlp search."""
+
+    def __init__(self, artist_manager):
+        self._artist_name = artist_manager.artist_name
+        self._cache_dir = artist_manager.checkpoint_dir
+
+    def discover(self) -> list[DiscoveredSet]:
+        """Discover DJ sets, print results, and return them.
+
+        Applies Config.MAX_SETS_PER_ARTIST limit internally.
+        Uses cached results in checkpoint_dir/discovery.json if present.
+        """
+        # Check for cached results
+        cache_file = self._cache_dir / "discovery.json"
+        if cache_file.exists():
+            print(f"  Found cached discovery results: {cache_file}")
+            with open(cache_file) as f:
+                cached = json.load(f)
+            print(f"  Loaded {len(cached['sets'])} previously discovered sets")
+            sets = [DiscoveredSet.from_dict(s) for s in cached["sets"]]
+            self._print_results(sets)
+            return sets
+
+        queries = _build_search_queries(self._artist_name)
+
+        print(f"  Searching YouTube & SoundCloud for DJ sets by '{self._artist_name}'...")
+        print(f"  Running {len(queries)} search queries...\n")
+
+        seen_ids: set[str] = set()
+        all_results: list[dict] = []
+
+        for i, query in enumerate(queries, 1):
+            print(f"  [{i}/{len(queries)}] {query}")
+            results = _search_yt_dlp(query)
+            for entry in results:
+                entry_id = entry.get("id", "")
+                if entry_id and entry_id not in seen_ids:
+                    seen_ids.add(entry_id)
+                    all_results.append(entry)
+            print(f"           → {len(results)} results ({len(all_results)} unique total)")
+
+        print(f"\n  Found {len(all_results)} unique results before filtering")
+
+        sets = _filter_and_map(all_results, self._artist_name)
+        print(f"  After filtering: {len(sets)} DJ sets")
+
+        if not sets:
+            print("  No DJ sets found matching criteria.")
+            return []
+
+        # Apply limit
+        if Config.MAX_SETS_PER_ARTIST > 0 and len(sets) > Config.MAX_SETS_PER_ARTIST:
+            print(f"  Limiting to {Config.MAX_SETS_PER_ARTIST} sets (found {len(sets)})")
+            sets = sets[:Config.MAX_SETS_PER_ARTIST]
+
+        # Cache results
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        with open(cache_file, "w") as f:
+            json.dump({"artist": self._artist_name, "sets": [asdict(s) for s in sets]}, f, indent=2)
+        print(f"  Cached discovery results to {cache_file}")
+
+        self._print_results(sets)
+        return sets
+
+    def _print_results(self, sets: list[DiscoveredSet]):
+        """Print a formatted summary of discovered sets."""
+        print(f"\n{'=' * 70}")
+        print(f"DISCOVERED DJ SETS FOR: {self._artist_name.upper()}")
+        print(f"{'=' * 70}")
+        print(f"Found {len(sets)} sets\n")
+
+        for i, s in enumerate(sets, 1):
+            platform_icon = "YT" if s.platform == "youtube" else "SC"
+            duration = f" ({s.duration_minutes}min)" if s.duration_minutes else ""
+            event = f" @ {s.event}" if s.event else ""
+            year = f" [{s.year}]" if s.year else ""
+            print(f"  {i:2d}. [{platform_icon}] {s.title}{event}{year}{duration}")
+            print(f"      {s.url}")
+
+        yt_count = sum(1 for s in sets if s.platform == "youtube")
+        sc_count = sum(1 for s in sets if s.platform == "soundcloud")
+        print(f"\n  YouTube: {yt_count} | SoundCloud: {sc_count}")
+        print()
+
+
 # Title keywords that indicate a result is NOT a DJ set
 _EXCLUDE_KEYWORDS = [
     "interview", "premiere", "panel", "review", "trailer", "reaction",
@@ -41,71 +127,6 @@ _EXCLUDE_KEYWORDS = [
     "behind the scenes", "unboxing", "podcast",
 ]
 
-
-def discover_dj_sets(artist_name: str, cache_dir: Path | None = None) -> list[DiscoveredSet]:
-    """Discover DJ sets for an artist using yt-dlp search.
-
-    Args:
-        artist_name: Name of the DJ/artist to search for.
-        cache_dir: Directory to cache discovery results. If discovery.json
-                   exists here, returns cached results.
-
-    Returns:
-        List of DiscoveredSet instances.
-    """
-    # Check for cached discovery results
-    if cache_dir:
-        cache_file = cache_dir / "discovery.json"
-        if cache_file.exists():
-            print(f"  Found cached discovery results: {cache_file}")
-            with open(cache_file) as f:
-                cached = json.load(f)
-            print(f"  Loaded {len(cached['sets'])} previously discovered sets")
-            return [DiscoveredSet.from_dict(s) for s in cached["sets"]]
-
-    queries = _build_search_queries(artist_name)
-
-    print(f"  Searching YouTube & SoundCloud for DJ sets by '{artist_name}'...")
-    print(f"  Running {len(queries)} search queries...\n")
-
-    # Run all searches and collect raw results
-    seen_ids: set[str] = set()
-    all_results: list[dict] = []
-
-    for i, query in enumerate(queries, 1):
-        print(f"  [{i}/{len(queries)}] {query}")
-        results = _search_yt_dlp(query)
-        for entry in results:
-            entry_id = entry.get("id", "")
-            if entry_id and entry_id not in seen_ids:
-                seen_ids.add(entry_id)
-                all_results.append(entry)
-        print(f"           → {len(results)} results ({len(all_results)} unique total)")
-
-    print(f"\n  Found {len(all_results)} unique results before filtering")
-
-    # Filter and map to output format
-    sets = _filter_and_map(all_results, artist_name)
-    print(f"  After filtering: {len(sets)} DJ sets")
-
-    if not sets:
-        print("  No DJ sets found matching criteria.")
-        return []
-
-    # Apply max sets limit
-    if Config.MAX_SETS_PER_ARTIST > 0 and len(sets) > Config.MAX_SETS_PER_ARTIST:
-        print(f"  Limiting to {Config.MAX_SETS_PER_ARTIST} sets (found {len(sets)})")
-        sets = sets[:Config.MAX_SETS_PER_ARTIST]
-
-    # Cache results
-    if cache_dir:
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_file = cache_dir / "discovery.json"
-        with open(cache_file, "w") as f:
-            json.dump({"artist": artist_name, "sets": [asdict(s) for s in sets]}, f, indent=2)
-        print(f"  Cached discovery results to {cache_file}")
-
-    return sets
 
 
 _YT_GENERIC_TERMS = ["DJ set", "live set", "mix"]
@@ -244,23 +265,3 @@ def _detect_platform(url: str) -> str:
         return "soundcloud"
     return "unknown"
 
-
-def print_discovery_results(sets: list[DiscoveredSet], artist_name: str):
-    """Print a formatted summary of discovered sets."""
-    print(f"\n{'=' * 70}")
-    print(f"DISCOVERED DJ SETS FOR: {artist_name.upper()}")
-    print(f"{'=' * 70}")
-    print(f"Found {len(sets)} sets\n")
-
-    for i, s in enumerate(sets, 1):
-        platform_icon = "YT" if s.platform == "youtube" else "SC"
-        duration = f" ({s.duration_minutes}min)" if s.duration_minutes else ""
-        event = f" @ {s.event}" if s.event else ""
-        year = f" [{s.year}]" if s.year else ""
-        print(f"  {i:2d}. [{platform_icon}] {s.title}{event}{year}{duration}")
-        print(f"      {s.url}")
-
-    yt_count = sum(1 for s in sets if s.platform == "youtube")
-    sc_count = sum(1 for s in sets if s.platform == "soundcloud")
-    print(f"\n  YouTube: {yt_count} | SoundCloud: {sc_count}")
-    print()
