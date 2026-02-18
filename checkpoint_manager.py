@@ -8,38 +8,17 @@ from datetime import datetime
 from config import Config
 from typing import Optional
 
-class ArtistManager:
-    """Manage artist-level directories and discovery cache."""
-
-    def __init__(self, artist_name: str):
-        self.artist_name = artist_name
-        safe_name = Config._sanitize_filename(artist_name)
-        self.checkpoint_dir = Config.CHECKPOINT_DIR / safe_name
-        self.output_dir = Config.OUTPUT_DIR / safe_name
-
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-    def cleanup_discovery_cache(self):
-        """Delete discovery cache file and empty directories."""
-        if not Config.CLEANUP_CHECKPOINTS:
-            print(f"  Kept discovery cache in: {self.checkpoint_dir}")
-            return
-
-        discovery_file = self.checkpoint_dir / "discovery.json"
-        if discovery_file.exists():
-            discovery_file.unlink()
-            print("  Cleaned up discovery cache")
-
-        CheckpointManager._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
-
-
 class CheckpointManager:
-    """Manage checkpoints for crash recovery with organized directory structure."""
-    
+    """Manage checkpoints for crash recovery with organized directory structure.
+
+    Two construction modes:
+        Mix mode:    ``CheckpointManager(url, mix_name, artist_name=...)``
+        Artist mode: ``CheckpointManager.for_artist(artist_name)``
+    """
+
     def __init__(self, url: str, mix_name: str, artist_name: str = None):
         """
-        Initialize checkpoint manager.
+        Initialize checkpoint manager for a single mix.
 
         Args:
             url: URL of the mix
@@ -49,6 +28,7 @@ class CheckpointManager:
         """
         self.url = url
         self.mix_name = mix_name
+        self.artist_name = artist_name
 
         # Create unique identifier for this mix based on URL
         self.mix_id = hashlib.md5(url.encode()).hexdigest()[:12]
@@ -61,10 +41,34 @@ class CheckpointManager:
 
         # Ensure directories exist
         Config.ensure_mix_directories(mix_name, artist_name=artist_name)
-        
+
         # File paths
         self.checkpoint_file = self.checkpoint_dir / f"checkpoint_{self.mix_id}.json"
         self.audio_file = self.assets_dir / f"mix_{self.mix_id}.mp3"
+
+    @classmethod
+    def for_artist(cls, artist_name: str) -> 'CheckpointManager':
+        """Create a CheckpointManager for artist-level directory management.
+
+        Artist mode only uses checkpoint_dir and output_dir (no mix-specific
+        attributes like audio_file or checkpoint_file).
+        """
+        instance = cls.__new__(cls)
+        instance.artist_name = artist_name
+        instance.url = None
+        instance.mix_name = None
+        instance.mix_id = None
+        instance.assets_dir = None
+        instance.checkpoint_file = None
+        instance.audio_file = None
+
+        safe_name = Config._sanitize_filename(artist_name)
+        instance.checkpoint_dir = Config.CHECKPOINT_DIR / safe_name
+        instance.output_dir = Config.OUTPUT_DIR / safe_name
+
+        instance.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        instance.output_dir.mkdir(parents=True, exist_ok=True)
+        return instance
     
     def save_checkpoint(self, stage: str, data: dict):
         """
@@ -171,6 +175,19 @@ class CheckpointManager:
         if self.checkpoint_file.exists():
             self.checkpoint_file.unlink()
             print("🗑️  Checkpoint cleared")
+
+        self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
+
+    def cleanup_discovery_cache(self):
+        """Delete discovery cache file and empty directories."""
+        if not Config.CLEANUP_CHECKPOINTS:
+            print(f"  Kept discovery cache in: {self.checkpoint_dir}")
+            return
+
+        discovery_file = self.checkpoint_dir / "discovery.json"
+        if discovery_file.exists():
+            discovery_file.unlink()
+            print("  Cleaned up discovery cache")
 
         self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
 

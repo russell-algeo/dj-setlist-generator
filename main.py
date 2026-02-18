@@ -10,7 +10,7 @@ from track_recognizer import TrackRecognizer, Recognition
 from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
-from checkpoint_manager import ArtistManager, CheckpointManager
+from checkpoint_manager import CheckpointManager
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
@@ -248,7 +248,7 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ Artist: {artist_name}")
     print("█" * 70 + "\n")
 
-    artist_mgr = ArtistManager(artist_name)
+    artist_mgr = CheckpointManager.for_artist(artist_name)
 
     # Step 1: Discover sets (cached in checkpoints dir)
     print("[Discovery] Searching for DJ sets...\n")
