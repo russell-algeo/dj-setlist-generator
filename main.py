@@ -10,7 +10,7 @@ from track_recognizer import TrackRecognizer, Recognition
 from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
-from checkpoint_manager import CheckpointManager
+from checkpoint_manager import ArtistManager, CheckpointManager
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
@@ -248,9 +248,11 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ Artist: {artist_name}")
     print("█" * 70 + "\n")
 
+    artist_mgr = ArtistManager(artist_name)
+
     # Step 1: Discover sets (cached in checkpoints dir)
     print("[Discovery] Searching for DJ sets...\n")
-    sets = discover_dj_sets(artist_name, cache_dir=CheckpointManager.artist_checkpoint_dir(artist_name))
+    sets = discover_dj_sets(artist_name, cache_dir=artist_mgr.checkpoint_dir)
 
     if not sets:
         print(f"\nNo DJ sets found for '{artist_name}'.")
@@ -275,10 +277,10 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ GENERATING ARTIST SUMMARY")
     print("█" * 70 + "\n")
 
-    generate_artist_summary(artist_name, CheckpointManager.artist_output_dir(artist_name), results)
+    generate_artist_summary(artist_name, artist_mgr.output_dir, results)
 
     # Clean up discovery cache
-    CheckpointManager.cleanup_discovery_cache(CheckpointManager.artist_checkpoint_dir(artist_name))
+    artist_mgr.cleanup_discovery_cache()
 
     # Print final batch summary
     print("\n" + "=" * 70)
@@ -296,8 +298,8 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
             print(f"     {r['status']}")
 
     print(f"\nResults: {success_count} successful, {fail_count} failed out of {len(results)} sets")
-    print(f"Output directory: {CheckpointManager.artist_output_dir(artist_name)}")
-    print(f"Artist summary: {CheckpointManager.artist_output_dir(artist_name) / 'artist_summary.md'}")
+    print(f"Output directory: {artist_mgr.output_dir}")
+    print(f"Artist summary: {artist_mgr.output_dir / 'artist_summary.md'}")
 
     # Send artist completion notification
     Notifier.notify_artist_complete(artist_name, success_count, len(results))

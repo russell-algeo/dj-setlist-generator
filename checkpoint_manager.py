@@ -8,6 +8,32 @@ from datetime import datetime
 from config import Config
 from typing import Optional
 
+class ArtistManager:
+    """Manage artist-level directories and discovery cache."""
+
+    def __init__(self, artist_name: str):
+        self.artist_name = artist_name
+        safe_name = Config._sanitize_filename(artist_name)
+        self.checkpoint_dir = Config.CHECKPOINT_DIR / safe_name
+        self.output_dir = Config.OUTPUT_DIR / safe_name
+
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def cleanup_discovery_cache(self):
+        """Delete discovery cache file and empty directories."""
+        if not Config.CLEANUP_CHECKPOINTS:
+            print(f"  Kept discovery cache in: {self.checkpoint_dir}")
+            return
+
+        discovery_file = self.checkpoint_dir / "discovery.json"
+        if discovery_file.exists():
+            discovery_file.unlink()
+            print("  Cleaned up discovery cache")
+
+        CheckpointManager._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
+
+
 class CheckpointManager:
     """Manage checkpoints for crash recovery with organized directory structure."""
     
@@ -147,37 +173,6 @@ class CheckpointManager:
             print("🗑️  Checkpoint cleared")
 
         self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
-
-    @classmethod
-    def artist_checkpoint_dir(cls, artist_name: str) -> Path:
-        """Get the artist-level checkpoint directory, creating it if needed."""
-        d = Config.CHECKPOINT_DIR / Config._sanitize_filename(artist_name)
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    @classmethod
-    def artist_output_dir(cls, artist_name: str) -> Path:
-        """Get the artist-level output directory, creating it if needed."""
-        d = Config.OUTPUT_DIR / Config._sanitize_filename(artist_name)
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    @staticmethod
-    def cleanup_discovery_cache(cache_dir: Path):
-        """Delete discovery cache file and empty directories.
-
-        Controlled by Config.CLEANUP_CHECKPOINTS.
-        """
-        if not Config.CLEANUP_CHECKPOINTS:
-            print(f"  Kept discovery cache in: {cache_dir}")
-            return
-
-        discovery_file = cache_dir / "discovery.json"
-        if discovery_file.exists():
-            discovery_file.unlink()
-            print("  Cleaned up discovery cache")
-
-        CheckpointManager._remove_empty_parents(cache_dir, Config.CHECKPOINT_DIR)
 
     @staticmethod
     def _remove_empty_parents(directory: Path, stop_at: Path):
