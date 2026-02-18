@@ -231,16 +231,15 @@ async def process_urls(urls: list[str], resume: bool, artist_name: str = None):
     return results
 
 
-async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
+async def process_artist(artist_name: str, resume: bool):
     """Discover and process all DJ sets for an artist.
 
     Args:
         artist_name: Name of the DJ/artist.
         resume: Whether to resume from checkpoints.
-        max_sets: Max number of sets to process (0 = no limit).
     """
-    from dj_set_discovery import discover_dj_sets, print_discovery_results
-    from artist_summary import generate_artist_summary
+    from dj_set_discovery import DjSetDiscoverer
+    from artist_summary import ArtistSummarizer
 
     print("█" * 70)
     print(f"█ DJ SET DISCOVERY MODE")
@@ -250,23 +249,16 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
 
     artist_mgr = ArtistManager(artist_name)
 
-    # Step 1: Discover sets (cached in checkpoints dir)
+    # Step 1: Discover sets (cached in checkpoints dir, limited by Config.MAX_SETS_PER_ARTIST)
     print("[Discovery] Searching for DJ sets...\n")
-    sets = discover_dj_sets(artist_name, cache_dir=artist_mgr.checkpoint_dir)
+    discoverer = DjSetDiscoverer(artist_manager=artist_mgr)
+    sets = discoverer.discover()
 
     if not sets:
         print(f"\nNo DJ sets found for '{artist_name}'.")
         print("Try using a direct URL instead:")
         print(f'  python main.py "https://www.youtube.com/watch?v=xxxxx"')
         return
-
-    # Apply max_sets override (CLI flag takes precedence over config)
-    effective_max = max_sets or Config.MAX_SETS_PER_ARTIST
-    if effective_max > 0 and len(sets) > effective_max:
-        print(f"\nLimiting to {effective_max} of {len(sets)} discovered sets")
-        sets = sets[:effective_max]
-
-    print_discovery_results(sets, artist_name)
 
     # Step 2: Process each discovered set
     urls = [s.url for s in sets]
@@ -277,7 +269,8 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ GENERATING ARTIST SUMMARY")
     print("█" * 70 + "\n")
 
-    generate_artist_summary(artist_name, artist_mgr.output_dir, results)
+    summarizer = ArtistSummarizer(artist_manager=artist_mgr)
+    summarizer.generate(results)
 
     # Clean up discovery cache
     artist_mgr.cleanup_discovery_cache()
@@ -314,12 +307,11 @@ async def main():
         print("")
         print("Options:")
         print("  --no-resume       Ignore checkpoints, start fresh")
-        print("  --max-sets N      Limit number of sets to process per artist")
+        print("  (Set MAX_SETS_PER_ARTIST=N in .env to limit sets per artist)")
         print("")
         print("Examples:")
         print("  python main.py \"Dyed Soundorom\"")
         print("  python main.py \"Adam Rose\" \"Spirit Catcher\"")
-        print("  python main.py \"Peggy Gou\" --max-sets 5")
         print("  python main.py https://www.youtube.com/watch?v=xxxxx")
         print("  python main.py url1 url2 url3 --no-resume")
         sys.exit(1)
@@ -328,7 +320,6 @@ async def main():
     urls = []
     artists = []
     resume = True
-    max_sets = 0
 
     args = sys.argv[1:]
     i = 0
@@ -336,17 +327,6 @@ async def main():
         arg = args[i]
         if arg == '--no-resume':
             resume = False
-        elif arg == '--max-sets':
-            if i + 1 < len(args):
-                try:
-                    max_sets = int(args[i + 1])
-                    i += 1
-                except ValueError:
-                    print(f"Error: --max-sets requires a number, got '{args[i + 1]}'")
-                    sys.exit(1)
-            else:
-                print("Error: --max-sets requires a number argument")
-                sys.exit(1)
         elif _is_url(arg):
             urls.append(arg)
         else:
@@ -389,7 +369,7 @@ async def main():
                 print("\n" + "▓" * 70)
                 print(f"▓ ARTIST {artist_idx}/{len(artists)}: {artist_name.upper()}")
                 print("▓" * 70 + "\n")
-            await process_artist(artist_name, resume=resume, max_sets=max_sets)
+            await process_artist(artist_name, resume=resume)
 
     else:
         print("Error: No URLs or artist name provided")
