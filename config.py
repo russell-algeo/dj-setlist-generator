@@ -133,35 +133,20 @@ class Config:
             path.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def get_artist_directories(cls, artist_name: str) -> dict:
-        """Get artist-level directory paths.
-
-        Args:
-            artist_name: Name of the DJ/artist.
-
-        Returns:
-            Dictionary with paths for output and checkpoints.
-        """
-        safe_artist = cls._sanitize_filename(artist_name)
-        return {
-            'output': cls.OUTPUT_DIR / safe_artist,
-            'checkpoints': cls.CHECKPOINT_DIR / safe_artist,
-        }
+    def artist_output_dir(cls, artist_name: str) -> Path:
+        """Get the output directory for an artist."""
+        return cls.OUTPUT_DIR / cls._sanitize_filename(artist_name)
 
     @classmethod
-    def ensure_artist_directories(cls, artist_name: str) -> dict:
-        """Create artist-level directories and return their paths.
+    def artist_checkpoint_dir(cls, artist_name: str) -> Path:
+        """Get the checkpoint directory for an artist."""
+        return cls.CHECKPOINT_DIR / cls._sanitize_filename(artist_name)
 
-        Args:
-            artist_name: Name of the DJ/artist.
-
-        Returns:
-            Dictionary with paths for output and checkpoints.
-        """
-        dirs = cls.get_artist_directories(artist_name)
-        for path in dirs.values():
-            path.mkdir(parents=True, exist_ok=True)
-        return dirs
+    @classmethod
+    def ensure_artist_directories(cls, artist_name: str):
+        """Create artist-level output and checkpoint directories."""
+        cls.artist_output_dir(artist_name).mkdir(parents=True, exist_ok=True)
+        cls.artist_checkpoint_dir(artist_name).mkdir(parents=True, exist_ok=True)
     
     @staticmethod
     def _sanitize_filename(name: str) -> str:

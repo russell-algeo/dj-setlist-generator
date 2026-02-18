@@ -249,13 +249,11 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print("█" * 70 + "\n")
 
     # Artist-level directories
-    artist_dirs = Config.ensure_artist_directories(artist_name)
-    artist_output_dir = artist_dirs['output']
-    artist_checkpoint_dir = artist_dirs['checkpoints']
+    Config.ensure_artist_directories(artist_name)
 
     # Step 1: Discover sets (cached in checkpoints dir)
     print("[Discovery] Searching for DJ sets...\n")
-    sets = discover_dj_sets(artist_name, cache_dir=artist_checkpoint_dir)
+    sets = discover_dj_sets(artist_name, cache_dir=Config.artist_checkpoint_dir(artist_name))
 
     if not sets:
         print(f"\nNo DJ sets found for '{artist_name}'.")
@@ -280,10 +278,10 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ GENERATING ARTIST SUMMARY")
     print("█" * 70 + "\n")
 
-    generate_artist_summary(artist_name, artist_output_dir, results)
+    generate_artist_summary(artist_name, Config.artist_output_dir(artist_name), results)
 
     # Clean up discovery cache
-    CheckpointManager.cleanup_discovery_cache(artist_checkpoint_dir)
+    CheckpointManager.cleanup_discovery_cache(Config.artist_checkpoint_dir(artist_name))
 
     # Print final batch summary
     print("\n" + "=" * 70)
@@ -301,8 +299,8 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
             print(f"     {r['status']}")
 
     print(f"\nResults: {success_count} successful, {fail_count} failed out of {len(results)} sets")
-    print(f"Output directory: {artist_output_dir}")
-    print(f"Artist summary: {artist_output_dir / 'artist_summary.md'}")
+    print(f"Output directory: {Config.artist_output_dir(artist_name)}")
+    print(f"Artist summary: {Config.artist_output_dir(artist_name) / 'artist_summary.md'}")
 
     # Send artist completion notification
     Notifier.notify_artist_complete(artist_name, success_count, len(results))

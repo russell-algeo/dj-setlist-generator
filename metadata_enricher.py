@@ -30,7 +30,6 @@ class MetadataEnricher:
         self.spotify_enabled = Config.ENABLE_SPOTIFY
         self.youtube_enabled = Config.ENABLE_YOUTUBE
         self.discogs_enabled = Config.ENABLE_DISCOGS
-        self.discogs_token = Config.DISCOGS_TOKEN
 
         # Initialize Spotify client if enabled
         self.spotify = None
@@ -186,14 +185,14 @@ class MetadataEnricher:
     @_platform_search("Discogs")
     def _search_discogs(self, title: str, artist: str) -> Optional[str]:
         """Search Discogs for track."""
-        if not self.discogs_token:
+        if not Config.DISCOGS_TOKEN:
             return None
 
         query = f"{artist} {title}"
         url = "https://api.discogs.com/database/search"
 
         headers = {
-            'Authorization': f'Discogs token={self.discogs_token}'
+            'Authorization': f'Discogs token={Config.DISCOGS_TOKEN}'
         }
 
         params = {

@@ -43,14 +43,6 @@ class Track:
 class SetlistBuilder:
     """Build deduplicated setlist from recognitions."""
 
-    def __init__(self):
-        """Initialize builder with config values."""
-        self.min_cluster_size = Config.MIN_CLUSTER_SIZE
-        self.min_cluster_density = Config.MIN_CLUSTER_DENSITY
-        self.overlap_resolution_enabled = Config.OVERLAP_RESOLUTION_ENABLED
-        self.overlap_threshold = Config.OVERLAP_THRESHOLD
-        self.min_unknown_gap_size = Config.MIN_UNKNOWN_GAP_SIZE
-        
     def build_setlist(self, recognitions: list) -> list[Track]:
         """Build setlist from recognition results."""
         valid_recognitions = [r for r in recognitions if r.recognized]
@@ -64,7 +56,7 @@ class SetlistBuilder:
 
         # Step 2: Resolve temporal overlaps (competing tracks at same time)
         # Do this BEFORE filtering to choose dominant track among competitors
-        if self.overlap_resolution_enabled:
+        if Config.OVERLAP_RESOLUTION_ENABLED:
             clusters = self._resolve_overlapping_clusters(clusters)
 
         # Log cluster details for diagnostics
@@ -114,10 +106,10 @@ class SetlistBuilder:
             cluster = self._make_cluster_dict(track_id, recs)
             density = cluster['density']
 
-            if len(recs) < self.min_cluster_size:
-                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {self.min_cluster_size} min)")
-            elif density < self.min_cluster_density:
-                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {self.min_cluster_density} min)")
+            if len(recs) < Config.MIN_CLUSTER_SIZE:
+                print(f"✗ Skipped: {artist} - {title} ({len(recs)} detections < {Config.MIN_CLUSTER_SIZE} min)")
+            elif density < Config.MIN_CLUSTER_DENSITY:
+                print(f"✗ Skipped: {artist} - {title} (density {density:.2f} < {Config.MIN_CLUSTER_DENSITY} min)")
             else:
                 clusters.append(cluster)
                 print(f"✓ Clustered: {artist} - {title} ({len(recs)} detections, density {density:.2f})")
@@ -234,7 +226,7 @@ class SetlistBuilder:
         span1 = end1 - start1
         span2 = end2 - start2
 
-        return overlap >= min(span1, span2) * self.overlap_threshold
+        return overlap >= min(span1, span2) * Config.OVERLAP_THRESHOLD
 
     def _log_clusters(self, clusters: list[dict]):
         """Log diagnostic details for each cluster."""
@@ -313,11 +305,11 @@ class SetlistBuilder:
             if not current_gap or seg_idx - current_gap[-1] <= 2:
                 current_gap.append(seg_idx)
             else:
-                if len(current_gap) >= self.min_unknown_gap_size:
+                if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
                     unknown_gaps.append(current_gap)
                 current_gap = [seg_idx]
         
-        if len(current_gap) >= self.min_unknown_gap_size:
+        if len(current_gap) >= Config.MIN_UNKNOWN_GAP_SIZE:
             unknown_gaps.append(current_gap)
         
         # Create Unknown Track entries

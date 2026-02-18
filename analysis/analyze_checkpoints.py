@@ -4,14 +4,8 @@ Analyze checkpoint data and simulate simplified clustering algorithm.
 """
 
 import json
-import sys
 from collections import defaultdict
-from pathlib import Path
 from typing import Dict, List, Tuple, Set
-
-# Allow importing from project root
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from output_formatter import format_time as _format_seconds
 
 def load_checkpoint(filepath: str) -> dict:
     """Load checkpoint JSON file."""
@@ -235,7 +229,10 @@ def analyze_checkpoint(filepath: str, mix_name: str) -> dict:
 
 def format_time(segment_index: int) -> str:
     """Format segment index as time string (assumes 15s step size)."""
-    return _format_seconds(segment_index * 15)
+    seconds = segment_index * 15
+    minutes = seconds // 60
+    secs = seconds % 60
+    return f"{minutes}:{secs:02d}"
 
 def generate_markdown_report(yoyaku_analysis: dict, masda_analysis: dict,
                             yoyaku_reference: List[str], masda_reference: List[str]) -> str:
