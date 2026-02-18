@@ -10,7 +10,7 @@ from track_recognizer import TrackRecognizer, Recognition
 from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
-from checkpoint_manager import ArtistManager, CheckpointManager
+from checkpoint_manager import ArtistManager, CheckpointManager, sanitize_filename
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
@@ -152,7 +152,7 @@ class SetlistGenerator:
             enriched_tracks = self.enricher.enrich_all_tracks(tracks)
 
             # Save outputs (use custom name or mix name)
-            final_output_name = output_name or Config._sanitize_filename(mix_name)
+            final_output_name = output_name or sanitize_filename(mix_name)
             json_file = formatter.save_json(enriched_tracks, mix_info, final_output_name)
             md_file = formatter.save_markdown(enriched_tracks, mix_info, final_output_name)
 

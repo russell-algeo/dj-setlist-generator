@@ -9,12 +9,25 @@ from config import Config
 from typing import Optional
 
 
+def sanitize_filename(name: str) -> str:
+    """Sanitize a string to be safe for use as a filename/directory name."""
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        name = name.replace(char, '_')
+    name = name.strip('. ')
+    if len(name) > 200:
+        name = name[:200]
+    if not name:
+        name = 'untitled_mix'
+    return name
+
+
 class ArtistManager:
     """Manage artist-level directories and discovery cache."""
 
     def __init__(self, artist_name: str):
         self.artist_name = artist_name
-        safe_name = Config._sanitize_filename(artist_name)
+        safe_name = sanitize_filename(artist_name)
         self.checkpoint_dir = Config.CHECKPOINT_DIR / safe_name
         self.output_dir = Config.OUTPUT_DIR / safe_name
 
@@ -55,14 +68,24 @@ class CheckpointManager:
         # Create unique identifier for this mix based on URL
         self.mix_id = hashlib.md5(url.encode()).hexdigest()[:12]
 
-        # Get organized directory structure
-        dirs = Config.get_mix_directories(mix_name, artist_name=artist_name)
-        self.assets_dir = dirs['assets']
-        self.checkpoint_dir = dirs['checkpoints']
-        self.output_dir = dirs['output']
+        # Build organized directory structure
+        safe_mix = sanitize_filename(mix_name)
+        assets_base = Config.ASSETS_DIR
+        checkpoint_base = Config.CHECKPOINT_DIR
+        output_base = Config.OUTPUT_DIR
+        if artist_name:
+            safe_artist = sanitize_filename(artist_name)
+            assets_base = assets_base / safe_artist
+            checkpoint_base = checkpoint_base / safe_artist
+            output_base = output_base / safe_artist
+
+        self.assets_dir = assets_base / safe_mix
+        self.checkpoint_dir = checkpoint_base / safe_mix
+        self.output_dir = output_base / safe_mix
 
         # Ensure directories exist
-        Config.ensure_mix_directories(mix_name, artist_name=artist_name)
+        for d in (self.assets_dir, self.checkpoint_dir, self.output_dir):
+            d.mkdir(parents=True, exist_ok=True)
 
         # File paths
         self.checkpoint_file = self.checkpoint_dir / f"checkpoint_{self.mix_id}.json"
