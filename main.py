@@ -10,7 +10,7 @@ from track_recognizer import TrackRecognizer, Recognition
 from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
-from checkpoint_manager import CheckpointManager
+from checkpoint_manager import ArtistManager, CheckpointManager, sanitize_filename
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
@@ -152,7 +152,7 @@ class SetlistGenerator:
             enriched_tracks = self.enricher.enrich_all_tracks(tracks)
 
             # Save outputs (use custom name or mix name)
-            final_output_name = output_name or Config._sanitize_filename(mix_name)
+            final_output_name = output_name or sanitize_filename(mix_name)
             json_file = formatter.save_json(enriched_tracks, mix_info, final_output_name)
             md_file = formatter.save_markdown(enriched_tracks, mix_info, final_output_name)
 
@@ -248,16 +248,11 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ Artist: {artist_name}")
     print("█" * 70 + "\n")
 
-    # Artist-level directories
-    safe_artist_name = Config._sanitize_filename(artist_name)
-    artist_output_dir = Config.OUTPUT_DIR / safe_artist_name
-    artist_output_dir.mkdir(parents=True, exist_ok=True)
-    artist_checkpoint_dir = Config.CHECKPOINT_DIR / safe_artist_name
-    artist_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    artist_mgr = ArtistManager(artist_name)
 
     # Step 1: Discover sets (cached in checkpoints dir)
     print("[Discovery] Searching for DJ sets...\n")
-    sets = discover_dj_sets(artist_name, cache_dir=artist_checkpoint_dir)
+    sets = discover_dj_sets(artist_name, cache_dir=artist_mgr.checkpoint_dir)
 
     if not sets:
         print(f"\nNo DJ sets found for '{artist_name}'.")
@@ -274,7 +269,7 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print_discovery_results(sets, artist_name)
 
     # Step 2: Process each discovered set
-    urls = [s["url"] for s in sets]
+    urls = [s.url for s in sets]
     results = await process_urls(urls, resume=resume, artist_name=artist_name)
 
     # Step 3: Generate artist summary
@@ -282,10 +277,10 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
     print(f"█ GENERATING ARTIST SUMMARY")
     print("█" * 70 + "\n")
 
-    generate_artist_summary(artist_name, artist_output_dir, results)
+    generate_artist_summary(artist_name, artist_mgr.output_dir, results)
 
     # Clean up discovery cache
-    CheckpointManager.cleanup_discovery_cache(artist_checkpoint_dir)
+    artist_mgr.cleanup_discovery_cache()
 
     # Print final batch summary
     print("\n" + "=" * 70)
@@ -303,8 +298,8 @@ async def process_artist(artist_name: str, resume: bool, max_sets: int = 0):
             print(f"     {r['status']}")
 
     print(f"\nResults: {success_count} successful, {fail_count} failed out of {len(results)} sets")
-    print(f"Output directory: {artist_output_dir}")
-    print(f"Artist summary: {artist_output_dir / 'artist_summary.md'}")
+    print(f"Output directory: {artist_mgr.output_dir}")
+    print(f"Artist summary: {artist_mgr.output_dir / 'artist_summary.md'}")
 
     # Send artist completion notification
     Notifier.notify_artist_complete(artist_name, success_count, len(results))

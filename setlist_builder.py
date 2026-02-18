@@ -12,6 +12,20 @@ CONFIDENCE_ICONS = {
     'UNCERTAIN': '⚪',
 }
 
+TRACK_ID_SEPARATOR = '|'
+
+
+def make_track_id(artist: str, title: str, shazam_id: str) -> str:
+    """Build a track_id string from its components."""
+    return f"{artist}{TRACK_ID_SEPARATOR}{title}{TRACK_ID_SEPARATOR}{shazam_id}"
+
+
+def parse_track_id(track_id: str) -> tuple[str, str, str]:
+    """Parse a track_id string into (artist, title, shazam_id)."""
+    parts = track_id.split(TRACK_ID_SEPARATOR)
+    return parts[0], parts[1], parts[2]
+
+
 @dataclass
 class Track:
     """Represents a track in the setlist."""
@@ -28,11 +42,7 @@ class Track:
 
 class SetlistBuilder:
     """Build deduplicated setlist from recognitions."""
-    
-    def __init__(self, min_confidence_threshold: int = None):
-        """Initialize builder."""
-        self.min_confidence = min_confidence_threshold or Config.MIN_CONFIDENCE_THRESHOLD
-        
+
     def build_setlist(self, recognitions: list) -> list[Track]:
         """Build setlist from recognition results."""
         valid_recognitions = [r for r in recognitions if r.recognized]
@@ -83,14 +93,14 @@ class SetlistBuilder:
         # Group by track ID - collect ALL detections for each track
         track_sequences = defaultdict(list)
         for rec in sorted_recs:
-            track_id = f"{rec.artist}|{rec.track_title}|{rec.shazam_track_id}"
+            track_id = make_track_id(rec.artist, rec.track_title, rec.shazam_track_id)
             track_sequences[track_id].append(rec)
 
         clusters = []
 
         # Create one cluster per track_id (all detections grouped together)
         for track_id, recs in track_sequences.items():
-            artist, title = track_id.split('|')[0:2]
+            artist, title, _ = parse_track_id(track_id)
 
             # Only create cluster if we have minimum detections and density
             cluster = self._make_cluster_dict(track_id, recs)
@@ -171,7 +181,7 @@ class SetlistBuilder:
                     return c['detection_count'] * 10.0 + c['density'] * 20.0
 
                 for c in overlapping:
-                    artist, title = c['track_id'].split('|')[0:2]
+                    artist, title, _ = parse_track_id(c['track_id'])
                     score = calc_score(c)
                     print(f"  📊 {artist} - {title}")
                     print(f"     └─ {c['detection_count']} detections, span {c['span']}, density {c['density']:.2f}")
@@ -180,12 +190,12 @@ class SetlistBuilder:
                 # Choose track with highest score
                 winner = max(overlapping, key=calc_score)
 
-                winner_artist, winner_title = winner['track_id'].split('|')[0:2]
+                winner_artist, winner_title, _ = parse_track_id(winner['track_id'])
                 print(f"  ✅ KEEPING: {winner_artist} - {winner_title}")
 
                 for c in overlapping:
                     if c != winner:
-                        loser_artist, loser_title = c['track_id'].split('|')[0:2]
+                        loser_artist, loser_title, _ = parse_track_id(c['track_id'])
                         print(f"  ❌ REMOVING: {loser_artist} - {loser_title}")
 
                 resolved.append(winner)
@@ -228,7 +238,7 @@ class SetlistBuilder:
         print(f"{'='*70}")
 
         for cluster in clusters:
-            artist, title = cluster['track_id'].split('|')[0:2]
+            artist, title, _ = parse_track_id(cluster['track_id'])
             count = cluster['detection_count']
             density = cluster['density']
             span = cluster['span']
@@ -239,7 +249,7 @@ class SetlistBuilder:
         """Convert cluster to Track object."""
         first = cluster['recognitions'][0]
         last = cluster['recognitions'][-1]
-        artist, title, shazam_id = cluster['track_id'].split('|')
+        artist, title, shazam_id = parse_track_id(cluster['track_id'])
         
         return Track(
             title=title,

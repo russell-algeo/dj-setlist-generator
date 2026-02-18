@@ -8,12 +8,52 @@ from datetime import datetime
 from config import Config
 from typing import Optional
 
+
+def sanitize_filename(name: str) -> str:
+    """Sanitize a string to be safe for use as a filename/directory name."""
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        name = name.replace(char, '_')
+    name = name.strip('. ')
+    if len(name) > 200:
+        name = name[:200]
+    if not name:
+        name = 'untitled_mix'
+    return name
+
+
+class ArtistManager:
+    """Manage artist-level directories and discovery cache."""
+
+    def __init__(self, artist_name: str):
+        self.artist_name = artist_name
+        safe_name = sanitize_filename(artist_name)
+        self.checkpoint_dir = Config.CHECKPOINT_DIR / safe_name
+        self.output_dir = Config.OUTPUT_DIR / safe_name
+
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def cleanup_discovery_cache(self):
+        """Delete discovery cache file and empty directories."""
+        if not Config.CLEANUP_CHECKPOINTS:
+            print(f"  Kept discovery cache in: {self.checkpoint_dir}")
+            return
+
+        discovery_file = self.checkpoint_dir / "discovery.json"
+        if discovery_file.exists():
+            discovery_file.unlink()
+            print("  Cleaned up discovery cache")
+
+        CheckpointManager._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
+
+
 class CheckpointManager:
     """Manage checkpoints for crash recovery with organized directory structure."""
-    
+
     def __init__(self, url: str, mix_name: str, artist_name: str = None):
         """
-        Initialize checkpoint manager.
+        Initialize checkpoint manager for a single mix.
 
         Args:
             url: URL of the mix
@@ -23,34 +63,45 @@ class CheckpointManager:
         """
         self.url = url
         self.mix_name = mix_name
+        self.artist_name = artist_name
 
         # Create unique identifier for this mix based on URL
         self.mix_id = hashlib.md5(url.encode()).hexdigest()[:12]
 
-        # Get organized directory structure
-        dirs = Config.get_mix_directories(mix_name, artist_name=artist_name)
-        self.assets_dir = dirs['assets']
-        self.checkpoint_dir = dirs['checkpoints']
-        self.output_dir = dirs['output']
+        # Build organized directory structure
+        safe_mix = sanitize_filename(mix_name)
+        assets_base = Config.ASSETS_DIR
+        checkpoint_base = Config.CHECKPOINT_DIR
+        output_base = Config.OUTPUT_DIR
+        if artist_name:
+            safe_artist = sanitize_filename(artist_name)
+            assets_base = assets_base / safe_artist
+            checkpoint_base = checkpoint_base / safe_artist
+            output_base = output_base / safe_artist
+
+        self.assets_dir = assets_base / safe_mix
+        self.checkpoint_dir = checkpoint_base / safe_mix
+        self.output_dir = output_base / safe_mix
 
         # Ensure directories exist
-        Config.ensure_mix_directories(mix_name, artist_name=artist_name)
-        
+        for d in (self.assets_dir, self.checkpoint_dir, self.output_dir):
+            d.mkdir(parents=True, exist_ok=True)
+
         # File paths
         self.checkpoint_file = self.checkpoint_dir / f"checkpoint_{self.mix_id}.json"
         self.audio_file = self.assets_dir / f"mix_{self.mix_id}.mp3"
-    
+
     def save_checkpoint(self, stage: str, data: dict):
         """
         Save checkpoint data.
-        
+
         Args:
             stage: Current stage (e.g., 'downloaded', 'segmented', 'recognized')
             data: Data to save
         """
         if not Config.ENABLE_CHECKPOINTS:
             return
-        
+
         checkpoint = {
             'mix_id': self.mix_id,
             'mix_name': self.mix_name,
@@ -59,10 +110,10 @@ class CheckpointManager:
             'timestamp': datetime.now().isoformat(),
             'data': data
         }
-        
+
         with open(self.checkpoint_file, 'w') as f:
             json.dump(checkpoint, f, indent=2)
-        
+
         print(f"💾 Checkpoint saved: {stage}")
 
     def save_recognition_checkpoint(self, recognitions: list, stage: str):
@@ -86,29 +137,29 @@ class CheckpointManager:
     def load_checkpoint(self) -> Optional[dict]:
         """
         Load existing checkpoint if it exists.
-        
+
         Returns:
             Checkpoint data or None
         """
         if not Config.ENABLE_CHECKPOINTS:
             return None
-        
+
         if not self.checkpoint_file.exists():
             return None
-        
+
         try:
             with open(self.checkpoint_file, 'r') as f:
                 checkpoint = json.load(f)
-            
+
             print(f"📂 Found checkpoint from {checkpoint['timestamp']}")
             print(f"   Mix: {checkpoint.get('mix_name', 'Unknown')}")
             print(f"   Stage: {checkpoint['stage']}")
             return checkpoint
-        
+
         except Exception as e:
             print(f"⚠️  Could not load checkpoint: {e}")
             return None
-    
+
     def cleanup_assets(self):
         """Delete temporary audio/segment files and empty directories.
 
@@ -147,23 +198,6 @@ class CheckpointManager:
             print("🗑️  Checkpoint cleared")
 
         self._remove_empty_parents(self.checkpoint_dir, Config.CHECKPOINT_DIR)
-
-    @staticmethod
-    def cleanup_discovery_cache(cache_dir: Path):
-        """Delete discovery cache file and empty directories.
-
-        Controlled by Config.CLEANUP_CHECKPOINTS.
-        """
-        if not Config.CLEANUP_CHECKPOINTS:
-            print(f"  Kept discovery cache in: {cache_dir}")
-            return
-
-        discovery_file = cache_dir / "discovery.json"
-        if discovery_file.exists():
-            discovery_file.unlink()
-            print("  Cleaned up discovery cache")
-
-        CheckpointManager._remove_empty_parents(cache_dir, Config.CHECKPOINT_DIR)
 
     @staticmethod
     def _remove_empty_parents(directory: Path, stop_at: Path):

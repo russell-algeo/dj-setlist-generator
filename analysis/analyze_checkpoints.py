@@ -228,7 +228,7 @@ def analyze_checkpoint(filepath: str, mix_name: str) -> dict:
     }
 
 def format_time(segment_index: int) -> str:
-    """Format segment index as time string."""
+    """Format segment index as time string (assumes 15s step size)."""
     seconds = segment_index * 15
     minutes = seconds // 60
     secs = seconds % 60
