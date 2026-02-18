@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from shazamio import Shazam, HTTPClient
 from aiohttp_retry import JitterRetry
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional
 from config import Config
 
@@ -247,7 +247,7 @@ class TrackRecognizer:
 
             # Save checkpoint after each batch
             if self.checkpoint_manager:
-                self._save_recognition_checkpoint(recognitions)
+                self.checkpoint_manager.save_recognition_checkpoint(recognitions, stage='recognizing')
 
             # Summary for batch
             batch_recognized = sum(1 for r in batch_results if isinstance(r, Recognition) and r.recognized)
@@ -257,22 +257,8 @@ class TrackRecognizer:
         print(f"\n✅ Recognition complete: {recognized_count}/{total} segments recognized")
 
         # Save final checkpoint with 'recognized' stage to enable skipping on re-runs
-        self._save_recognition_checkpoint(recognitions, stage='recognized')
+        if self.checkpoint_manager:
+            self.checkpoint_manager.save_recognition_checkpoint(recognitions, stage='recognized')
 
         return recognitions
 
-    def _save_recognition_checkpoint(self, recognitions: list[Recognition], stage: str = 'recognizing'):
-        """Save recognitions to checkpoint."""
-        if not self.checkpoint_manager:
-            return
-
-        serializable_recognitions = []
-        for rec in recognitions:
-            rec_dict = asdict(rec)
-            rec_dict['raw_data'] = None
-            serializable_recognitions.append(rec_dict)
-
-        self.checkpoint_manager.save_checkpoint(stage, {
-            'recognitions': serializable_recognitions,
-            'count': len(recognitions)
-        })

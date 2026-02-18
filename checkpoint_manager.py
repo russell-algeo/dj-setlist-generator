@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+from dataclasses import asdict
 from pathlib import Path
 from datetime import datetime
 from config import Config
@@ -63,7 +64,25 @@ class CheckpointManager:
             json.dump(checkpoint, f, indent=2)
         
         print(f"💾 Checkpoint saved: {stage}")
-    
+
+    def save_recognition_checkpoint(self, recognitions: list, stage: str):
+        """Save recognition results to checkpoint.
+
+        Args:
+            recognitions: List of Recognition dataclass instances.
+            stage: Checkpoint stage (e.g., 'recognizing', 'recognized', 'completed').
+        """
+        serializable_recognitions = []
+        for rec in recognitions:
+            rec_dict = asdict(rec)
+            rec_dict['raw_data'] = None
+            serializable_recognitions.append(rec_dict)
+
+        self.save_checkpoint(stage, {
+            'recognitions': serializable_recognitions,
+            'count': len(recognitions)
+        })
+
     def load_checkpoint(self) -> Optional[dict]:
         """
         Load existing checkpoint if it exists.

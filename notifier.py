@@ -57,3 +57,12 @@ class Notifier:
         message = f"Processed {success_count}/{total} URLs successfully"
 
         Notifier.send(message, title, tags="checkered_flag")
+
+    @staticmethod
+    def notify_artist_complete(artist_name: str, success_count: int, total: int):
+        """Send notification when all sets for an artist are done."""
+        title = f"Artist Complete: {artist_name}"
+        message = f"Processed {success_count}/{total} sets successfully"
+
+        tags = "checkered_flag" if success_count == total else "warning"
+        Notifier.send(message, title, tags=tags)

@@ -28,11 +28,11 @@ class AudioSegmenter:
     def create_segments(self, audio_file: Path, force_recreate: bool = False) -> list[dict]:
         """
         Create overlapping segments from audio file.
-        
+
         Args:
             audio_file: Path to audio file
             force_recreate: If True, recreate even if segments exist
-        
+
         Returns:
             List of segment info dicts with timestamp and file path
         """
