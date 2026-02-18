@@ -258,6 +258,7 @@ async def process_artist(artist_name: str, resume: bool):
         print(f"\nNo DJ sets found for '{artist_name}'.")
         print("Try using a direct URL instead:")
         print(f'  python main.py "https://www.youtube.com/watch?v=xxxxx"')
+        artist_mgr.cleanup_discovery_cache()
         return
 
     # Step 2: Process each discovered set
