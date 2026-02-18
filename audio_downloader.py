@@ -8,14 +8,14 @@ from config import Config
 class AudioDownloader:
     """Download audio from YouTube or SoundCloud."""
     
-    def __init__(self, assets_dir: Path = None):
+    def __init__(self, checkpoint_manager=None):
         """
         Initialize downloader.
-        
+
         Args:
-            assets_dir: Directory to save downloaded audio (if None, uses Config.ASSETS_DIR)
+            checkpoint_manager: CheckpointManager instance. If None, falls back to Config.ASSETS_DIR.
         """
-        self.assets_dir = assets_dir or Config.ASSETS_DIR
+        self.assets_dir = checkpoint_manager.assets_dir if checkpoint_manager else Config.ASSETS_DIR
         self.assets_dir.mkdir(parents=True, exist_ok=True)
 
     def _is_bot_detection_error(self, error: Exception) -> bool:

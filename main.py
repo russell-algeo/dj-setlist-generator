@@ -52,18 +52,17 @@ class SetlistGenerator:
 
         # Initialize checkpoint manager with mix name (single source of truth for paths)
         checkpoint_manager = CheckpointManager(url, mix_name, artist_name=artist_name)
-        mix_id = checkpoint_manager.mix_id
 
         print(f"\n📁 Directory structure:")
         print(f"  Assets: {checkpoint_manager.assets_dir}")
         print(f"  Checkpoints: {checkpoint_manager.checkpoint_dir}")
         print(f"  Output: {checkpoint_manager.output_dir}")
 
-        # Initialize components with mix-specific directories
-        downloader = AudioDownloader(assets_dir=checkpoint_manager.assets_dir)
-        segmenter = AudioSegmenter(mix_id=mix_id, assets_dir=checkpoint_manager.assets_dir)
+        # Initialize components — each pulls its directories from checkpoint_manager
+        downloader = AudioDownloader(checkpoint_manager=checkpoint_manager)
+        segmenter = AudioSegmenter(checkpoint_manager=checkpoint_manager)
         recognizer = TrackRecognizer(checkpoint_manager=checkpoint_manager)
-        formatter = OutputFormatter(output_dir=checkpoint_manager.output_dir)
+        formatter = OutputFormatter(checkpoint_manager=checkpoint_manager)
 
         # Check for existing checkpoint
         checkpoint = None
@@ -248,10 +247,11 @@ async def process_artist(artist_name: str, resume: bool):
     print("█" * 70 + "\n")
 
     artist_mgr = ArtistManager(artist_name)
+    discoverer = DjSetDiscoverer(artist_manager=artist_mgr)
+    summarizer = ArtistSummarizer(artist_manager=artist_mgr)
 
     # Step 1: Discover sets (cached in checkpoints dir, limited by Config.MAX_SETS_PER_ARTIST)
     print("[Discovery] Searching for DJ sets...\n")
-    discoverer = DjSetDiscoverer(artist_manager=artist_mgr)
     sets = discoverer.discover()
 
     if not sets:
@@ -270,7 +270,6 @@ async def process_artist(artist_name: str, resume: bool):
     print(f"█ GENERATING ARTIST SUMMARY")
     print("█" * 70 + "\n")
 
-    summarizer = ArtistSummarizer(artist_manager=artist_mgr)
     summarizer.generate(results)
 
     # Clean up discovery cache

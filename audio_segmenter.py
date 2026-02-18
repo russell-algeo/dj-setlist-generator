@@ -8,21 +8,20 @@ import math
 class AudioSegmenter:
     """Create overlapping segments from audio file."""
     
-    def __init__(self, segment_duration: int = None, overlap: int = None, 
-                 mix_id: str = None, assets_dir: Path = None):
+    def __init__(self, checkpoint_manager=None, segment_duration: int = None, overlap: int = None):
         """
         Initialize segmenter.
-        
+
         Args:
+            checkpoint_manager: CheckpointManager instance. Provides mix_id and assets_dir.
+                                 If None, falls back to Config defaults.
             segment_duration: Duration of each segment in seconds
             overlap: Overlap between segments in seconds
-            mix_id: Unique identifier for this mix (for segment naming)
-            assets_dir: Directory to save segments (if None, uses Config.ASSETS_DIR)
         """
         self.segment_duration = segment_duration or Config.SEGMENT_DURATION
         self.overlap = overlap or Config.SEGMENT_OVERLAP
-        self.assets_dir = assets_dir or Config.ASSETS_DIR
-        self.mix_id = mix_id or "default"
+        self.assets_dir = checkpoint_manager.assets_dir if checkpoint_manager else Config.ASSETS_DIR
+        self.mix_id = checkpoint_manager.mix_id if checkpoint_manager else "default"
         self.assets_dir.mkdir(parents=True, exist_ok=True)
     
     def create_segments(self, audio_file: Path, force_recreate: bool = False) -> list[dict]:

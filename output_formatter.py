@@ -18,14 +18,14 @@ def format_time(seconds: float) -> str:
 class OutputFormatter:
     """Format and save setlist output."""
 
-    def __init__(self, output_dir: Path = None):
+    def __init__(self, checkpoint_manager=None):
         """
         Initialize formatter.
 
         Args:
-            output_dir: Directory to save output files (if None, uses Config.OUTPUT_DIR)
+            checkpoint_manager: CheckpointManager instance. If None, falls back to Config.OUTPUT_DIR.
         """
-        self.output_dir = output_dir or Config.OUTPUT_DIR
+        self.output_dir = checkpoint_manager.output_dir if checkpoint_manager else Config.OUTPUT_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
