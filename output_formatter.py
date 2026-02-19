@@ -94,14 +94,21 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
 class OutputFormatter:
     """Format and save setlist output."""
 
-    def __init__(self, checkpoint_manager=None):
+    def __init__(self, checkpoint_manager=None, artist_manager=None):
         """
         Initialize formatter.
 
         Args:
-            checkpoint_manager: CheckpointManager instance. If None, falls back to Config.OUTPUT_DIR.
+            checkpoint_manager: CheckpointManager instance for per-set outputs.
+            artist_manager: ArtistManager instance for artist-level outputs.
+            Falls back to Config.OUTPUT_DIR if neither is provided.
         """
-        self.output_dir = checkpoint_manager.output_dir if checkpoint_manager else Config.OUTPUT_DIR
+        if checkpoint_manager:
+            self.output_dir = checkpoint_manager.output_dir
+        elif artist_manager:
+            self.output_dir = artist_manager.output_dir
+        else:
+            self.output_dir = Config.OUTPUT_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -121,7 +128,7 @@ class OutputFormatter:
             'uncertain_tracks': counts.get('UNCERTAIN', 0),
         }
 
-    def save_json(self, enriched_tracks: list, mix_info: dict, filename: str = None) -> Path:
+    def save_setlist_json(self, enriched_tracks: list, mix_info: dict, filename: str = None) -> Path:
         """Save setlist as JSON."""
         if not filename:
             filename = f"setlist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -144,7 +151,7 @@ class OutputFormatter:
         print(f"Saved JSON: {output_path}")
         return output_path
     
-    def save_markdown(self, enriched_tracks: list, mix_info: dict, filename: str = None) -> Path:
+    def save_setlist_markdown(self, enriched_tracks: list, mix_info: dict, filename: str = None) -> Path:
         """Save setlist as Markdown."""
         if not filename:
             filename = f"setlist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -208,6 +215,82 @@ class OutputFormatter:
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
-        
+
         print(f"Saved Markdown: {output_path}")
+        return output_path
+
+    def save_artist_summary_markdown(
+        self, artist_name, set_summaries, track_counter, track_info, successful, failed
+    ) -> Path:
+        """Save artist-level aggregate summary as Markdown."""
+        lines = []
+        lines.append(f"# {artist_name} - DJ Set Analysis")
+        lines.append(f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"**Sets Analyzed:** {len(successful)} successful, {len(failed)} failed")
+        lines.append(f"**Unique Tracks Found:** {len(track_counter)}")
+
+        lines.append(f"\n---\n")
+        lines.append(f"## Sets Analyzed\n")
+        for i, s in enumerate(set_summaries, 1):
+            lines.append(f"{i}. **{s['title']}** - {s['total_tracks']} tracks ({s['high_confidence']} high confidence)")
+            lines.append(f"   Source: {s['url']}")
+
+        most_common = track_counter.most_common(30)
+        if most_common:
+            lines.append(f"\n---\n")
+            lines.append(f"## Most Played Tracks\n")
+            lines.append("Tracks that appear across multiple sets:\n")
+            for rank, (track_key, count) in enumerate(most_common, 1):
+                info = track_info[track_key]
+                spotify = f" | [Spotify]({info['spotify_url']})" if info.get("spotify_url") else ""
+                lines.append(f"{rank}. **{track_key}** - played in {count} set(s){spotify}")
+                for app in info.get("appearances", []):
+                    time_part = f" ({app['time_range']})" if app.get("time_range") else ""
+                    lines.append(f"   - {app['set_title']}{time_part}")
+
+        if failed:
+            lines.append(f"\n---\n")
+            lines.append(f"## Failed Sets\n")
+            for r in failed:
+                lines.append(f"- {r['url']}: {r['status']}")
+
+        output_path = self.output_dir / "artist_summary.md"
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        print(f"\nSaved artist summary: {output_path}")
+        return output_path
+
+    def save_artist_summary_json(
+        self, artist_name, set_summaries, track_counter, track_info, all_tracks, successful, failed
+    ) -> Path:
+        """Save artist-level aggregate summary as JSON."""
+        summary = {
+            "artist": artist_name,
+            "generated_at": datetime.now().isoformat(),
+            "stats": {
+                "sets_analyzed": len(successful),
+                "sets_failed": len(failed),
+                "unique_tracks": len(track_counter),
+                "total_track_appearances": len(all_tracks),
+            },
+            "sets": set_summaries,
+            "most_played_tracks": [
+                {
+                    "artist": track_info[key]["artist"],
+                    "title": track_info[key]["title"],
+                    "appearances": count,
+                    "spotify_url": track_info[key].get("spotify_url"),
+                }
+                for key, count in track_counter.most_common(50)
+            ],
+            "failed_sets": [
+                {"url": r["url"], "error": r["status"]}
+                for r in failed
+            ],
+        }
+
+        output_path = self.output_dir / "artist_summary.json"
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        print(f"Saved artist summary JSON: {output_path}")
         return output_path

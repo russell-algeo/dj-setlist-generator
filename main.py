@@ -154,9 +154,9 @@ class SetlistGenerator:
 
             # Save outputs (use custom name or mix name)
             final_output_name = output_name or sanitize_filename(mix_name)
-            json_file = formatter.save_json(enriched_tracks, mix_info, final_output_name)
-            md_file = formatter.save_markdown(enriched_tracks, mix_info, final_output_name)
-            html_file = html_formatter.save_html(enriched_tracks, mix_info, final_output_name) if Config.ENABLE_HTML_OUTPUT else None
+            json_file = formatter.save_setlist_json(enriched_tracks, mix_info, final_output_name)
+            md_file = formatter.save_setlist_markdown(enriched_tracks, mix_info, final_output_name)
+            html_file = html_formatter.save_setlist_html(enriched_tracks, mix_info, final_output_name) if Config.ENABLE_HTML_OUTPUT else None
 
             print("\n" + "=" * 70)
             print("COMPLETE!")
