@@ -100,7 +100,7 @@ def _render_track_cards(tracks: list) -> str:
                 f'<div class="track-time">'
                 f'<a class="track-time-link" '
                 f'href="{_esc(deep_link)}" target="_blank" rel="noopener" '
-                f'title="Open in YouTube at this timestamp">{start_esc}</a>'
+                f'title="Open at this timestamp">{start_esc}</a>'
                 f'<span class="track-time-sep"> \u2013 </span>{end_esc}'
                 f'</div>'
             )
