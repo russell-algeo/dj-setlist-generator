@@ -65,8 +65,11 @@ class CheckpointManager:
         self.mix_name = mix_name
         self.artist_name = artist_name
 
-        # Create unique identifier for this mix based on URL
-        self.mix_id = hashlib.md5(url.encode()).hexdigest()[:12]
+        # Create unique identifier for this mix based on its title.
+        # Using mix_name (rather than URL) means alternate URL forms for the
+        # same video (youtu.be short links, ?si= tracking params, etc.) all
+        # resolve to the same checkpoint and audio file.
+        self.mix_id = hashlib.md5(mix_name.encode()).hexdigest()[:12]
 
         # Build organized directory structure
         safe_mix = sanitize_filename(mix_name)

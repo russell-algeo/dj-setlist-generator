@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from pathlib import Path
 from config import Config
 from notifier import Notifier
 from audio_downloader import AudioDownloader
@@ -164,7 +165,7 @@ class SetlistGenerator:
             print(f"JSON output:     {json_file}")
             print(f"Markdown output: {md_file}")
             if html_file:
-                print(f"HTML output:     {html_file}")
+                print(f"HTML output:     file://{html_file.resolve()}")
 
             # Spotify Playlist Creation
             if Config.ENABLE_SPOTIFY_PLAYLISTS:
@@ -292,12 +293,19 @@ async def process_artist(artist_name: str, resume: bool):
         icon = "✅" if r["status"] == "SUCCESS" else "❌"
         name = r["mix_name"] or r["url"][:60]
         print(f"  {icon} {name}")
+        if r["status"] == "SUCCESS" and r.get("output_dir"):
+            html_files = list(Path(r["output_dir"]).glob("*.html"))
+            if html_files:
+                print(f"     file://{html_files[0].resolve()}")
         if r["status"] != "SUCCESS":
             print(f"     {r['status']}")
 
     print(f"\nResults: {success_count} successful, {fail_count} failed out of {len(results)} sets")
     print(f"Output directory: {artist_mgr.output_dir}")
     print(f"Artist summary: {artist_mgr.output_dir / 'artist_summary.md'}")
+    artist_html = artist_mgr.output_dir / 'artist_summary.html'
+    if artist_html.exists():
+        print(f"Artist summary HTML: file://{artist_html.resolve()}")
 
     # Send artist completion notification
     Notifier.notify_artist_complete(artist_name, success_count, len(results))
