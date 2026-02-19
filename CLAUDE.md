@@ -44,12 +44,11 @@ python main.py "url1" "url2" "url3" --no-resume
 
 **Standard Pipeline** (per URL):
 1. **Download** - `audio_downloader.py` uses yt-dlp to fetch audio
-2. **Segment** - `audio_segmenter.py` splits into 30-second overlapping chunks (15s overlap)
-3. **Recognize** - `track_recognizer.py` uses shazamio (Shazam API) with concurrent processing (Semaphore + asyncio.gather)
-4. **Build Setlist** - `setlist_builder.py` clusters and deduplicates detections
-5. **Enrich** - `metadata_enricher.py` adds Spotify/YouTube/Discogs links
-6. **Output** - `output_formatter.py` generates JSON and Markdown in `output/<mix_name>/`
-7. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
+2. **Stream: Segment + Recognize** - `audio_segmenter.py` + `track_recognizer.py` work in a batch pipeline: each batch of segments is extracted on-the-fly via FFmpeg (no full-file RAM load), recognized with Shazam (Semaphore + asyncio.gather), then segment files are deleted immediately — only `BATCH_SIZE` segment files exist on disk at any time
+3. **Build Setlist** - `setlist_builder.py` clusters and deduplicates detections
+4. **Enrich** - `metadata_enricher.py` adds Spotify/YouTube/Discogs links
+5. **Output** - `output_formatter.py` generates JSON and Markdown in `output/<mix_name>/`
+6. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
 
 ### DJ Set Discovery (dj_set_discovery.py)
 Uses yt-dlp to search YouTube (`ytsearch`) and SoundCloud (`scsearch`) directly with multiple query strategies (generic searches, known DJ set channels like Boiler Room, HOR Berlin, Cercle, etc.). Results are filtered by duration (>= `MIN_SET_DURATION_MINUTES`) and title keywords to exclude non-sets. Results are cached to `checkpoints/<artist>/discovery.json` during processing and cleaned up after completion (controlled by `CLEANUP_CHECKPOINTS`).
@@ -62,7 +61,7 @@ The setlist building uses a clustering approach:
 - Adds "Unknown Track" entries for unrecognized gaps (configurable via `MIN_UNKNOWN_GAP_SIZE`)
 
 ### Checkpoint System (checkpoint_manager.py)
-Saves progress during long recognition runs. Checkpoints stored in `checkpoints/<mix_name>/`. Process can resume from any stage: `downloaded`, `segmented`, or `recognizing`.
+Saves progress during long recognition runs. Checkpoints stored in `checkpoints/<mix_name>/`. Valid stages: `downloaded` → `recognizing` (updated after each batch) → `recognized` → `completed`. The old `segmented` stage no longer exists; checkpoints with that stage from pre-streaming runs are treated the same as `downloaded` (fresh recognition start).
 
 ## Configuration
 
@@ -80,12 +79,12 @@ All settings in `.env` file (see `config.py` for defaults):
 ## Directory Structure
 
 **URL mode** (`python main.py "https://..."`)
-- `assets/<mix_name>/` - Downloaded audio and segments (temporary)
+- `assets/<mix_name>/` - Downloaded audio (segment files are transient; deleted after each batch)
 - `checkpoints/<mix_name>/` - Crash recovery state
 - `output/<mix_name>/` - Final JSON and Markdown output
 
 **Artist mode** (`python main.py "DJ Name"`) - everything nested under artist:
-- `assets/<artist_name>/<mix_name>/` - Downloaded audio and segments
+- `assets/<artist_name>/<mix_name>/` - Downloaded audio (segment files are transient)
 - `checkpoints/<artist_name>/discovery.json` - Cached discovery results (cleaned up after processing)
 - `checkpoints/<artist_name>/<mix_name>/` - Per-set crash recovery state
 - `output/<artist_name>/artist_summary.md` - Aggregate analysis across all sets
