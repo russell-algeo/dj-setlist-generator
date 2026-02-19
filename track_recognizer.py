@@ -354,27 +354,48 @@ class TrackRecognizer:
                         return result
                     await self._trigger_quota_cooldown()
 
-        # --- Batch loop -------------------------------------------------------
-        # Limit FFmpeg parallelism: more than ~4 concurrent FFmpeg processes
-        # rarely helps and can saturate I/O on slower systems.
+        # --- Batch loop (producer-consumer pipeline) --------------------------
+        # The producer extracts FFmpeg segments for batch N+1 while the
+        # consumer is recognising batch N with Shazam, hiding the FFmpeg
+        # overhead inside the (much longer) network-bound recognition phase.
+        # maxsize=1 caps pre-extraction at one batch ahead, so at most
+        # 2×BATCH_SIZE segment files exist on disk at any moment.
         max_ffmpeg_workers = min(Config.BATCH_SIZE, 4)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_ffmpeg_workers) as executor:
-            for batch_start in range(start_index, total, Config.BATCH_SIZE):
-                batch_end = min(batch_start + Config.BATCH_SIZE, total)
+            queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+
+            async def _producer() -> None:
+                for batch_start in range(start_index, total, Config.BATCH_SIZE):
+                    batch_end = min(batch_start + Config.BATCH_SIZE, total)
+                    print(
+                        f"\n  Extracting segments {batch_start}–{batch_end - 1} "
+                        f"of {total - 1} via FFmpeg..."
+                    )
+                    try:
+                        segments = await segmenter.create_segments_batch(
+                            audio_file, batch_start, batch_end, executor
+                        )
+                        await queue.put(('ok', batch_start, batch_end, segments))
+                    except Exception as e:
+                        print(
+                            f"  ⚠️  Segment extraction failed for batch "
+                            f"{batch_start}–{batch_end - 1}: {e}"
+                        )
+                        await queue.put(('error', batch_start, batch_end, e))
+                await queue.put(None)  # sentinel: no more batches
+
+            producer_task = asyncio.create_task(_producer())
+
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+
+                kind, batch_start, batch_end, payload = item
                 batch_size = batch_end - batch_start
 
-                # Step A: Create segment files for this batch via FFmpeg.
-                print(
-                    f"\n  Extracting segments {batch_start}–{batch_end - 1} "
-                    f"of {total - 1} via FFmpeg..."
-                )
-                try:
-                    batch_segments = await segmenter.create_segments_batch(
-                        audio_file, batch_start, batch_end, executor
-                    )
-                except Exception as e:
-                    print(f"  ⚠️  Segment extraction failed for batch {batch_start}–{batch_end - 1}: {e}")
+                if kind == 'error':
                     # Record failed recognitions so indices stay aligned.
                     for i in range(batch_start, batch_end):
                         info = segmenter._segment_info(i)
@@ -394,11 +415,13 @@ class TrackRecognizer:
                         )
                     continue
 
-                # Step B: Recognize all segments in the batch concurrently.
+                batch_segments = payload
+
+                # Recognize all segments in the batch concurrently.
                 tasks = [_recognize_with_semaphore(seg) for seg in batch_segments]
                 batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                # Step C: Record results, print progress, delete segment files.
+                # Record results, print progress, delete segment files.
                 batch_recognized = 0
                 for i, (seg, result) in enumerate(zip(batch_segments, batch_results)):
                     global_idx = batch_start + i + 1
@@ -436,13 +459,15 @@ class TrackRecognizer:
                     except Exception:
                         pass
 
-                # Step D: Save incremental checkpoint.
+                # Save incremental checkpoint.
                 if self.checkpoint_manager:
                     self.checkpoint_manager.save_recognition_checkpoint(
                         recognitions, stage='recognizing'
                     )
 
                 print(f"💾 Batch complete: {batch_recognized}/{batch_size} recognized")
+
+            await producer_task
 
         # --- Finalise ---------------------------------------------------------
         recognized_count = sum(1 for r in recognitions if r.recognized)
