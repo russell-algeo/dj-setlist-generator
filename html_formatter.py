@@ -3,6 +3,7 @@
 from html import escape
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import quote
 from config import Config
 from output_formatter import format_time, serialize_track
 
@@ -830,7 +831,7 @@ def _render_set_cards(set_summaries: list) -> str:
         source_url = s.get('url', '')
 
         if s.get('set_html_rel'):
-            primary_href = _esc(s['set_html_rel'])
+            primary_href = _esc(quote(s['set_html_rel'], safe='/'))
             primary_target = '_self'
         elif source_url:
             primary_href = _esc(source_url)
