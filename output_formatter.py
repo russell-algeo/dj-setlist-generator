@@ -64,6 +64,33 @@ def make_source_url(source_url: str, timestamp_seconds: float) -> Optional[str]:
     return None
 
 
+def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
+    """Build a plain dict representation of a single enriched track.
+
+    Contains all fields common to every output format (JSON, HTML, etc.).
+    Format-specific extras (e.g. timeline percentages) should be added by the caller.
+    """
+    track = item['track']
+    meta = item['metadata']
+    return {
+        'position': position,
+        'title': track.title,
+        'artist': track.artist,
+        'start_time': track.start_time,
+        'end_time': track.end_time,
+        'start_time_formatted': format_time(track.start_time),
+        'end_time_formatted': format_time(track.end_time) if track.end_time is not None else None,
+        'confidence': track.confidence,
+        'detection_count': track.detection_count,
+        'cluster_density': track.cluster_density,
+        'cluster_span': track.cluster_span,
+        'source_deep_link': make_source_url(source_url, track.start_time),
+        'spotify_url': meta.get('spotify_url'),
+        'youtube_url': meta.get('youtube_url'),
+        'discogs_url': meta.get('discogs_url'),
+    }
+
+
 class OutputFormatter:
     """Format and save setlist output."""
 
@@ -105,23 +132,7 @@ class OutputFormatter:
         output_data = {
             'mix_info': mix_info,
             'tracks': [
-                {
-                    'position': i + 1,
-                    'title': item['track'].title,
-                    'artist': item['track'].artist,
-                    'start_time': item['track'].start_time,
-                    'end_time': item['track'].end_time,
-                    'start_time_formatted': format_time(item['track'].start_time),
-                    'end_time_formatted': format_time(item['track'].end_time) if item['track'].end_time is not None else None,
-                    'confidence': item['track'].confidence,
-                    'detection_count': item['track'].detection_count,
-                    'cluster_density': item['track'].cluster_density,
-                    'cluster_span': item['track'].cluster_span,
-                    'source_deep_link': make_source_url(source_url, item['track'].start_time),
-                    'spotify_url': item['metadata']['spotify_url'],
-                    'youtube_url': item['metadata']['youtube_url'],
-                    'discogs_url': item['metadata']['discogs_url'],
-                }
+                serialize_track(item, i + 1, source_url)
                 for i, item in enumerate(enriched_tracks)
             ],
             'metadata': self._build_metadata(enriched_tracks)

@@ -5,7 +5,7 @@ from html import escape
 from pathlib import Path
 from datetime import datetime
 from config import Config
-from output_formatter import format_time, make_source_url
+from output_formatter import format_time, make_source_url, serialize_track
 
 
 # Confidence level configuration: label, CSS class, hex color
@@ -26,31 +26,18 @@ def _build_track_data(enriched_tracks: list, total_duration: float, source_url: 
     """Convert enriched tracks to a list of plain dicts for rendering."""
     rows = []
     for i, item in enumerate(enriched_tracks, 1):
-        track = item['track']
-        meta  = item['metadata']
+        t = serialize_track(item, i, source_url)
 
-        end_t = track.end_time if track.end_time is not None else total_duration
-        start_pct = (track.start_time / total_duration * 100) if total_duration else 0
-        width_pct  = max(0.5, ((end_t - track.start_time) / total_duration * 100)) if total_duration else 0
+        # Apply end_time fallback and reformat for HTML (end_time must be a concrete value)
+        end_t = t['end_time'] if t['end_time'] is not None else total_duration
+        t['end_time'] = end_t
+        t['end_time_formatted'] = format_time(end_t)
 
-        rows.append({
-            'position':       i,
-            'title':          track.title,
-            'artist':         track.artist,
-            'start_time':     track.start_time,
-            'end_time':       end_t,
-            'start_fmt':      format_time(track.start_time),
-            'end_fmt':        format_time(end_t),
-            'confidence':     track.confidence,
-            'detections':     track.detection_count,
-            'density':        track.cluster_density,
-            'spotify_url':    meta.get('spotify_url') or '',
-            'youtube_url':    meta.get('youtube_url') or '',
-            'discogs_url':    meta.get('discogs_url') or '',
-            'source_deep_link': make_source_url(source_url, track.start_time),
-            'start_pct':      start_pct,
-            'width_pct':      width_pct,
-        })
+        # HTML-specific timeline layout fields
+        t['start_pct'] = (t['start_time'] / total_duration * 100) if total_duration else 0
+        t['width_pct'] = max(0.5, ((end_t - t['start_time']) / total_duration * 100)) if total_duration else 0
+
+        rows.append(t)
     return rows
 
 
@@ -62,7 +49,7 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
         cfg    = CONFIDENCE_CONFIG.get(conf, CONFIDENCE_CONFIG['UNCERTAIN'])
         color  = cfg[2]
         label    = _esc(f"{t['artist']} — {t['title']}")
-        time_l   = _esc(f"{t['start_fmt']} \u2013 {t['end_fmt']}")
+        time_l   = _esc(f"{t['start_time_formatted']} \u2013 {t['end_time_formatted']}")
 
         segments_html.append(
             f'<div class="tl-segment" '
@@ -103,11 +90,11 @@ def _render_track_cards(tracks: list) -> str:
             )
         links_block = ''.join(links_html)
 
-        density_pct = f"{t['density']:.0%}"
+        density_pct = f"{t['cluster_density']:.0%}"
 
         deep_link = t.get('source_deep_link') or ''
-        start_esc = _esc(t['start_fmt'])
-        end_esc   = _esc(t['end_fmt'])
+        start_esc = _esc(t['start_time_formatted'])
+        end_esc   = _esc(t['end_time_formatted'])
         if deep_link:
             time_cell = (
                 f'<div class="track-time">'
@@ -136,7 +123,7 @@ def _render_track_cards(tracks: list) -> str:
     </div>
     <div class="track-meta">
       <span class="conf-badge {cls}" style="border-color:{color};color:{color};">{_esc(conf)}</span>
-      <span class="track-stats">{t["detections"]} detections &middot; {density_pct} density</span>
+      <span class="track-stats">{t["detection_count"]} detections &middot; {density_pct} density</span>
     </div>
   </div>
   <div class="track-actions">
