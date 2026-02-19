@@ -116,12 +116,6 @@ class SetlistGenerator:
                 # via FFmpeg (no full-file RAM load), recognized, then deleted
                 # immediately after each batch.  This avoids writing all 250-400
                 # segment files to disk before recognition can begin.
-                #
-                # Checkpoint resume logic:
-                #   'recognizing' → partial results exist; skip already-done segments.
-                #   'segmented'   → legacy pre-streaming checkpoint; segment files are
-                #                   gone, so we treat this as a fresh recognition run.
-                #   'downloaded'  → nothing done yet; start from segment 0.
                 print("\n[3/5] Streaming recognition (segment + recognize on-the-fly)...")
                 should_resume = bool(checkpoint and checkpoint['stage'] == 'recognizing')
                 recognitions = await recognizer.recognize_segments_streaming(

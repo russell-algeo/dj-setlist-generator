@@ -61,7 +61,7 @@ The setlist building uses a clustering approach:
 - Adds "Unknown Track" entries for unrecognized gaps (configurable via `MIN_UNKNOWN_GAP_SIZE`)
 
 ### Checkpoint System (checkpoint_manager.py)
-Saves progress during long recognition runs. Checkpoints stored in `checkpoints/<mix_name>/`. Valid stages: `downloaded` → `recognizing` (updated after each batch) → `recognized` → `completed`. The old `segmented` stage no longer exists; checkpoints with that stage from pre-streaming runs are treated the same as `downloaded` (fresh recognition start).
+Saves progress during long recognition runs. Checkpoints stored in `checkpoints/<mix_name>/`. Valid stages: `downloaded` → `recognizing` (updated after each batch) → `recognized` → `completed`.
 
 ## Configuration
 

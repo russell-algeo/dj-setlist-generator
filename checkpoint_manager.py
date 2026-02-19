@@ -99,7 +99,7 @@ class CheckpointManager:
         Save checkpoint data.
 
         Args:
-            stage: Current stage (e.g., 'downloaded', 'segmented', 'recognized')
+            stage: Current stage (e.g., 'downloaded', 'recognizing', 'recognized', 'completed')
             data: Data to save
         """
         if not Config.ENABLE_CHECKPOINTS:
