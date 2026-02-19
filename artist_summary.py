@@ -1,20 +1,23 @@
-"""Generate aggregate artist summary across all processed DJ sets."""
+"""Aggregate artist summary across all processed DJ sets."""
 
 import json
 from pathlib import Path
-from datetime import datetime
 from collections import Counter
+
+from output_formatter import OutputFormatter
+from html_formatter import HtmlFormatter
 
 
 class ArtistSummarizer:
-    """Generate aggregate artist summary across all processed DJ sets."""
+    """Aggregate data across all processed DJ sets and delegate to formatters."""
 
     def __init__(self, artist_manager):
+        self._artist_manager = artist_manager
         self._artist_name = artist_manager.artist_name
         self._output_dir = artist_manager.output_dir
 
     def generate(self, results: list[dict]):
-        """Generate artist_summary.md and artist_summary.json.
+        """Aggregate per-set data and write artist summary outputs.
 
         Args:
             results: List of dicts with keys: url, status, mix_name, output_dir
@@ -44,20 +47,36 @@ class ArtistSummarizer:
             mix_info = data.get("mix_info", {})
             metadata = data.get("metadata", {})
 
+            # Find per-set HTML file and compute its path relative to the
+            # artist summary page so set cards can link to it directly.
+            html_files = list(Path(set_output_dir).glob("*.html"))
+            set_html_rel = None
+            if html_files:
+                try:
+                    set_html_rel = str(html_files[0].relative_to(self._output_dir))
+                except ValueError:
+                    pass  # output_dir outside expected tree — skip relative link
+
             set_summaries.append({
                 "title": mix_info.get("title", result.get("mix_name", "Unknown")),
                 "url": result["url"],
                 "total_tracks": metadata.get("total_tracks", len(tracks)),
                 "high_confidence": metadata.get("high_confidence_tracks", 0),
+                "set_html_rel": set_html_rel,
             })
 
+            set_title = mix_info.get("title", "Unknown")
             for track in tracks:
                 if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
+                    start_fmt = track.get("start_time_formatted", "")
+                    end_fmt   = track.get("end_time_formatted") or ""
+                    time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
                     all_tracks.append({
-                        "artist": track["artist"],
-                        "title": track["title"],
+                        "artist":     track["artist"],
+                        "title":      track["title"],
                         "spotify_url": track.get("spotify_url"),
-                        "from_set": mix_info.get("title", "Unknown"),
+                        "from_set":   set_title,
+                        "time_range": time_range,
                     })
 
         track_counter = Counter()
@@ -66,91 +85,26 @@ class ArtistSummarizer:
             key = f"{t['artist']} - {t['title']}"
             track_counter[key] += 1
             if key not in track_info:
-                track_info[key] = t
+                track_info[key] = {
+                    "artist":      t["artist"],
+                    "title":       t["title"],
+                    "spotify_url": t.get("spotify_url"),
+                    "appearances": [],
+                }
+            track_info[key]["appearances"].append({
+                "set_title":  t["from_set"],
+                "time_range": t.get("time_range", ""),
+            })
 
-        _save_summary_markdown(
-            self._artist_name, self._output_dir, set_summaries, track_counter,
-            track_info, successful, failed
+        output_fmt = OutputFormatter(artist_manager=self._artist_manager)
+        html_fmt   = HtmlFormatter(artist_manager=self._artist_manager)
+
+        output_fmt.save_artist_summary_markdown(
+            self._artist_name, set_summaries, track_counter, track_info, successful, failed
         )
-        _save_summary_json(
-            self._artist_name, self._output_dir, set_summaries, track_counter,
-            track_info, all_tracks, successful, failed
+        output_fmt.save_artist_summary_json(
+            self._artist_name, set_summaries, track_counter, track_info, all_tracks, successful, failed
         )
-
-
-def _save_summary_markdown(
-    artist_name, output_dir, set_summaries, track_counter,
-    track_info, successful, failed
-):
-    """Write the artist_summary.md file."""
-    lines = []
-    lines.append(f"# {artist_name} - DJ Set Analysis")
-    lines.append(f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"**Sets Analyzed:** {len(successful)} successful, {len(failed)} failed")
-    lines.append(f"**Unique Tracks Found:** {len(track_counter)}")
-
-    # Sets overview
-    lines.append(f"\n---\n")
-    lines.append(f"## Sets Analyzed\n")
-    for i, s in enumerate(set_summaries, 1):
-        lines.append(f"{i}. **{s['title']}** - {s['total_tracks']} tracks ({s['high_confidence']} high confidence)")
-        lines.append(f"   Source: {s['url']}")
-
-    # Most played tracks
-    most_common = track_counter.most_common(30)
-    if most_common:
-        lines.append(f"\n---\n")
-        lines.append(f"## Most Played Tracks\n")
-        lines.append("Tracks that appear across multiple sets:\n")
-        for rank, (track_key, count) in enumerate(most_common, 1):
-            info = track_info[track_key]
-            spotify = f" | [Spotify]({info['spotify_url']})" if info.get("spotify_url") else ""
-            lines.append(f"{rank}. **{track_key}** - played in {count} set(s){spotify}")
-
-    # Failed sets
-    if failed:
-        lines.append(f"\n---\n")
-        lines.append(f"## Failed Sets\n")
-        for r in failed:
-            lines.append(f"- {r['url']}: {r['status']}")
-
-    output_path = output_dir / "artist_summary.md"
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    print(f"\nSaved artist summary: {output_path}")
-
-
-def _save_summary_json(
-    artist_name, output_dir, set_summaries, track_counter,
-    track_info, all_tracks, successful, failed
-):
-    """Write the artist_summary.json file."""
-    summary = {
-        "artist": artist_name,
-        "generated_at": datetime.now().isoformat(),
-        "stats": {
-            "sets_analyzed": len(successful),
-            "sets_failed": len(failed),
-            "unique_tracks": len(track_counter),
-            "total_track_appearances": len(all_tracks),
-        },
-        "sets": set_summaries,
-        "most_played_tracks": [
-            {
-                "artist": track_info[key]["artist"],
-                "title": track_info[key]["title"],
-                "appearances": count,
-                "spotify_url": track_info[key].get("spotify_url"),
-            }
-            for key, count in track_counter.most_common(50)
-        ],
-        "failed_sets": [
-            {"url": r["url"], "error": r["status"]}
-            for r in failed
-        ],
-    }
-
-    output_path = output_dir / "artist_summary.json"
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2, ensure_ascii=False)
-    print(f"Saved artist summary JSON: {output_path}")
+        html_fmt.save_artist_summary_html(
+            self._artist_name, set_summaries, track_counter, track_info, successful, failed
+        )
