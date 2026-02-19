@@ -26,6 +26,22 @@ class AudioDownloader:
             or ("cookies" in error_str and "authentication" in error_str)
         )
 
+    def _run_with_bot_retry(self, fn):
+        """Run fn(), retrying indefinitely on YouTube bot detection."""
+        attempt = 0
+        while True:
+            attempt += 1
+            if attempt > 1:
+                print(f"🔄 Retry attempt {attempt}...")
+            try:
+                return fn()
+            except Exception as e:
+                if self._is_bot_detection_error(e):
+                    print(f"🤖 YouTube bot detection triggered. Cooling down for {Config.QUOTA_COOLDOWN_DURATION}s...")
+                    time.sleep(Config.QUOTA_COOLDOWN_DURATION)
+                else:
+                    raise
+
     def download(self, url: str, output_path: Path = None) -> Path:
         """
         Download audio from URL and convert to MP3.
@@ -61,23 +77,11 @@ class AudioDownloader:
         
         print(f"Downloading audio from: {url}")
 
-        attempt = 0
-        while True:
-            attempt += 1
-            if attempt > 1:
-                print(f"🔄 Retry attempt {attempt}...")
+        def _do_download():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-                break  # Success - exit loop
-            except Exception as e:
-                if self._is_bot_detection_error(e):
-                    print(f"🤖 YouTube bot detection triggered. Cooling down for {Config.QUOTA_COOLDOWN_DURATION}s...")
-                    time.sleep(Config.QUOTA_COOLDOWN_DURATION)
-                    continue  # Retry
-                else:
-                    raise  # Non-bot errors fail immediately
+        self._run_with_bot_retry(_do_download)
 
         print(f"Download complete: {output_path}")
         return output_path
@@ -94,11 +98,14 @@ class AudioDownloader:
             'no_warnings': True,
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return {
-                'title': info.get('title', 'Unknown'),
-                'duration': info.get('duration', 0),
-                'uploader': info.get('uploader', 'Unknown'),
-                'url': url,
-            }
+        def _do_extract():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=False)
+
+        info = self._run_with_bot_retry(_do_extract)
+        return {
+            'title': info.get('title', 'Unknown'),
+            'duration': info.get('duration', 0),
+            'uploader': info.get('uploader', 'Unknown'),
+            'url': url,
+        }

@@ -124,7 +124,7 @@ class DjSetDiscoverer:
 _EXCLUDE_KEYWORDS = [
     "interview", "premiere", "panel", "review", "trailer", "reaction",
     "tutorial", "official video", "music video", "teaser",
-    "behind the scenes", "unboxing", "podcast",
+    "behind the scenes", "unboxing", "podcast", "tribute"
 ]
 
 
