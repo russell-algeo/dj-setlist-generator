@@ -48,14 +48,16 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
         conf   = t['confidence']
         cfg    = CONFIDENCE_CONFIG.get(conf, CONFIDENCE_CONFIG['UNCERTAIN'])
         color  = cfg[2]
-        label    = _esc(f"{t['artist']} — {t['title']}")
-        time_l   = _esc(f"{t['start_time_formatted']} \u2013 {t['end_time_formatted']}")
 
         segments_html.append(
             f'<div class="tl-segment" '
             f'style="left:{t["start_pct"]:.3f}%;width:{t["width_pct"]:.3f}%;background:{color};" '
-            f'title="{time_l}  {label}" '
-            f'data-conf="{_esc(conf)}">'
+            f'data-conf="{_esc(conf)}" '
+            f'data-track-idx="{t["position"]}" '
+            f'data-artist="{_esc(t["artist"])}" '
+            f'data-title="{_esc(t["title"])}" '
+            f'data-time="{_esc(t["start_time_formatted"])} \u2013 {_esc(t["end_time_formatted"])}" '
+            f'data-color="{_esc(color)}">'
             f'</div>'
         )
     return '\n'.join(segments_html)
@@ -112,7 +114,7 @@ def _render_track_cards(tracks: list) -> str:
             )
 
         cards.append(f'''
-<div class="track-card" data-conf="{_esc(conf)}" data-search="{artist_esc.lower()} {title_esc.lower()}">
+<div class="track-card" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
   <div class="track-num">{t["position"]}</div>
   {time_cell}
   <div class="track-info">
@@ -255,7 +257,7 @@ a { color: inherit; text-decoration: none; }
   height: 100%;
   opacity: 0.85;
   transition: opacity 0.15s;
-  cursor: default;
+  cursor: pointer;
 }
 .tl-segment:hover { opacity: 1; }
 
@@ -464,9 +466,60 @@ a { color: inherit; text-decoration: none; }
   .track-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .track-num { display: none; }
 }
+
+/* ── Timeline segment interactive states ── */
+.tl-segment--hover {
+  outline: 2px solid rgba(255,255,255,0.6);
+  outline-offset: -1px;
+  z-index: 2;
+}
+.tl-segment--active {
+  outline: 2px solid #fff;
+  outline-offset: -1px;
+  z-index: 3;
+  opacity: 1 !important;
+}
+
+/* ── Track card active state ── */
+.track-card--active {
+  border-color: #fff !important;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.25), 0 0 12px rgba(255,255,255,0.12);
+  background: #1a1a1a !important;
+  animation: card-pulse 0.5s ease-out 1;
+}
+@keyframes card-pulse {
+  0%   { box-shadow: 0 0 0 4px rgba(255,255,255,0.45), 0 0 20px rgba(255,255,255,0.2); }
+  100% { box-shadow: 0 0 0 2px rgba(255,255,255,0.25), 0 0 12px rgba(255,255,255,0.12); }
+}
+
+/* ── Custom tooltip ── */
+#tl-tooltip {
+  position: fixed;
+  z-index: 9000;
+  pointer-events: none;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 7px;
+  padding: 9px 13px;
+  min-width: 180px;
+  max-width: 280px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  opacity: 0;
+  transition: opacity 0.12s;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+#tl-tooltip.visible { opacity: 1; }
+.tl-tip-num  { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #555; font-weight: 600; }
+.tl-tip-track { font-size: 13px; font-weight: 600; color: #fff; line-height: 1.3; word-break: break-word; }
+.tl-tip-time { font-size: 11px; font-family: 'Courier New', monospace; color: #888; font-variant-numeric: tabular-nums; }
+.tl-tip-badge { margin-top: 2px; align-self: flex-start; padding: 1px 7px; border-radius: 10px; border: 1px solid; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
 """
 
 JS = """
+let activeIdx = null;
+
 // ── Search ──
 const searchInput = document.getElementById('searchInput');
 searchInput.addEventListener('input', applyFilters);
@@ -504,6 +557,12 @@ function applyFilters() {
     const match = conf === 'all' || seg.dataset.conf === conf;
     seg.style.opacity = match ? '0.85' : '0.15';
   });
+
+  // Re-assert opacity on active segment (it should not be dimmed)
+  if (activeIdx !== null) {
+    document.querySelector('.tl-segment[data-track-idx="' + activeIdx + '"]')
+      ?.style.setProperty('opacity', '1');
+  }
 }
 
 // ── Copy to clipboard ──
@@ -530,6 +589,92 @@ function showToast() {
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 1800);
 }
+
+// ── Timeline Interactivity ──
+const tooltip  = document.getElementById('tl-tooltip');
+const tipNum   = tooltip.querySelector('.tl-tip-num');
+const tipTrack = tooltip.querySelector('.tl-tip-track');
+const tipTime  = tooltip.querySelector('.tl-tip-time');
+const tipBadge = tooltip.querySelector('.tl-tip-badge');
+
+function positionTooltip(cx, cy) {
+  const OFFSET = 14, vw = window.innerWidth, vh = window.innerHeight;
+  const tw = tooltip.offsetWidth || 200, th = tooltip.offsetHeight || 90;
+  let left = cx + OFFSET, top = cy + OFFSET;
+  if (left + tw > vw - 8) left = cx - tw - OFFSET;
+  if (top  + th > vh - 8) top  = cy - th - OFFSET;
+  tooltip.style.left = Math.max(8, left) + 'px';
+  tooltip.style.top  = Math.max(8, top)  + 'px';
+}
+
+function populateTooltip(seg) {
+  tipNum.textContent   = 'Track #' + seg.dataset.trackIdx;
+  tipTrack.textContent = seg.dataset.artist + ' \u2014 ' + seg.dataset.title;
+  tipTime.textContent  = seg.dataset.time;
+  tipBadge.textContent = seg.dataset.conf;
+  tipBadge.style.borderColor = seg.dataset.color;
+  tipBadge.style.color       = seg.dataset.color;
+}
+
+function clearActive() {
+  if (activeIdx === null) return;
+  document.querySelector('.tl-segment[data-track-idx="' + activeIdx + '"]')
+    ?.classList.remove('tl-segment--active');
+  const card = document.querySelector('.track-card[data-track-idx="' + activeIdx + '"]');
+  if (card) { card.classList.remove('track-card--active'); void card.offsetWidth; }
+  activeIdx = null;
+}
+
+function setActive(idx) {
+  const seg  = document.querySelector('.tl-segment[data-track-idx="' + idx + '"]');
+  const card = document.querySelector('.track-card[data-track-idx="' + idx + '"]');
+  if (!seg) return;
+  seg.classList.add('tl-segment--active');
+  if (card && !card.hidden) {
+    card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
+    card.classList.add('track-card--active');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  activeIdx = idx;
+}
+
+document.querySelectorAll('.tl-segment').forEach(seg => {
+  seg.addEventListener('mouseenter', e => {
+    populateTooltip(seg);
+    positionTooltip(e.clientX, e.clientY);
+    tooltip.classList.add('visible');
+    if (seg.dataset.trackIdx !== String(activeIdx))
+      seg.classList.add('tl-segment--hover');
+  });
+  seg.addEventListener('mousemove', e => { positionTooltip(e.clientX, e.clientY); });
+  seg.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+    seg.classList.remove('tl-segment--hover');
+  });
+  seg.addEventListener('click', e => {
+    e.stopPropagation();
+    const idx = seg.dataset.trackIdx;
+    if (String(activeIdx) === idx) { clearActive(); }
+    else { clearActive(); setActive(idx); }
+  });
+});
+
+document.querySelectorAll('.track-card').forEach(card => {
+  card.addEventListener('mouseenter', () => {
+    const idx = card.dataset.trackIdx;
+    if (idx !== String(activeIdx))
+      document.querySelector('.tl-segment[data-track-idx="' + idx + '"]')
+        ?.classList.add('tl-segment--hover');
+  });
+  card.addEventListener('mouseleave', () => {
+    const idx = card.dataset.trackIdx;
+    if (idx !== String(activeIdx))
+      document.querySelector('.tl-segment[data-track-idx="' + idx + '"]')
+        ?.classList.remove('tl-segment--hover');
+  });
+});
+
+document.addEventListener('click', () => { clearActive(); });
 """
 
 
@@ -1082,6 +1227,12 @@ class HtmlFormatter:
 
 </div><!-- /.container -->
 
+<div id="tl-tooltip" aria-hidden="true">
+  <div class="tl-tip-num"></div>
+  <div class="tl-tip-track"></div>
+  <div class="tl-tip-time"></div>
+  <div class="tl-tip-badge"></div>
+</div>
 <div id="toast">Copied!</div>
 
 <script>{JS}</script>
