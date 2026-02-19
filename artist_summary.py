@@ -77,11 +77,13 @@ class ArtistSummarizer:
                     end_fmt   = track.get("end_time_formatted") or ""
                     time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
                     all_tracks.append({
-                        "artist":     track["artist"],
-                        "title":      track["title"],
-                        "spotify_url": track.get("spotify_url"),
-                        "from_set":   set_title,
-                        "time_range": time_range,
+                        "artist":          track["artist"],
+                        "title":           track["title"],
+                        "spotify_url":     track.get("spotify_url"),
+                        "from_set":        set_title,
+                        "time_range":      time_range,
+                        "source_deep_link": track.get("source_deep_link"),
+                        "set_html_rel":    set_html_rel,
                     })
 
         # Include manually-migrated sets that weren't part of this discovery run.
@@ -133,11 +135,13 @@ class ArtistSummarizer:
                     end_fmt   = track.get("end_time_formatted") or ""
                     time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
                     all_tracks.append({
-                        "artist":     track["artist"],
-                        "title":      track["title"],
-                        "spotify_url": track.get("spotify_url"),
-                        "from_set":   set_title,
-                        "time_range": time_range,
+                        "artist":          track["artist"],
+                        "title":           track["title"],
+                        "spotify_url":     track.get("spotify_url"),
+                        "from_set":        set_title,
+                        "time_range":      time_range,
+                        "source_deep_link": track.get("source_deep_link"),
+                        "set_html_rel":    set_html_rel,
                     })
 
         track_counter = Counter()
@@ -153,8 +157,10 @@ class ArtistSummarizer:
                     "appearances": [],
                 }
             track_info[key]["appearances"].append({
-                "set_title":  t["from_set"],
-                "time_range": t.get("time_range", ""),
+                "set_title":       t["from_set"],
+                "time_range":      t.get("time_range", ""),
+                "source_deep_link": t.get("source_deep_link"),
+                "set_html_rel":    t.get("set_html_rel"),
             })
 
         output_fmt = OutputFormatter(artist_manager=self._artist_manager)
