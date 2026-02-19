@@ -901,6 +901,18 @@ h2 {
   font-size: 10px;
 }
 
+.app-chip-title { transition: color 0.15s; }
+.app-chip-title:hover { color: #fff; }
+
+.app-chip-time {
+  color: #00e676;
+  font-variant-numeric: tabular-nums;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  transition: opacity 0.15s;
+}
+.app-chip-time:hover { opacity: 0.7; text-decoration: underline; }
+
 .track-actions {
   display: flex;
   gap: 6px;
@@ -1039,12 +1051,36 @@ def _render_most_played(track_counter, track_info: dict) -> str:
         if appearances:
             chips = []
             for app in appearances:
-                time_part = (
-                    f'<span class="app-time">\u00a0{_esc(app["time_range"])}</span>'
-                    if app.get('time_range') else ''
-                )
+                set_html_rel = app.get('set_html_rel') or ''
+                deep_link    = app.get('source_deep_link') or ''
+
+                # Set title: clickable link to set HTML when available
+                if set_html_rel:
+                    title_html = (
+                        f'<a class="app-chip-title"'
+                        f' href="{_esc(quote(set_html_rel, safe="/"))}"'
+                        f' title="Open setlist">'
+                        f'{_esc(app["set_title"])}</a>'
+                    )
+                else:
+                    title_html = _esc(app["set_title"])
+
+                # Timestamp: clickable link to source audio at that moment
+                if app.get('time_range') and deep_link:
+                    time_html = (
+                        f'<a class="app-chip-time"'
+                        f' href="{_esc(deep_link)}"'
+                        f' target="_blank" rel="noopener"'
+                        f' title="Listen at this timestamp">'
+                        f'\u00a0{_esc(app["time_range"])}</a>'
+                    )
+                elif app.get('time_range'):
+                    time_html = f'<span class="app-time">\u00a0{_esc(app["time_range"])}</span>'
+                else:
+                    time_html = ''
+
                 chips.append(
-                    f'<span class="app-chip">{_esc(app["set_title"])}{time_part}</span>'
+                    f'<span class="app-chip">{title_html}{time_html}</span>'
                 )
             app_chips = f'<div class="appearances">{"".join(chips)}</div>'
 
