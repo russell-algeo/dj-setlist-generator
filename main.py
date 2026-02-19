@@ -42,7 +42,7 @@ class SetlistGenerator:
         print("=" * 70)
 
         # Step 1: Get video info first to get mix name
-        print("\n[1/6] Fetching video information...")
+        print("\n[1/5] Fetching video information...")
         temp_downloader = AudioDownloader()
         mix_info = temp_downloader.get_video_info(url)
         mix_info['url'] = url  # Store original URL for playlist description
@@ -98,12 +98,11 @@ class SetlistGenerator:
                 print(f"   Loaded {len(recognitions)} recognition results")
 
                 audio_file = None
-                segments = None
             else:
-                # Normal flow: download, segment, recognize
+                # Normal flow: download, then stream segment+recognize.
 
                 # Step 2: Download audio (or skip if exists)
-                print("\n[2/6] Downloading audio...")
+                print("\n[2/5] Downloading audio...")
                 audio_path = checkpoint_manager.audio_file
                 audio_file = downloader.download(url, output_path=audio_path)
 
@@ -113,31 +112,21 @@ class SetlistGenerator:
                         'mix_info': mix_info
                     })
 
-                # Step 3: Segment audio (or load existing)
-                print("\n[3/6] Segmenting audio...")
-                # Only reuse existing segments if checkpoint confirms segmentation completed.
-                # If checkpoint is 'downloaded' or absent, segmentation may have been interrupted
-                # leaving partial segments on disk.
-                segmentation_confirmed = checkpoint and checkpoint['stage'] in ('segmented', 'recognizing')
-                segments = segmenter.create_segments(audio_file, force_recreate=not segmentation_confirmed)
-
-                if not checkpoint or checkpoint['stage'] in ['downloaded', 'segmented']:
-                    checkpoint_manager.save_checkpoint('segmented', {
-                        'audio_file': str(audio_file),
-                        'segment_count': len(segments),
-                        'mix_info': mix_info
-                    })
-
-                # Step 4: Recognize tracks (with resume support)
-                print("\n[4/6] Recognizing tracks...")
+                # Step 3: Streaming recognition — segments are created on-the-fly
+                # via FFmpeg (no full-file RAM load), recognized, then deleted
+                # immediately after each batch.  This avoids writing all 250-400
+                # segment files to disk before recognition can begin.
+                print("\n[3/5] Streaming recognition (segment + recognize on-the-fly)...")
                 should_resume = bool(checkpoint and checkpoint['stage'] == 'recognizing')
-                recognitions = await recognizer.recognize_all_segments(
-                    segments,
-                    resume_from_checkpoint=should_resume
+                recognitions = await recognizer.recognize_segments_streaming(
+                    audio_file,
+                    mix_duration=mix_info['duration'],
+                    segmenter=segmenter,
+                    resume_from_checkpoint=should_resume,
                 )
 
-            # Step 5: Build setlist
-            print("\n[5/6] Building setlist...")
+            # Step 4: Build setlist
+            print("\n[4/5] Building setlist...")
             tracks = self.builder.build_setlist(recognitions)
             tracks = self.builder.add_unknown_tracks(tracks, recognitions)
 
@@ -149,8 +138,8 @@ class SetlistGenerator:
                 icon = CONFIDENCE_ICONS.get(track.confidence, '⚪')
                 print(f"{i:2d}. [{format_time(track.start_time)}] {icon} {track.artist} - {track.title}")
 
-            # Step 6: Enrich and save
-            print("\n[6/6] Enriching metadata and saving...")
+            # Step 5: Enrich and save
+            print("\n[5/5] Enriching metadata and saving...")
             enriched_tracks = self.enricher.enrich_all_tracks(tracks)
 
             # Save outputs (use custom name or mix name)
