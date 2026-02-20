@@ -3,7 +3,7 @@
 from html import escape
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, parse_qs
 from config import Config
 from output_formatter import format_time, serialize_track
 
@@ -41,6 +41,157 @@ def _build_track_data(enriched_tracks: list, total_duration: float, source_url: 
     return rows
 
 
+def _detect_platform(source_url: str) -> tuple:
+    """Detect platform and extract embed identifier from source URL.
+
+    Returns:
+        (platform, embed_id) where platform is 'youtube', 'soundcloud', or 'unknown'
+        For YouTube: embed_id is the video ID
+        For SoundCloud: embed_id is the full track URL (needed for SC widget)
+    """
+    if not source_url:
+        return ('unknown', '')
+    try:
+        parsed = urlparse(source_url)
+        host = parsed.netloc.lower()
+        if 'youtube.com' in host:
+            qs = parse_qs(parsed.query)
+            video_ids = qs.get('v', [])
+            if video_ids:
+                return ('youtube', video_ids[0])
+        elif 'youtu.be' in host:
+            video_id = parsed.path.lstrip('/')
+            if video_id:
+                return ('youtube', video_id)
+        elif 'soundcloud.com' in host:
+            # SC widget needs the full track URL (without timestamp fragment)
+            clean_url = source_url.split('#')[0]
+            return ('soundcloud', clean_url)
+    except Exception:
+        pass
+    return ('unknown', '')
+
+
+def _render_player(platform: str, embed_id: str) -> str:
+    """Return the embedded player HTML for the detected platform."""
+    if platform == 'youtube':
+        return '''<div class="player-wrap" id="playerWrap">
+  <div id="ytPlayer"></div>
+</div>'''
+    elif platform == 'soundcloud':
+        encoded_url = quote(embed_id, safe='')
+        return (
+            f'<div class="player-wrap sc" id="playerWrap">\n'
+            f'  <iframe id="scWidget" scrolling="no" frameborder="no" allow="autoplay"\n'
+            f'    src="https://w.soundcloud.com/player/?url={encoded_url}'
+            f'&auto_play=false&show_artwork=true&color=%2300e676&hide_related=true">\n'
+            f'  </iframe>\n'
+            f'</div>'
+        )
+    return ''
+
+
+def _render_player_js(platform: str, embed_id: str, tracks: list) -> str:
+    """Return platform-specific player JS including trackTimes array and now-playing logic."""
+    if platform == 'unknown':
+        return ''
+
+    # Build trackTimes array from tracks list
+    track_times_entries = []
+    for t in tracks:
+        track_times_entries.append(
+            f'  {{idx: "{t["position"]}", start: {t["start_time"]:.3f}, end: {t["end_time"]:.3f}}}'
+        )
+    track_times_js = 'const trackTimes = [\n' + ',\n'.join(track_times_entries) + '\n];'
+
+    now_playing_js = """
+let nowPlayingInterval = null;
+
+function startNowPlaying() {
+  if (nowPlayingInterval) return;
+  nowPlayingInterval = setInterval(updateNowPlaying, 1000);
+}
+
+function stopNowPlaying() {
+  clearInterval(nowPlayingInterval);
+  nowPlayingInterval = null;
+}
+
+function updateNowPlaying() {
+  if (typeof player !== 'undefined' && player && player.getCurrentTime) {
+    highlightTrackAt(player.getCurrentTime());
+    return;
+  }
+  if (typeof widget !== 'undefined' && widget && widget.getPosition) {
+    widget.getPosition(function(pos) { highlightTrackAt(pos / 1000); });
+  }
+}
+
+function highlightTrackAt(seconds) {
+  const match = trackTimes.find(t => seconds >= t.start && seconds < t.end);
+  if (match && match.idx !== String(activeIdx)) {
+    clearActive();
+    setActive(String(match.idx));
+  }
+}
+"""
+
+    if platform == 'youtube':
+        return f"""<script>
+{track_times_js}
+
+var tag = document.createElement('script');
+tag.src = "https://www.youtube.com/iframe_api";
+var firstScriptTag = document.getElementsByTagName('script')[0];
+firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+var player;
+function onYouTubeIframeAPIReady() {{
+  player = new YT.Player('ytPlayer', {{
+    videoId: '{embed_id}',
+    playerVars: {{ autoplay: 0, modestbranding: 1, rel: 0 }},
+    events: {{
+      onReady: function() {{ console.log('YT player ready'); }},
+      onStateChange: function(e) {{
+        if (e.data === YT.PlayerState.PLAYING) startNowPlaying();
+        else stopNowPlaying();
+      }}
+    }}
+  }});
+}}
+
+function seekPlayer(seconds) {{
+  if (player && player.seekTo) {{
+    player.seekTo(seconds, true);
+    player.playVideo();
+  }}
+}}
+{now_playing_js}
+</script>"""
+
+    elif platform == 'soundcloud':
+        return f"""<script src="https://w.soundcloud.com/player/api.js"></script>
+<script>
+{track_times_js}
+
+var widget = SC.Widget(document.getElementById('scWidget'));
+widget.bind(SC.Widget.Events.READY, function() {{
+  console.log('SC widget ready');
+}});
+widget.bind(SC.Widget.Events.PLAY, function() {{ startNowPlaying(); }});
+widget.bind(SC.Widget.Events.PAUSE, function() {{ stopNowPlaying(); }});
+widget.bind(SC.Widget.Events.FINISH, function() {{ stopNowPlaying(); }});
+
+function seekPlayer(seconds) {{
+  widget.seekTo(seconds * 1000);
+  widget.play();
+}}
+{now_playing_js}
+</script>"""
+
+    return ''
+
+
 def _render_timeline(tracks: list, total_duration: float) -> str:
     """Render the mix timeline as HTML segments."""
     segments_html = []
@@ -63,7 +214,7 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
     return '\n'.join(segments_html)
 
 
-def _render_track_cards(tracks: list) -> str:
+def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
     """Render individual track cards as HTML."""
     cards = []
     for t in tracks:
@@ -97,7 +248,19 @@ def _render_track_cards(tracks: list) -> str:
         deep_link = t.get('source_deep_link') or ''
         start_esc = _esc(t['start_time_formatted'])
         end_esc   = _esc(t['end_time_formatted'])
-        if deep_link:
+        start_seconds = t['start_time']
+
+        if platform in ('youtube', 'soundcloud'):
+            # Timestamp seeks the embedded player instead of opening a new tab
+            time_cell = (
+                f'<div class="track-time">'
+                f'<a class="track-time-link" href="#" '
+                f'onclick="seekPlayer({start_seconds:.3f}); return false;" '
+                f'title="Jump to this track">{start_esc}</a>'
+                f'<span class="track-time-sep"> \u2013 </span>{end_esc}'
+                f'</div>'
+            )
+        elif deep_link:
             time_cell = (
                 f'<div class="track-time">'
                 f'<a class="track-time-link" '
@@ -170,6 +333,14 @@ def _render_track_cards(tracks: list) -> str:
   </div>
 </div>'''
 
+        # Play button (seeks embedded player)
+        play_btn = (
+            f'<button class="btn btn-play" onclick="seekPlayer({start_seconds:.3f})" '
+            f'title="Play from here">&#9654;</button>'
+            if platform in ('youtube', 'soundcloud') else ''
+        )
+
+
         cards.append(f'''
 <div class="track-card" draggable="true" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
   <div class="track-num">{t["position"]}</div>
@@ -189,6 +360,7 @@ def _render_track_cards(tracks: list) -> str:
     </div>
   </div>
   <div class="track-actions">
+    {play_btn}
     {links_block}
     {preview_btn}
     <button class="btn btn-expand-details" onclick="toggleDetails(this)" title="Detection details">&#8943;</button>
@@ -646,6 +818,39 @@ a { color: inherit; text-decoration: none; }
 .track-card--dragging { opacity: 0.4; }
 .track-card--dragover { border-color: #00e676 !important; background: #1a2a1a !important; }
 
+/* ── Player ── */
+.player-wrap {
+  margin-bottom: 24px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #222;
+  background: #111;
+}
+.player-wrap iframe, .player-wrap #ytPlayer {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+}
+.player-wrap.sc iframe { height: 166px; aspect-ratio: auto; }
+
+.btn-play { color: #00e676; border-color: #00e676; font-size: 11px; padding: 3px 8px; }
+
+.track-card--now-playing {
+  border-left: 3px solid #00e676;
+}
+.track-card--now-playing .track-num::before {
+  content: '\25B6 ';
+  color: #00e676;
+}
+
+@media (max-width: 600px) {
+  .player-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+}
+
 /* ── Custom tooltip ── */
 #tl-tooltip {
   position: fixed;
@@ -816,7 +1021,13 @@ document.querySelectorAll('.tl-segment').forEach(seg => {
     e.stopPropagation();
     const idx = seg.dataset.trackIdx;
     if (String(activeIdx) === idx) { clearActive(); }
-    else { clearActive(); setActive(idx); }
+    else {
+      clearActive(); setActive(idx);
+      if (typeof trackTimes !== 'undefined') {
+        const trackTime = trackTimes.find(t => t.idx === idx);
+        if (trackTime && typeof seekPlayer === 'function') seekPlayer(trackTime.start);
+      }
+    }
   });
 });
 
@@ -1434,6 +1645,9 @@ class HtmlFormatter:
         source_url = mix_info.get('url', '')
         tracks = _build_track_data(enriched_tracks, total_duration, source_url=source_url)
 
+        # Detect embedded player platform
+        platform, embed_id = _detect_platform(source_url)
+
         # Confidence counts
         from collections import Counter
         counts    = Counter(t['confidence'] for t in tracks)
@@ -1443,7 +1657,9 @@ class HtmlFormatter:
         # Section HTML
         stats_html    = _render_stats(counts, total, recognized)
         timeline_html = _render_timeline(tracks, total_duration)
-        cards_html    = _render_track_cards(tracks)
+        cards_html    = _render_track_cards(tracks, platform)
+        player_html   = _render_player(platform, embed_id)
+        player_js     = _render_player_js(platform, embed_id, tracks)
 
         # Timeline tick marks (0%, 25%, 50%, 75%, 100%)
         ticks_html = ''.join(
@@ -1505,6 +1721,9 @@ class HtmlFormatter:
     </div>
   </header>
 
+  <!-- Embedded Player -->
+  {player_html}
+
   <!-- Stats -->
   {stats_html}
 
@@ -1550,6 +1769,7 @@ class HtmlFormatter:
 
 <script>{JS}</script>
 {_render_track_card_js()}
+{player_js}
 </body>
 </html>"""
 
