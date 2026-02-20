@@ -981,7 +981,315 @@ h2 {
   font-size: 12px;
   color: #444;
 }
+
+/* ── Track Frequency Heatmap ── */
+.heatmap-container {
+  overflow-x: auto;
+  margin-bottom: 48px;
+}
+
+.hm-header {
+  display: flex;
+  align-items: flex-end;
+  margin-bottom: 4px;
+}
+
+.hm-track-label {
+  width: 250px;
+  min-width: 250px;
+  font-size: 12px;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+}
+
+.hm-set-labels {
+  display: flex;
+  gap: 2px;
+}
+
+.hm-set-label {
+  width: 28px;
+  font-size: 9px;
+  color: #666;
+  transform-origin: bottom left;
+  transform: rotate(-55deg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+  height: 80px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.hm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hm-row {
+  display: flex;
+  align-items: center;
+}
+
+.hm-cells {
+  display: flex;
+  gap: 2px;
+}
+
+.hm-cell {
+  width: 28px;
+  height: 28px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+  opacity: 0.85;
+}
+.hm-cell:hover {
+  opacity: 1;
+  transform: scale(1.2);
+  z-index: 2;
+  position: relative;
+}
+
+.hm-cell--empty {
+  background: #1a1a1a;
+  cursor: default;
+}
+.hm-cell--empty:hover {
+  transform: none;
+  opacity: 0.85;
+}
+
+.hm-tooltip {
+  position: fixed;
+  z-index: 9000;
+  pointer-events: none;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 7px;
+  padding: 9px 13px;
+  min-width: 160px;
+  max-width: 280px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  opacity: 0;
+  transition: opacity 0.12s;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hm-tooltip.visible { opacity: 1; }
+
+.hm-tip-track {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.hm-tip-time {
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+
+.hm-tip-conf {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
 """
+
+
+def _build_heatmap_data(track_counter, track_info: dict, set_summaries: list) -> dict:
+    """Build the data needed for the heatmap visualization.
+
+    Returns a dict with:
+        set_titles: ordered list of set names
+        set_html_rels: list of relative HTML paths (or None) per set
+        rows: list of track row dicts, each with artist, title, track_key, and cells list.
+              Each cell: {'present': bool, 'confidence': str, 'time_range': str,
+                          'deep_link': str, 'set_html_rel': str}
+    """
+    set_titles = [s['title'] for s in set_summaries]
+    set_html_rels = [s.get('set_html_rel') for s in set_summaries]
+
+    rows = []
+    for track_key, _ in track_counter.most_common(30):
+        info = track_info.get(track_key, {})
+        appearances = info.get('appearances', [])
+
+        # Index appearances by set_title for O(1) lookup
+        # If a track appears multiple times in the same set, keep the highest confidence one
+        conf_order = {'HIGH': 4, 'MEDIUM': 3, 'LOW': 2, 'UNCERTAIN': 1}
+        by_set: dict[str, dict] = {}
+        for app in appearances:
+            st = app.get('set_title', '')
+            existing = by_set.get(st)
+            if existing is None or conf_order.get(app.get('confidence', 'UNCERTAIN'), 1) > conf_order.get(existing.get('confidence', 'UNCERTAIN'), 1):
+                by_set[st] = app
+
+        cells = []
+        for set_title in set_titles:
+            app = by_set.get(set_title)
+            if app:
+                cells.append({
+                    'present': True,
+                    'confidence': app.get('confidence', 'UNCERTAIN'),
+                    'time_range': app.get('time_range', ''),
+                    'deep_link': app.get('source_deep_link') or '',
+                    'set_html_rel': app.get('set_html_rel') or '',
+                })
+            else:
+                cells.append({'present': False})
+
+        rows.append({
+            'track_key': track_key,
+            'artist': info.get('artist', ''),
+            'title': info.get('title', track_key),
+            'cells': cells,
+        })
+
+    return {
+        'set_titles': set_titles,
+        'set_html_rels': set_html_rels,
+        'rows': rows,
+    }
+
+
+def _render_heatmap(heatmap_data: dict) -> str:
+    """Render the track frequency heatmap as HTML."""
+    set_titles = heatmap_data['set_titles']
+    rows = heatmap_data['rows']
+
+    if not rows or not set_titles:
+        return '<p class="empty">Not enough data to display heatmap.</p>'
+
+    conf_colors = {
+        'HIGH': '#00e676',
+        'MEDIUM': '#ffd740',
+        'LOW': '#ff9100',
+        'UNCERTAIN': '#757575',
+    }
+
+    # Column headers (rotated set names)
+    header_labels = []
+    for title in set_titles:
+        header_labels.append(
+            f'<div class="hm-set-label">{_esc(title)}</div>'
+        )
+    headers_html = '\n'.join(header_labels)
+
+    # Rows
+    row_htmls = []
+    for row in rows:
+        label = f'{_esc(row["artist"])} \u2014 {_esc(row["title"])}'
+
+        cells_html_parts = []
+        for cell in row['cells']:
+            if not cell['present']:
+                cells_html_parts.append('<div class="hm-cell hm-cell--empty"></div>')
+            else:
+                conf = cell['confidence']
+                color = conf_colors.get(conf, '#757575')
+                set_html_rel = _esc(cell['set_html_rel'])
+                deep_link = _esc(cell['deep_link'])
+                time_range = _esc(cell['time_range'])
+                track_label = _esc(f'{row["artist"]} — {row["title"]}')
+                # Find the set title for this cell
+                # We rely on the same ordering as set_titles; find the index via the cell's set_html_rel
+                # Use data attributes for JS to pick up
+                navigate_target = set_html_rel or deep_link
+                cells_html_parts.append(
+                    f'<div class="hm-cell" '
+                    f'style="background:{color};" '
+                    f'data-track="{track_label}" '
+                    f'data-time="{time_range}" '
+                    f'data-conf="{_esc(conf)}" '
+                    f'data-href="{navigate_target}" '
+                    f'onclick="navigateHmCell(this)"></div>'
+                )
+        cells_block = '\n'.join(cells_html_parts)
+
+        row_htmls.append(f'''<div class="hm-row">
+  <div class="hm-track-label" title="{label}">{label}</div>
+  <div class="hm-cells">
+    {cells_block}
+  </div>
+</div>''')
+
+    rows_html = '\n'.join(row_htmls)
+
+    # Tooltip div + JS injected inline at bottom of the heatmap container
+    hm_js = """<script>
+(function() {
+  var hmTooltip = document.getElementById('hm-tooltip');
+  if (!hmTooltip) return;
+
+  document.querySelectorAll('.hm-cell:not(.hm-cell--empty)').forEach(function(cell) {
+    cell.addEventListener('mouseenter', function(e) {
+      hmTooltip.querySelector('.hm-tip-track').textContent = this.dataset.track;
+      hmTooltip.querySelector('.hm-tip-time').textContent = this.dataset.time || '';
+      var confEl = hmTooltip.querySelector('.hm-tip-conf');
+      confEl.textContent = this.dataset.conf;
+      confEl.style.color = getHmConfColor(this.dataset.conf);
+      positionHmTooltip(e.clientX, e.clientY);
+      hmTooltip.classList.add('visible');
+    });
+    cell.addEventListener('mousemove', function(e) {
+      positionHmTooltip(e.clientX, e.clientY);
+    });
+    cell.addEventListener('mouseleave', function() {
+      hmTooltip.classList.remove('visible');
+    });
+  });
+
+  function getHmConfColor(conf) {
+    return {HIGH: '#00e676', MEDIUM: '#ffd740', LOW: '#ff9100', UNCERTAIN: '#757575'}[conf] || '#757575';
+  }
+
+  function positionHmTooltip(cx, cy) {
+    var OFFSET = 14, vw = window.innerWidth, vh = window.innerHeight;
+    var tw = hmTooltip.offsetWidth || 200, th = hmTooltip.offsetHeight || 80;
+    var left = cx + OFFSET, top = cy + OFFSET;
+    if (left + tw > vw - 8) left = cx - tw - OFFSET;
+    if (top + th > vh - 8) top = cy - th - OFFSET;
+    hmTooltip.style.left = Math.max(8, left) + 'px';
+    hmTooltip.style.top = Math.max(8, top) + 'px';
+  }
+})();
+
+function navigateHmCell(cell) {
+  var href = cell.dataset.href;
+  if (href) window.open(href, '_self');
+}
+</script>"""
+
+    return f'''<div class="heatmap-container">
+  <div class="hm-header">
+    <div class="hm-track-label"></div>
+    <div class="hm-set-labels">
+      {headers_html}
+    </div>
+  </div>
+  <div class="hm-body">
+    {rows_html}
+  </div>
+</div>
+<div id="hm-tooltip" class="hm-tooltip" aria-hidden="true">
+  <div class="hm-tip-track"></div>
+  <div class="hm-tip-time"></div>
+  <div class="hm-tip-conf"></div>
+</div>
+{hm_js}'''
 
 
 def _render_set_cards(set_summaries: list) -> str:
@@ -1297,9 +1605,11 @@ class HtmlFormatter:
         total_appearances = sum(track_counter.values())
         repeat_tracks = sum(1 for c in track_counter.values() if c > 1)
 
-        sets_html   = _render_set_cards(set_summaries)
-        played_html = _render_most_played(track_counter, track_info)
-        failed_html = _render_failed_section(failed)
+        sets_html    = _render_set_cards(set_summaries)
+        played_html  = _render_most_played(track_counter, track_info)
+        failed_html  = _render_failed_section(failed)
+        heatmap_data = _build_heatmap_data(track_counter, track_info, set_summaries)
+        heatmap_html = _render_heatmap(heatmap_data)
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1341,6 +1651,11 @@ class HtmlFormatter:
     <div class="sets-grid">
       {sets_html}
     </div>
+  </section>
+
+  <section>
+    <h2>Track Frequency Heatmap</h2>
+    {heatmap_html}
   </section>
 
   <section>

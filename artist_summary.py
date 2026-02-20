@@ -84,6 +84,7 @@ class ArtistSummarizer:
                         "time_range":      time_range,
                         "source_deep_link": track.get("source_deep_link"),
                         "set_html_rel":    set_html_rel,
+                        "confidence":      track.get("confidence", "UNCERTAIN"),
                     })
 
         # Include manually-migrated sets that weren't part of this discovery run.
@@ -142,6 +143,7 @@ class ArtistSummarizer:
                         "time_range":      time_range,
                         "source_deep_link": track.get("source_deep_link"),
                         "set_html_rel":    set_html_rel,
+                        "confidence":      track.get("confidence", "UNCERTAIN"),
                     })
 
         track_counter = Counter()
@@ -161,6 +163,7 @@ class ArtistSummarizer:
                 "time_range":      t.get("time_range", ""),
                 "source_deep_link": t.get("source_deep_link"),
                 "set_html_rel":    t.get("set_html_rel"),
+                "confidence":      t.get("confidence", "UNCERTAIN"),
             })
 
         output_fmt = OutputFormatter(artist_manager=self._artist_manager)
