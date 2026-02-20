@@ -178,8 +178,9 @@ class TrackRecognizer:
           3. Delete the segment files immediately after recognition.
           4. Save a 'recognizing' checkpoint and move to the next batch.
 
-        Peak disk usage is limited to roughly BATCH_SIZE × ~0.5 MB of segment files
-        rather than the full 500 MB+ that writing all segments up-front requires.
+        Peak disk usage is limited to roughly 3×BATCH_SIZE × ~0.5 MB of segment files
+        (one batch being recognised, one queued, one being extracted) rather than
+        the full 500 MB+ that writing all segments up-front requires.
 
         Checkpoint resumption works by inspecting how many recognitions are already
         stored; segment creation restarts from that index using the still-present
@@ -252,9 +253,12 @@ class TrackRecognizer:
         # The producer extracts FFmpeg segments for batch N+1 while the
         # consumer is recognising batch N with Shazam, hiding the FFmpeg
         # overhead inside the (much longer) network-bound recognition phase.
-        # maxsize=1 caps pre-extraction at one batch ahead, so at most
-        # 2×BATCH_SIZE segment files exist on disk at any moment.
+        # maxsize=1 limits the queue to one pre-extracted batch, but because
+        # the producer completes extraction before blocking on queue.put(), a
+        # third batch's files can land on disk while waiting for queue space.
+        # Peak disk usage is therefore ~3×BATCH_SIZE segment files.
         max_ffmpeg_workers = min(Config.BATCH_SIZE, 4)
+        total_batches = (total - start_index + Config.BATCH_SIZE - 1) // Config.BATCH_SIZE
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_ffmpeg_workers) as executor:
             queue: asyncio.Queue = asyncio.Queue(maxsize=1)
@@ -262,9 +266,10 @@ class TrackRecognizer:
             async def _producer() -> None:
                 for batch_start in range(start_index, total, Config.BATCH_SIZE):
                     batch_end = min(batch_start + Config.BATCH_SIZE, total)
+                    batch_num = (batch_start - start_index) // Config.BATCH_SIZE + 1
                     print(
-                        f"\n  Extracting segments {batch_start}–{batch_end - 1} "
-                        f"of {total - 1} via FFmpeg..."
+                        f"\n⚙️  [Batch {batch_num}/{total_batches}] "
+                        f"Extracting segments {batch_start}–{batch_end - 1}..."
                     )
                     try:
                         segments = await segmenter.create_segments_batch(
