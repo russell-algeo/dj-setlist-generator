@@ -633,7 +633,14 @@ function setActive(idx) {
   if (card && !card.hidden) {
     card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
     card.classList.add('track-card--active');
-    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const rect = card.getBoundingClientRect();
+    const viewH = window.innerHeight;
+    // Target: card top at ~67% down the viewport (bottom third)
+    const targetTop = viewH * 0.67;
+    const offset = rect.top - targetTop;
+    if (offset > 0 || rect.bottom > viewH) {
+      window.scrollBy({ top: offset, behavior: 'smooth' });
+    }
   }
   activeIdx = idx;
 }
