@@ -124,16 +124,17 @@ class DjSetDiscoverer:
 _EXCLUDE_KEYWORDS = [
     "interview", "premiere", "panel", "review", "trailer", "reaction",
     "tutorial", "official video", "music video", "teaser",
-    "behind the scenes", "unboxing", "podcast", "tribute"
+    "behind the scenes", "unboxing", "tribute"
 ]
 
 
-_YT_GENERIC_TERMS = ["DJ set", "live set", "mix"]
-_YT_CHANNELS = [
+_GENERIC_TERMS = ["DJ set", "live set", "mix", "guest mix", "b2b", "live", "podcast"]
+_CHANNELS = [
     "Boiler Room", "HÖR Berlin", "Cercle",
     "Resident Advisor", "Dekmantel", "Mixmag",
+    "themuddshow", "Dimensions Festival", "fabric",
+    "XLR8R", "Rinse FM", "Robot Heart", "MEOKO", "Desert Hearts",
 ]
-_SC_TERMS = ["DJ set", "mix", "live"]
 
 
 def _build_search_queries(artist_name: str) -> list[str]:
@@ -141,11 +142,10 @@ def _build_search_queries(artist_name: str) -> list[str]:
     n = Config.DISCOVERY_RESULTS_PER_QUERY
     quoted = f'"{artist_name}"'
 
-    yt_terms = [f"{quoted} {t}" for t in _YT_GENERIC_TERMS + _YT_CHANNELS]
-    sc_terms = [f"{quoted} {t}" for t in _SC_TERMS]
+    terms = [f"{quoted} {t}" for t in _GENERIC_TERMS + _CHANNELS]
 
-    queries = [f"ytsearch{n}:{term}" for term in yt_terms]
-    queries += [f"scsearch{n}:{term}" for term in sc_terms]
+    queries = [f"ytsearch{n}:{term}" for term in terms]
+    queries += [f"scsearch{n}:{term}" for term in terms]
     return queries
 
 

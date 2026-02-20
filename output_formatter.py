@@ -238,7 +238,7 @@ class OutputFormatter:
         lines = []
         lines.append(f"# {artist_name} - DJ Set Analysis")
         lines.append(f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append(f"**Sets Analyzed:** {len(successful)} successful, {len(failed)} failed")
+        lines.append(f"**Sets Analyzed:** {len(set_summaries)} successful, {len(failed)} failed")
         lines.append(f"**Unique Tracks Found:** {len(track_counter)}")
 
         lines.append(f"\n---\n")
@@ -280,7 +280,7 @@ class OutputFormatter:
             "artist": artist_name,
             "generated_at": datetime.now().isoformat(),
             "stats": {
-                "sets_analyzed": len(successful),
+                "sets_analyzed": len(set_summaries),
                 "sets_failed": len(failed),
                 "unique_tracks": len(track_counter),
                 "total_track_appearances": len(all_tracks),
