@@ -113,9 +113,67 @@ def _render_track_cards(tracks: list) -> str:
                 f'</div>'
             )
 
+        # Album art
+        album_art_url = t.get('spotify_album_art')
+        if album_art_url:
+            art_cell = (
+                f'<div class="track-art">'
+                f'<img src="{_esc(album_art_url)}" alt="" loading="lazy">'
+                f'</div>'
+            )
+        else:
+            art_cell = '<div class="track-art track-art--empty">\u266a</div>'
+
+        # Genre tags
+        genres = t.get('spotify_genres') or []
+        genre_tags = ''.join(
+            f'<span class="genre-tag">{_esc(g)}</span>' for g in genres
+        )
+
+        # BPM and key
+        bpm = t.get('spotify_bpm')
+        key = t.get('spotify_key') or ''
+        bpm_key_html = ''
+        if bpm or key:
+            parts = []
+            if bpm:
+                parts.append(f'{bpm} BPM')
+            if key:
+                parts.append(key)
+            bpm_key_html = f'<span class="track-bpm-key">{_esc(" · ".join(parts))}</span>'
+
+        # Audio preview button
+        preview_url = t.get('spotify_preview_url')
+        preview_btn = ''
+        if preview_url:
+            preview_btn = (
+                f'<button class="btn btn-preview" '
+                f'onclick="togglePreview(this, \'{_esc(preview_url)}\')" '
+                f'title="30s preview">\u266b Preview</button>'
+            )
+
+        # Detection details panel
+        density_fill = f"{t['cluster_density'] * 100:.0f}%"
+        details_panel = f'''<div class="track-details" hidden>
+  <div class="detail-row">
+    <span class="detail-label">Detection count:</span>
+    <span class="detail-value">{t["detection_count"]}</span>
+  </div>
+  <div class="detail-row">
+    <span class="detail-label">Cluster span:</span>
+    <span class="detail-value">{t["cluster_span"]} segments</span>
+  </div>
+  <div class="detail-row">
+    <span class="detail-label">Density:</span>
+    <div class="detail-density-bar"><div class="detail-density-fill" style="width:{density_fill};"></div></div>
+    <span class="detail-value">{density_pct}</span>
+  </div>
+</div>'''
+
         cards.append(f'''
-<div class="track-card" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
+<div class="track-card" draggable="true" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
   <div class="track-num">{t["position"]}</div>
+  {art_cell}
   {time_cell}
   <div class="track-info">
     <div class="track-title-row">
@@ -126,12 +184,17 @@ def _render_track_cards(tracks: list) -> str:
     <div class="track-meta">
       <span class="conf-badge {cls}" style="border-color:{color};color:{color};">{_esc(conf)}</span>
       <span class="track-stats">{t["detection_count"]} detections &middot; {density_pct} density</span>
+      {genre_tags}
+      {bpm_key_html}
     </div>
   </div>
   <div class="track-actions">
     {links_block}
+    {preview_btn}
+    <button class="btn btn-expand-details" onclick="toggleDetails(this)" title="Detection details">&#8943;</button>
     <button class="btn btn-copy" onclick="copyTrack(this)" data-text="{copy_val}" title="Copy to clipboard">&#128203;</button>
   </div>
+  {details_panel}
 </div>''')
 
     return '\n'.join(cards)
@@ -315,7 +378,7 @@ a { color: inherit; text-decoration: none; }
 
 .track-card {
   display: grid;
-  grid-template-columns: 36px max-content 1fr auto;
+  grid-template-columns: 36px 48px max-content 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -323,6 +386,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid #1e1e1e;
   border-radius: 6px;
   transition: background 0.15s, border-color 0.15s;
+  cursor: grab;
 }
 .track-card:hover { background: #161616; border-color: #2a2a2a; }
 .track-card[hidden] { display: none; }
@@ -463,6 +527,7 @@ a { color: inherit; text-decoration: none; }
 /* ── Responsive ── */
 @media (max-width: 600px) {
   .track-card { grid-template-columns: 28px max-content 1fr; }
+  .track-art { display: none; }
   .track-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .track-num { display: none; }
 }
@@ -491,6 +556,95 @@ a { color: inherit; text-decoration: none; }
   0%   { box-shadow: 0 0 0 4px rgba(255,255,255,0.45), 0 0 20px rgba(255,255,255,0.2); }
   100% { box-shadow: 0 0 0 2px rgba(255,255,255,0.25), 0 0 12px rgba(255,255,255,0.12); }
 }
+
+/* ── Album Art ── */
+.track-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #1a1a1a;
+  flex-shrink: 0;
+}
+.track-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.track-art--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #333;
+  font-size: 18px;
+}
+
+/* ── Genre tags ── */
+.genre-tag {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  font-size: 10px;
+  color: #666;
+  white-space: nowrap;
+}
+
+/* ── BPM / Key ── */
+.track-bpm-key {
+  font-size: 10px;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Expandable detection details ── */
+.track-details {
+  grid-column: 1 / -1;
+  padding: 8px 14px;
+  border-top: 1px solid #1e1e1e;
+  margin-top: 6px;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-size: 11px;
+  color: #888;
+}
+.track-details:not([hidden]) { display: flex; }
+.detail-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.detail-label { color: #555; }
+.detail-value { color: #ccc; font-variant-numeric: tabular-nums; }
+.detail-density-bar {
+  width: 80px;
+  height: 8px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.detail-density-fill {
+  height: 100%;
+  background: #00e676;
+  border-radius: 4px;
+}
+.btn-expand-details {
+  color: #555;
+  border-color: #333;
+  font-size: 14px;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+/* ── Audio preview ── */
+.btn-preview { color: #1db954; border-color: #1db954; }
+.btn-preview--playing { background: #1db954; color: #000; }
+
+/* ── Drag to reorder ── */
+.track-card:active { cursor: grabbing; }
+.track-card--dragging { opacity: 0.4; }
+.track-card--dragover { border-color: #00e676 !important; background: #1a2a1a !important; }
 
 /* ── Custom tooltip ── */
 #tl-tooltip {
@@ -1124,6 +1278,121 @@ def _render_failed_section(failed: list) -> str:
 </section>'''
 
 
+def _render_track_card_js() -> str:
+    """Return a <script> block with JS for track card upgrades: preview, expand details, drag-to-reorder."""
+    return """<script>
+// ── Toggle detection details ──
+function toggleDetails(btn) {
+  var card = btn.closest('.track-card');
+  var details = card.querySelector('.track-details');
+  details.hidden = !details.hidden;
+}
+
+// ── Audio preview ──
+var currentAudio = null;
+var currentPreviewBtn = null;
+
+function togglePreview(btn, url) {
+  if (currentAudio && currentPreviewBtn === btn) {
+    currentAudio.pause();
+    currentAudio = null;
+    btn.textContent = '\u266b Preview';
+    btn.classList.remove('btn-preview--playing');
+    currentPreviewBtn = null;
+    return;
+  }
+  if (currentAudio) {
+    currentAudio.pause();
+    currentPreviewBtn.textContent = '\u266b Preview';
+    currentPreviewBtn.classList.remove('btn-preview--playing');
+  }
+  currentAudio = new Audio(url);
+  currentPreviewBtn = btn;
+  btn.textContent = '\u25a0 Stop';
+  btn.classList.add('btn-preview--playing');
+  currentAudio.play();
+  currentAudio.onended = function() {
+    btn.textContent = '\u266b Preview';
+    btn.classList.remove('btn-preview--playing');
+    currentAudio = null;
+    currentPreviewBtn = null;
+  };
+}
+
+// ── Drag to reorder ──
+var dragSrcEl = null;
+
+document.querySelectorAll('.track-card').forEach(function(card) {
+  card.addEventListener('dragstart', function(e) {
+    dragSrcEl = this;
+    this.classList.add('track-card--dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', this.dataset.trackIdx);
+  });
+  card.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    this.classList.add('track-card--dragover');
+  });
+  card.addEventListener('dragleave', function() {
+    this.classList.remove('track-card--dragover');
+  });
+  card.addEventListener('drop', function(e) {
+    e.preventDefault();
+    this.classList.remove('track-card--dragover');
+    if (dragSrcEl !== this) {
+      var tracklist = document.getElementById('tracklist');
+      var allCards = Array.from(tracklist.querySelectorAll('.track-card'));
+      var srcIdx = allCards.indexOf(dragSrcEl);
+      var tgtIdx = allCards.indexOf(this);
+      if (srcIdx < tgtIdx) {
+        tracklist.insertBefore(dragSrcEl, this.nextSibling);
+      } else {
+        tracklist.insertBefore(dragSrcEl, this);
+      }
+      renumberTracks();
+      saveTrackOrder();
+    }
+  });
+  card.addEventListener('dragend', function() {
+    this.classList.remove('track-card--dragging');
+  });
+});
+
+function renumberTracks() {
+  var cards = document.querySelectorAll('.track-card');
+  cards.forEach(function(card, i) {
+    var numEl = card.querySelector('.track-num');
+    if (numEl) numEl.textContent = i + 1;
+  });
+}
+
+function saveTrackOrder() {
+  var order = Array.from(document.querySelectorAll('.track-card')).map(function(c) {
+    return c.dataset.trackIdx;
+  });
+  var key = 'trackOrder_' + document.title;
+  localStorage.setItem(key, JSON.stringify(order));
+}
+
+function restoreTrackOrder() {
+  var key = 'trackOrder_' + document.title;
+  var saved = localStorage.getItem(key);
+  if (!saved) return;
+  try {
+    var order = JSON.parse(saved);
+    var tracklist = document.getElementById('tracklist');
+    order.forEach(function(idx) {
+      var card = tracklist.querySelector('.track-card[data-track-idx="' + idx + '"]');
+      if (card) tracklist.appendChild(card);
+    });
+    renumberTracks();
+  } catch(e) { /* invalid saved order, ignore */ }
+}
+restoreTrackOrder();
+</script>"""
+
+
 class HtmlFormatter:
     """Generate self-contained interactive HTML setlist pages."""
 
@@ -1255,6 +1524,7 @@ class HtmlFormatter:
     <div class="filter-buttons">
       {filter_buttons}
     </div>
+    <button class="btn" style="color:#555;border-color:#333;" onclick="localStorage.removeItem('trackOrder_' + document.title); location.reload();" title="Reset to original order">&#8635; Reset Order</button>
   </div>
 
   <!-- Tracklist -->
@@ -1279,6 +1549,7 @@ class HtmlFormatter:
 <div id="toast">Copied!</div>
 
 <script>{JS}</script>
+{_render_track_card_js()}
 </body>
 </html>"""
 

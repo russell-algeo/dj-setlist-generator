@@ -98,6 +98,11 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
         'cluster_span': track.cluster_span,
         'source_deep_link': make_source_url(source_url, track.start_time),
         'spotify_url': meta.get('spotify_url'),
+        'spotify_album_art': meta.get('spotify_album_art'),
+        'spotify_preview_url': meta.get('spotify_preview_url'),
+        'spotify_genres': meta.get('spotify_genres', []),
+        'spotify_bpm': meta.get('spotify_bpm'),
+        'spotify_key': meta.get('spotify_key'),
         'youtube_url': meta.get('youtube_url'),
         'discogs_url': meta.get('discogs_url'),
     }
