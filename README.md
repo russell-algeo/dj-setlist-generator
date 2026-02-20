@@ -4,14 +4,17 @@ Automatically generate setlists from DJ mixes on YouTube or SoundCloud, complete
 
 ## Features
 
-- 🎵 Download audio from YouTube and SoundCloud
-- 🔍 Automatic track recognition using Shazam
-- 📊 Confidence scoring (HIGH/MEDIUM/LOW) based on multiple detections
-- 🎯 Handles unknown/unrecognized tracks
-- 🔗 Spotify/YouTube/Discogs link enrichment (toggleable)
-- 💾 Crash recovery with automatic checkpointing
-- 📄 Outputs in JSON and Markdown formats
-- ⚡ Resume from where you left off after crashes
+- Download audio from YouTube and SoundCloud
+- Automatic track recognition using Shazam
+- DJ artist discovery mode — pass a DJ name and auto-discover all their recorded sets
+- Multiple confidence levels (HIGH/MEDIUM/LOW) based on detection count and density
+- Handles unknown/unrecognized tracks
+- Spotify/YouTube/Discogs link enrichment (toggleable)
+- YouTube and SoundCloud timestamp deep-links
+- Crash recovery with automatic checkpointing
+- Outputs in JSON, Markdown, and interactive HTML formats
+- Resume from where you left off after crashes
+- Push notifications via ntfy.sh (optional)
 
 ## Installation
 
@@ -48,14 +51,24 @@ Get token from: https://www.discogs.com/settings/developers
 
 ## Usage
 
-### Basic usage (with crash recovery)
+### Process a single URL
 ```bash
 python main.py "https://www.youtube.com/watch?v=xxxxx"
 ```
 
-### With custom output name
+### Process multiple URLs
 ```bash
-python main.py "https://www.youtube.com/watch?v=xxxxx" my_favorite_mix
+python main.py "url1" "url2" "url3"
+```
+
+### Artist discovery mode — find and process all sets by a DJ
+```bash
+python main.py "Dyed Soundorom"
+```
+
+### Multiple artists
+```bash
+python main.py "Artist One" "Artist Two"
 ```
 
 ### Force restart (ignore checkpoints)
@@ -65,26 +78,20 @@ python main.py "https://www.youtube.com/watch?v=xxxxx" --no-resume
 
 ## Crash Recovery
 
-The tool automatically saves progress as it runs:
-
-- **Every 10 recognitions** (configurable)
-- **After downloading** audio
-- **After segmenting** audio
-- **During recognition** phase
+The tool automatically saves progress as it runs — after each batch of segments is recognized and after the download completes.
 
 If the script crashes or you interrupt it (Ctrl+C):
 
 1. Simply run the same command again
-2. It will ask if you want to resume
-3. It will skip already-completed work
-4. It will continue from where it left off
+2. It will automatically resume from the last saved batch
+3. It will skip already-completed work and continue from where it left off
 
 Example:
 ```bash
-# First run - crashes after 164 segments
+# First run - crashes mid-recognition
 python main.py "https://www.youtube.com/watch?v=xxxxx"
 
-# Second run - automatically resumes from segment 165
+# Second run - automatically resumes
 python main.py "https://www.youtube.com/watch?v=xxxxx"
 ```
 
@@ -101,13 +108,26 @@ ENABLE_YOUTUBE=true                   # YouTube link enrichment (no API key need
 ENABLE_DISCOGS=false                  # Discogs link enrichment (requires token)
 ENABLE_SPOTIFY_PLAYLISTS=true         # Enable Spotify playlist creation
 AUTO_CREATE_SPOTIFY_PLAYLIST=false    # Skip prompt, auto-create playlist
+ENABLE_HTML_OUTPUT=true               # Generate interactive HTML setlist
+```
+
+### Notifications (ntfy.sh)
+```bash
+NTFY_TOPIC=                           # Set to your ntfy.sh topic to enable push notifications
+```
+
+### Artist Discovery Settings
+```bash
+DISCOVERY_RESULTS_PER_QUERY=20        # Results fetched per search query
+MIN_SET_DURATION_MINUTES=20           # Minimum set duration to include
+MAX_SETS_PER_ARTIST=0                 # Max sets per artist (0 = no limit)
 ```
 
 ### Recognition Settings
 ```bash
 SEGMENT_DURATION=30           # Seconds per recognition segment
 SEGMENT_OVERLAP=15            # Overlap between segments (catches transitions)
-MIN_CONFIDENCE_THRESHOLD=2    # Detections needed for HIGH confidence
+MIN_CONFIDENCE_THRESHOLD=8    # Detection count threshold for confidence scoring
 ```
 
 ### Crash Recovery Settings
@@ -119,20 +139,19 @@ CHECKPOINT_INTERVAL=10        # Save progress every N recognitions
 ### Shazam Recognition Settings
 ```bash
 RECOGNITION_TIMEOUT=15        # Seconds before timeout per segment
-BASE_DELAY=1                  # Random delay range (0 to BASE_DELAY) between requests
+BASE_DELAY=0.3                # Random delay range (0 to BASE_DELAY) between requests
 ```
 
 ### Retry Settings (JitterRetry for 429 handling)
 ```bash
 MAX_RETRIES=5                 # Retry attempts before giving up
-BACKOFF_DELAY=1               # Base delay for exponential backoff
-MAX_BACKOFF_DELAY=60          # Maximum backoff cap in seconds
+MAX_BACKOFF_DELAY=30          # Maximum backoff cap in seconds
 JITTER_INTERVAL_SIZE=4.0      # Random jitter range is (0, size^2) seconds
 ```
 
 ### Concurrency Settings
 ```bash
-CONCURRENT_RECOGNITIONS=2     # Number of parallel Shazam requests
+CONCURRENT_RECOGNITIONS=5     # Number of parallel Shazam requests
 BATCH_SIZE=20                 # Segments processed per checkpoint
 ```
 
@@ -141,51 +160,82 @@ BATCH_SIZE=20                 # Segments processed per checkpoint
 QUOTA_COOLDOWN_DURATION=180   # Seconds to pause when rate limited (default: 3 min)
 ```
 
+### Cleanup Settings
+```bash
+CLEANUP_TEMP_FILES=true       # Delete downloaded audio after completion
+CLEANUP_CHECKPOINTS=true      # Delete checkpoint files after completion
+```
+
 ## Output
 
-The tool generates two files in the `output/` directory:
+The tool generates three files per set in the `output/` directory:
 
 ### 1. JSON file
-Structured data with all track information and metadata
+Structured data with all track information and metadata.
 
 ### 2. Markdown file
-Human-readable setlist with timestamps and clickable links
+Human-readable setlist with timestamps and clickable links.
+
+### 3. HTML file
+Interactive setlist with a clickable mix timeline, track cards, and direct YouTube/SoundCloud timestamp deep-links. Open in any browser.
 
 Example markdown output:
 
     # DJ Set Name
-    
+
     **By:** DJ Name
     **Duration:** 60:00
-    
+
     ## Tracklist
-    
+
     ### 1. Artist - Track Name 🟢
-    **Time:** 0:00
-    **Confidence:** HIGH (5 detections)
+    **Time:** 0:00 – 6:30
+    **Confidence:** HIGH (15 detections)
     **Links:** [Spotify](https://...) • [YouTube](https://...) • [Discogs](https://...)
 
 ## Confidence Levels
 
-The tool uses multiple detections to determine track confidence:
+Confidence is calculated from detection count and cluster density:
 
-- 🟢 **HIGH** - 3+ consecutive detections (very reliable)
-- 🟡 **MEDIUM** - 2 consecutive detections (likely correct)
-- 🟠 **LOW** - 1 detection only (uncertain)
-- ⚪ **UNCERTAIN** - Unknown track or conflicting results
-
-Confidence is based on how many consecutive 30-second segments recognized the same track. More detections = higher confidence.
+- 🟢 **HIGH** - 15+ detections, or 10+ detections, or 8+ detections with high density
+- 🟡 **MEDIUM** - 5+ detections with high density, or 3+ detections with very high density
+- 🟠 **LOW** - Fewer detections or sparse recognition pattern
+- ⚪ **UNCERTAIN** - Unknown track / unrecognized gap
 
 ## How It Works
 
 1. **Download** audio and convert to MP3
-2. **Segment** into 30-second overlapping chunks (15-second overlap)
-3. **Recognize** each segment using Shazam API
-4. **Save checkpoints** every 10 recognitions
-5. **Deduplicate** consecutive same-track detections
-6. **Calculate confidence** based on detection count
-7. **Enrich** with metadata from enabled platforms (Spotify/YouTube/Discogs)
-8. **Output** formatted JSON and Markdown files
+2. **Stream: Segment + Recognize** — FFmpeg extracts segments on-the-fly (no full-file RAM load); each batch is recognized via Shazam in parallel, then segment files are immediately deleted. Only `BATCH_SIZE` (~20) segment files exist on disk at any time
+3. **Save checkpoints** after each batch
+4. **Build setlist** — cluster and deduplicate detections, resolve overlaps, fill gaps with Unknown Track entries
+5. **Enrich and output** — add Spotify/YouTube/Discogs links, save JSON, Markdown, and HTML files
+
+## Artist Discovery Mode
+
+Pass a DJ name instead of a URL to auto-discover and process all their recorded sets:
+
+```bash
+python main.py "Dyed Soundorom"
+```
+
+The tool will:
+1. Search YouTube and SoundCloud for recorded sets (Boiler Room, HOR, Cercle, etc.)
+2. Filter by minimum duration (`MIN_SET_DURATION_MINUTES`)
+3. Process each set through the full pipeline
+4. Generate a combined artist summary (`artist_summary.md`, `artist_summary.html`)
+
+Limit the number of sets processed with `MAX_SETS_PER_ARTIST` in `.env`.
+
+## Utility Scripts
+
+### backfill_html.py
+Regenerate HTML files from existing JSON outputs (useful for sets processed before HTML output was added):
+
+```bash
+python backfill_html.py                 # Regenerate all outputs
+python backfill_html.py "Jay Tripwire"  # Regenerate one artist by name
+python backfill_html.py --dry-run       # Preview without writing
+```
 
 ## File Structure
 
@@ -198,12 +248,17 @@ Confidence is based on how many consecutive 30-second segments recognized the sa
     ├── config.py                 # Configuration management
     ├── checkpoint_manager.py     # Crash recovery system
     ├── audio_downloader.py       # Download audio from YouTube/SoundCloud
-    ├── audio_segmenter.py        # Split audio into segments
-    ├── track_recognizer.py       # Shazam recognition with retry logic
+    ├── audio_segmenter.py        # FFmpeg-based segment extraction (streaming)
+    ├── track_recognizer.py       # Shazam recognition with streaming batch pipeline
     ├── setlist_builder.py        # Build setlist from recognitions
     ├── metadata_enricher.py      # Fetch Spotify/YouTube/Discogs links
     ├── output_formatter.py       # Generate JSON and Markdown outputs
+    ├── html_formatter.py         # Generate interactive HTML setlist output
     ├── spotify_playlist_creator.py # Create Spotify playlist from setlist
-    ├── assets/<mix_name>/        # Downloaded audio and segment files
+    ├── dj_set_discovery.py       # Discover DJ sets via yt-dlp search
+    ├── artist_summary.py         # Generate artist-level summary across all sets
+    ├── notifier.py               # Push notifications via ntfy.sh
+    ├── backfill_html.py          # Regenerate HTML from existing JSON outputs
+    ├── assets/<mix_name>/        # Downloaded audio (segment files are transient)
     ├── checkpoints/<mix_name>/   # Crash recovery checkpoints
-    └── output/<mix_name>/        # Generated setlists (JSON and Markdown)
+    └── output/<mix_name>/        # Generated setlists (JSON, Markdown, HTML)
