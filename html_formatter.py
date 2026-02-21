@@ -1209,6 +1209,48 @@ h2 {
 }
 
 /* ── Set cards grid ── */
+.sets-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 7px 12px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.search-input:focus { border-color: #00e676; }
+.search-input::placeholder { color: #444; }
+
+.sort-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sort-btn {
+  padding: 5px 12px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: #666;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.sort-btn:hover { border-color: #444; color: #ccc; }
+.sort-btn.active { border-color: #00e676; color: #00e676; }
+
 .sets-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
@@ -1216,16 +1258,34 @@ h2 {
 }
 
 .set-card {
-  padding: 16px;
   background: #111;
   border: 1px solid #1e1e1e;
   border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.set-card:hover { border-color: #2a2a2a; transform: translateY(-2px); }
+
+.set-card-thumb {
+  height: 120px;
+  background-size: cover;
+  background-position: center;
+  background-color: #0a0a0a;
+}
+.set-card-thumb--empty {
+  height: 40px;
+  background: linear-gradient(135deg, #111 0%, #1a1a1a 100%);
+}
+
+.set-card-body {
+  padding: 12px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: border-color 0.15s;
+  flex: 1;
 }
-.set-card:hover { border-color: #2a2a2a; }
 
 .set-card-title {
   font-size: 13px;
@@ -1239,6 +1299,22 @@ h2 {
   overflow: hidden;
 }
 .set-card-title:hover { color: #00e676; }
+
+/* Mini timeline */
+.set-mini-timeline {
+  position: relative;
+  height: 6px;
+  background: #1a1a1a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.smt-seg {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  opacity: 0.85;
+}
 
 .set-card-stats {
   display: flex;
@@ -2570,6 +2646,26 @@ window.addEventListener('resize', drawContinuityArcs);
 {timeline_js}'''
 
 
+def _format_duration_hms(seconds: float) -> str:
+    """Format seconds as H:MM:SS (or M:SS if under an hour)."""
+    if not seconds:
+        return ''
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+_CONF_COLORS = {
+    "HIGH": "#00e676",
+    "MEDIUM": "#ffd740",
+    "LOW": "#ff6d00",
+    "UNCERTAIN": "#444",
+}
+
+
 def _render_set_cards(set_summaries: list) -> str:
     """Render the set cards grid HTML."""
     if not set_summaries:
@@ -2578,6 +2674,7 @@ def _render_set_cards(set_summaries: list) -> str:
     cards = []
     for s in set_summaries:
         title_esc = _esc(s['title'])
+        title_lower = s['title'].lower()
         source_url = s.get('url', '')
 
         if s.get('set_html_rel'):
@@ -2592,10 +2689,48 @@ def _render_set_cards(set_summaries: list) -> str:
 
         high_conf = s.get('high_confidence', 0)
         total = s.get('total_tracks', 0)
+        duration = s.get('duration', 0)
+        recognition_rate = s.get('recognition_rate', 0)
+        mini_timeline = s.get('mini_timeline', [])
+        thumbnail_url = s.get('thumbnail_url')
+        track_search_text = s.get('track_search_text', '')
 
+        # data-* attributes for JS sort/filter
+        data_tracks = int(total)
+        data_rate = int(recognition_rate)
+        data_duration = int(duration)
+        data_search = _esc(f"{title_lower} {track_search_text}")
+
+        # Thumbnail header
+        if thumbnail_url:
+            thumb_html = (
+                f'<div class="set-card-thumb" '
+                f'style="background-image: url(\'{_esc(thumbnail_url)}\')"></div>'
+            )
+        else:
+            thumb_html = '<div class="set-card-thumb set-card-thumb--empty"></div>'
+
+        # Mini timeline segments
+        smt_segs = ''.join(
+            f'<div class="smt-seg" style="left:{seg["start_pct"]:.2f}%;'
+            f'width:{seg["width_pct"]:.2f}%;'
+            f'background:{_CONF_COLORS.get(seg["confidence"], "#444")};"></div>'
+            for seg in mini_timeline
+        )
+        mini_tl_html = f'<div class="set-mini-timeline">{smt_segs}</div>'
+
+        # Stats pills
         high_pill = (
             f'<span class="set-card-pill pill-high">{_esc(high_conf)} high conf.</span>'
             if high_conf else ''
+        )
+        rate_pill = (
+            f'<span class="set-card-pill">{int(recognition_rate)}% identified</span>'
+            if total else ''
+        )
+        duration_pill = (
+            f'<span class="set-card-pill">{_esc(_format_duration_hms(duration))}</span>'
+            if duration else ''
         )
 
         source_link = (
@@ -2604,14 +2739,20 @@ def _render_set_cards(set_summaries: list) -> str:
             if source_url else ''
         )
 
-        cards.append(f'''<div class="set-card">
-  <a class="set-card-title" href="{primary_href}" target="{primary_target}">{title_esc}</a>
-  <div class="set-card-stats">
-    <span class="set-card-pill">{_esc(total)} tracks</span>
-    {high_pill}
-  </div>
-  <div class="set-card-footer">
-    {source_link}
+        cards.append(f'''<div class="set-card" data-tracks="{data_tracks}" data-rate="{data_rate}" data-duration="{data_duration}" data-search="{data_search}">
+  {thumb_html}
+  <div class="set-card-body">
+    <a class="set-card-title" href="{primary_href}" target="{primary_target}">{title_esc}</a>
+    {mini_tl_html}
+    <div class="set-card-stats">
+      <span class="set-card-pill">{_esc(total)} tracks</span>
+      {high_pill}
+      {rate_pill}
+      {duration_pill}
+    </div>
+    <div class="set-card-footer">
+      {source_link}
+    </div>
   </div>
 </div>''')
 
@@ -3307,6 +3448,16 @@ class HtmlFormatter:
 
   <section>
     <h2>Sets Analyzed ({len(set_summaries)})</h2>
+    <div class="sets-controls">
+      <input id="setSearch" class="search-input" type="search"
+             placeholder="Search sets or find a track across sets…" autocomplete="off">
+      <div class="sort-buttons">
+        <button class="sort-btn active" data-sort="default">Default</button>
+        <button class="sort-btn" data-sort="tracks">Most Tracks</button>
+        <button class="sort-btn" data-sort="rate">Best Recognition</button>
+        <button class="sort-btn" data-sort="duration">Longest</button>
+      </div>
+    </div>
     <div class="sets-grid">
       {sets_html}
     </div>
@@ -3331,6 +3482,46 @@ class HtmlFormatter:
   </div>
 
 </div>
+
+<script>
+/* ── Set grid: search + sort (Feature 6) ── */
+(function () {{
+  var searchInput = document.getElementById('setSearch');
+  var setsGrid = document.querySelector('.sets-grid');
+  if (!searchInput || !setsGrid) return;
+
+  function filterSets() {{
+    var query = searchInput.value.toLowerCase().trim();
+    setsGrid.querySelectorAll('.set-card').forEach(function (card) {{
+      var match = !query || card.dataset.search.includes(query);
+      card.style.display = match ? '' : 'none';
+    }});
+  }}
+
+  searchInput.addEventListener('input', filterSets);
+
+  function sortSets(sortBy) {{
+    var cards = Array.from(setsGrid.querySelectorAll('.set-card'));
+    cards.sort(function (a, b) {{
+      switch (sortBy) {{
+        case 'tracks':   return parseInt(b.dataset.tracks)   - parseInt(a.dataset.tracks);
+        case 'rate':     return parseInt(b.dataset.rate)     - parseInt(a.dataset.rate);
+        case 'duration': return parseInt(b.dataset.duration) - parseInt(a.dataset.duration);
+        default: return 0;
+      }}
+    }});
+    cards.forEach(function (card) {{ setsGrid.appendChild(card); }});
+  }}
+
+  document.querySelectorAll('.sort-btn').forEach(function (btn) {{
+    btn.addEventListener('click', function () {{
+      document.querySelectorAll('.sort-btn').forEach(function (b) {{ b.classList.remove('active'); }});
+      btn.classList.add('active');
+      sortSets(btn.dataset.sort);
+    }});
+  }});
+}})();
+</script>
 </body>
 </html>"""
 
