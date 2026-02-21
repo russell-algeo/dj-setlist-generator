@@ -1,5 +1,6 @@
 """Generate interactive HTML setlist output."""
 
+from collections import Counter
 from html import escape
 from pathlib import Path
 from datetime import datetime
@@ -1471,6 +1472,227 @@ h2 {
   text-transform: uppercase;
   margin-top: 2px;
 }
+
+/* ── DJ Signature Analysis ── */
+.sig-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sig-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  background: #111;
+  border: 1px solid #1e1e1e;
+  border-radius: 8px;
+}
+
+.sig-score-value {
+  font-size: 48px;
+  font-weight: 800;
+  color: #00e676;
+  line-height: 1;
+}
+
+.sig-score-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.sig-score-desc {
+  font-size: 11px;
+  color: #555;
+  margin-top: 2px;
+}
+
+.sig-bar {
+  display: flex;
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #1a1a1a;
+}
+
+.sig-bar-segment {
+  transition: opacity 0.2s;
+  cursor: pointer;
+}
+.sig-bar-segment:hover { opacity: 0.8; }
+
+.sig-staple { background: #00e676; }
+.sig-regular { background: #ffd740; }
+.sig-oneoff  { background: #333; }
+
+.sig-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #888;
+}
+
+.sig-legend-item { display: flex; align-items: center; }
+
+.sig-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.sig-dot.sig-staple { background: #00e676; }
+.sig-dot.sig-regular { background: #ffd740; }
+.sig-dot.sig-oneoff  { background: #333; }
+
+.sig-staples h3,
+.sig-trends h3,
+.sig-genres h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #555;
+  margin-bottom: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1e1e1e;
+}
+
+.sig-staples-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sig-staple-card {
+  padding: 12px 16px;
+  background: #111;
+  border: 1px solid #1e1e1e;
+  border-left: 3px solid #00e676;
+  border-radius: 6px;
+}
+
+.sig-staple-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: #00e676;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sig-staple-artist {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sig-staple-title {
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sig-trend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.sig-trend-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #111;
+  border: 1px solid #1e1e1e;
+  border-radius: 6px;
+}
+
+.sig-trend-rank {
+  font-size: 11px;
+  color: #444;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: right;
+}
+
+.sig-trend-info {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.sig-trend-artist { color: #fff; font-weight: 600; }
+.sig-trend-sep    { color: #444; }
+.sig-trend-title  { color: #888; }
+.sparkline        { flex-shrink: 0; }
+
+.sig-trend-count {
+  font-size: 11px;
+  color: #00e676;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.genre-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.genre-bar-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+}
+
+.genre-bar-label {
+  font-size: 12px;
+  color: #ccc;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.genre-bar-track {
+  height: 16px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.genre-bar-fill {
+  height: 100%;
+  background: #00e676;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.genre-bar-count {
+  font-size: 11px;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+}
 """
 
 
@@ -1655,6 +1877,214 @@ function navigateHmCell(cell) {
   <div class="hm-tip-conf"></div>
 </div>
 {hm_js}'''
+
+
+def _compute_signature_analysis(track_counter, track_info: dict, set_summaries: list) -> dict:
+    """Compute DJ signature analysis metrics."""
+    unique = len(track_counter)
+    staples = []
+    regulars = []
+    one_offs = []
+
+    for key, count in track_counter.most_common():
+        info = track_info.get(key, {})
+        entry = {
+            'key': key,
+            'artist': info.get('artist', ''),
+            'title': info.get('title', key),
+            'count': count,
+            'spotify_url': info.get('spotify_url'),
+        }
+        if count >= 3:
+            staples.append(entry)
+        elif count == 2:
+            regulars.append(entry)
+        else:
+            one_offs.append(entry)
+
+    recurring = len(staples) + len(regulars)
+    signature_score = (recurring / unique * 100) if unique else 0
+
+    # Genre distribution from track_info
+    genre_counter: Counter = Counter()
+    for info in track_info.values():
+        for genre in info.get('genres', []):
+            genre_counter[genre] += 1
+
+    return {
+        'unique_tracks': unique,
+        'staples': staples,
+        'regulars': regulars,
+        'one_offs': one_offs,
+        'signature_score': signature_score,
+        'total_sets': len(set_summaries),
+        'top_genres': genre_counter.most_common(10),
+    }
+
+
+def _build_trend_data(track_counter, track_info: dict, set_summaries: list) -> list:
+    """For each recurring track, build a presence array across sets."""
+    set_titles = [s['title'] for s in set_summaries]
+    trends = []
+    for key, count in track_counter.most_common():
+        if count < 2:
+            break
+        info = track_info.get(key, {})
+        appeared_in = {a['set_title'] for a in info.get('appearances', [])}
+        presence = [1 if title in appeared_in else 0 for title in set_titles]
+        trends.append({
+            'key': key,
+            'artist': info.get('artist', ''),
+            'title': info.get('title', key),
+            'count': count,
+            'presence': presence,
+            'spotify_url': info.get('spotify_url'),
+        })
+    return trends[:15]
+
+
+def _render_sparkline(presence: list) -> str:
+    """Render a tiny inline SVG sparkline for track presence across sets."""
+    if not presence:
+        return ''
+    n = len(presence)
+    w = 60
+    h = 16
+    step = w / max(n - 1, 1)
+
+    points = []
+    for i, v in enumerate(presence):
+        x = round(i * step, 1)
+        y = round(h - (v * (h - 4)) - 2, 1)
+        points.append(f"{x},{y}")
+
+    dots = ''.join(
+        f'<circle cx="{round(i * step, 1)}" cy="{round(h - (v * (h - 4)) - 2, 1)}" r="2" '
+        f'fill="{("#00e676" if v else "#333")}"/>'
+        for i, v in enumerate(presence)
+    )
+
+    return (
+        f'<svg class="sparkline" width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
+        f'<polyline points="{" ".join(points)}" fill="none" stroke="#00e676" stroke-width="1.5" opacity="0.6"/>'
+        f'{dots}'
+        f'</svg>'
+    )
+
+
+def _render_signature_analysis(track_counter, track_info: dict, set_summaries: list) -> str:
+    """Render the DJ signature analysis section as HTML."""
+    if not track_counter:
+        return '<p class="empty">No track data available for signature analysis.</p>'
+
+    sig = _compute_signature_analysis(track_counter, track_info, set_summaries)
+    unique = sig['unique_tracks']
+    staples = sig['staples']
+    regulars = sig['regulars']
+    one_offs = sig['one_offs']
+    signature_score = sig['signature_score']
+
+    n_staples = len(staples)
+    n_regulars = len(regulars)
+    n_oneoffs = len(one_offs)
+    total = unique or 1
+    pct_staple = n_staples / total * 100
+    pct_regular = n_regulars / total * 100
+    pct_oneoff = n_oneoffs / total * 100
+
+    breakdown_bar = f'''<div class="sig-bar">
+  <div class="sig-bar-segment sig-staple" style="width:{pct_staple:.1f}%;" title="{n_staples} staples (3+ sets)"></div>
+  <div class="sig-bar-segment sig-regular" style="width:{pct_regular:.1f}%;" title="{n_regulars} regulars (2 sets)"></div>
+  <div class="sig-bar-segment sig-oneoff" style="width:{pct_oneoff:.1f}%;" title="{n_oneoffs} one-offs"></div>
+</div>
+<div class="sig-legend">
+  <span class="sig-legend-item"><span class="sig-dot sig-staple"></span> Staples (3+ sets): {n_staples}</span>
+  <span class="sig-legend-item"><span class="sig-dot sig-regular"></span> Regulars (2 sets): {n_regulars}</span>
+  <span class="sig-legend-item"><span class="sig-dot sig-oneoff"></span> One-offs: {n_oneoffs}</span>
+</div>'''
+
+    # Staple cards (top 12)
+    staple_cards_html = ''
+    if staples:
+        cards = []
+        for entry in staples[:12]:
+            spotify_link = (
+                f'<a class="btn-spotify" href="{_esc(entry["spotify_url"])}" target="_blank" rel="noopener">Spotify</a>'
+                if entry.get('spotify_url') else ''
+            )
+            cards.append(f'''<div class="sig-staple-card">
+  <div class="sig-staple-count">{entry["count"]} sets</div>
+  <div class="sig-staple-artist">{_esc(entry["artist"])}</div>
+  <div class="sig-staple-title">{_esc(entry["title"])}</div>
+  {spotify_link}
+</div>''')
+        staple_cards_html = f'''<div class="sig-staples">
+  <h3>DJ Staples</h3>
+  <div class="sig-staples-grid">
+    {''.join(cards)}
+  </div>
+</div>'''
+
+    # Track trends with sparklines (only useful when there are multiple sets)
+    trends_html = ''
+    if len(set_summaries) > 1:
+        trends = _build_trend_data(track_counter, track_info, set_summaries)
+        if trends:
+            rows = []
+            for rank, t in enumerate(trends, 1):
+                sparkline = _render_sparkline(t['presence'])
+                rows.append(f'''<div class="sig-trend-row">
+  <span class="sig-trend-rank">#{rank}</span>
+  <div class="sig-trend-info">
+    <span class="sig-trend-artist">{_esc(t["artist"])}</span>
+    <span class="sig-trend-sep"> — </span>
+    <span class="sig-trend-title">{_esc(t["title"])}</span>
+  </div>
+  {sparkline}
+  <span class="sig-trend-count">{t["count"]} sets</span>
+</div>''')
+            trends_html = f'''<div class="sig-trends">
+  <h3>Track Trends</h3>
+  <div class="sig-trend-list">
+    {''.join(rows)}
+  </div>
+</div>'''
+
+    # Genre distribution (conditional — only shown when genre data is present)
+    genres_html = ''
+    top_genres = sig['top_genres']
+    if top_genres:
+        max_count = top_genres[0][1]
+        genre_rows = []
+        for genre, count in top_genres:
+            pct = count / max_count * 100
+            genre_rows.append(f'''<div class="genre-bar-row">
+  <span class="genre-bar-label">{_esc(genre)}</span>
+  <div class="genre-bar-track">
+    <div class="genre-bar-fill" style="width:{pct:.1f}%;"></div>
+  </div>
+  <span class="genre-bar-count">{count}</span>
+</div>''')
+        genres_html = f'''<div class="sig-genres">
+  <h3>Genre Distribution</h3>
+  <div class="genre-bars">
+    {''.join(genre_rows)}
+  </div>
+</div>'''
+
+    return f'''<div class="sig-section">
+  <div class="sig-score">
+    <span class="sig-score-value">{signature_score:.0f}%</span>
+    <span class="sig-score-label">Signature Score</span>
+    <span class="sig-score-desc">of unique tracks played in 2+ sets</span>
+  </div>
+  <div class="sig-breakdown">
+    {breakdown_bar}
+  </div>
+  {staple_cards_html}
+  {trends_html}
+  {genres_html}
+</div>'''
 
 
 def _render_set_cards(set_summaries: list) -> str:
@@ -1957,7 +2387,6 @@ class HtmlFormatter:
         platform, embed_id = _detect_platform(source_url)
 
         # Confidence counts
-        from collections import Counter
         counts    = Counter(t['confidence'] for t in tracks)
         total     = len(tracks)
         recognized = sum(1 for t in tracks if t['title'] != 'Unknown Track')
@@ -2096,11 +2525,12 @@ class HtmlFormatter:
         total_appearances = sum(track_counter.values())
         repeat_tracks = sum(1 for c in track_counter.values() if c > 1)
 
-        sets_html    = _render_set_cards(set_summaries)
-        played_html  = _render_most_played(track_counter, track_info)
-        failed_html  = _render_failed_section(failed)
-        heatmap_data = _build_heatmap_data(track_counter, track_info, set_summaries)
-        heatmap_html = _render_heatmap(heatmap_data)
+        sets_html       = _render_set_cards(set_summaries)
+        played_html     = _render_most_played(track_counter, track_info)
+        failed_html     = _render_failed_section(failed)
+        heatmap_data    = _build_heatmap_data(track_counter, track_info, set_summaries)
+        heatmap_html    = _render_heatmap(heatmap_data)
+        signature_html  = _render_signature_analysis(track_counter, track_info, set_summaries)
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -2136,6 +2566,11 @@ class HtmlFormatter:
       <span class="stat-label">Recurring Tracks</span>
     </div>
   </div>
+
+  <section>
+    <h2>DJ Signature</h2>
+    {signature_html}
+  </section>
 
   <section>
     <h2>Sets Analyzed ({len(set_summaries)})</h2>
