@@ -3,9 +3,26 @@
 import json
 from pathlib import Path
 from collections import Counter
+from urllib.parse import urlparse, parse_qs
 
 from output_formatter import OutputFormatter
 from html_formatter import HtmlFormatter
+
+
+def _extract_youtube_id(url: str) -> str | None:
+    """Extract YouTube video ID from URL."""
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().removeprefix('www.').removeprefix('m.')
+        if host == 'youtube.com':
+            return parse_qs(parsed.query).get('v', [None])[0]
+        if host == 'youtu.be':
+            return parsed.path.lstrip('/')
+    except Exception:
+        pass
+    return None
 
 
 class ArtistSummarizer:
@@ -74,14 +91,53 @@ class ArtistSummarizer:
                         "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
                     })
 
+            # Extra fields for improved set grid (Feature 6)
+            duration = mix_info.get("duration", 0)
+            total_tracks_count = metadata.get("total_tracks", len(tracks))
+            recognized = sum(1 for t in tracks if t.get("title") != "Unknown Track")
+            recognition_rate = (recognized / total_tracks_count * 100) if total_tracks_count else 0
+            confidence_counts = {
+                "HIGH": metadata.get("high_confidence_tracks", 0),
+                "MEDIUM": metadata.get("medium_confidence_tracks", 0),
+                "LOW": metadata.get("low_confidence_tracks", 0),
+                "UNCERTAIN": metadata.get("uncertain_tracks", 0),
+            }
+            mini_timeline = []
+            for t in tracks:
+                if duration and t.get("start_time") is not None:
+                    start = t["start_time"]
+                    end = t.get("end_time") or duration
+                    start_pct = start / duration * 100
+                    width_pct = max(0.5, (end - start) / duration * 100)
+                    mini_timeline.append({
+                        "start_pct": start_pct,
+                        "width_pct": width_pct,
+                        "confidence": t.get("confidence", "UNCERTAIN"),
+                    })
+            set_url = result["url"] or mix_info.get("url", "")
+            video_id = _extract_youtube_id(set_url)
+            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg" if video_id else None
+            track_search_text = " ".join(
+                f"{t.get('artist', '')} {t.get('title', '')}".lower()
+                for t in tracks
+                if t.get("title") != "Unknown Track"
+            )
+
             set_summaries.append({
                 "title": mix_info.get("title", result.get("mix_name", "Unknown")),
                 "url": result["url"],
-                "total_tracks": metadata.get("total_tracks", len(tracks)),
+                "total_tracks": total_tracks_count,
                 "high_confidence": metadata.get("high_confidence_tracks", 0),
                 "set_html_rel": set_html_rel,
                 "tracks": set_tracks,
                 "index": len(set_summaries),
+                # NEW fields for Feature 6
+                "duration": duration,
+                "recognition_rate": recognition_rate,
+                "confidence_counts": confidence_counts,
+                "mini_timeline": mini_timeline,
+                "thumbnail_url": thumbnail_url,
+                "track_search_text": track_search_text,
             })
 
             set_title = mix_info.get("title", "Unknown")
@@ -148,14 +204,52 @@ class ArtistSummarizer:
                         "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
                     })
 
+            # Extra fields for improved set grid (Feature 6)
+            duration = mix_info.get("duration", 0)
+            total_tracks_count = metadata.get("total_tracks", len(tracks))
+            recognized = sum(1 for t in tracks if t.get("title") != "Unknown Track")
+            recognition_rate = (recognized / total_tracks_count * 100) if total_tracks_count else 0
+            confidence_counts = {
+                "HIGH": metadata.get("high_confidence_tracks", 0),
+                "MEDIUM": metadata.get("medium_confidence_tracks", 0),
+                "LOW": metadata.get("low_confidence_tracks", 0),
+                "UNCERTAIN": metadata.get("uncertain_tracks", 0),
+            }
+            mini_timeline = []
+            for t in tracks:
+                if duration and t.get("start_time") is not None:
+                    start = t["start_time"]
+                    end = t.get("end_time") or duration
+                    start_pct = start / duration * 100
+                    width_pct = max(0.5, (end - start) / duration * 100)
+                    mini_timeline.append({
+                        "start_pct": start_pct,
+                        "width_pct": width_pct,
+                        "confidence": t.get("confidence", "UNCERTAIN"),
+                    })
+            video_id = _extract_youtube_id(url)
+            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg" if video_id else None
+            track_search_text = " ".join(
+                f"{t.get('artist', '')} {t.get('title', '')}".lower()
+                for t in tracks
+                if t.get("title") != "Unknown Track"
+            )
+
             set_summaries.append({
                 "title": mix_info.get("title", set_dir.name),
                 "url": url,
-                "total_tracks": metadata.get("total_tracks", len(tracks)),
+                "total_tracks": total_tracks_count,
                 "high_confidence": metadata.get("high_confidence_tracks", 0),
                 "set_html_rel": set_html_rel,
                 "tracks": set_tracks,
                 "index": len(set_summaries),
+                # NEW fields for Feature 6
+                "duration": duration,
+                "recognition_rate": recognition_rate,
+                "confidence_counts": confidence_counts,
+                "mini_timeline": mini_timeline,
+                "thumbnail_url": thumbnail_url,
+                "track_search_text": track_search_text,
             })
 
             set_title = mix_info.get("title", set_dir.name)
