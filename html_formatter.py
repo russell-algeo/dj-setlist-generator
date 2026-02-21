@@ -1693,6 +1693,212 @@ h2 {
   color: #666;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Interactive Set Timeline ── */
+.stl-container {
+  margin-bottom: 48px;
+  position: relative;
+}
+
+.stl-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 60px;
+  background: linear-gradient(to right, transparent, #0d0d0d);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.stl-scroll {
+  overflow-x: auto;
+  padding: 20px 0 40px;
+  position: relative;
+}
+
+.stl-axis {
+  position: absolute;
+  top: 50px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #2a2a2a;
+  z-index: 0;
+}
+
+.stl-nodes {
+  display: flex;
+  gap: 24px;
+  position: relative;
+  z-index: 1;
+  padding: 0 24px;
+  min-width: min-content;
+}
+
+.stl-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 220px;
+  max-width: 260px;
+}
+
+.stl-node-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #00e676;
+  border: 2px solid #0d0d0d;
+  margin-bottom: 12px;
+  z-index: 2;
+}
+
+.stl-node-card {
+  background: #111;
+  border: 1px solid #1e1e1e;
+  border-radius: 8px;
+  padding: 12px 16px;
+  width: 100%;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.stl-node-card:hover { border-color: #2a2a2a; }
+
+.stl-node-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.stl-node-meta {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.stl-node-mini-timeline {
+  position: relative;
+  height: 4px;
+  background: #1a1a1a;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.stl-mini-seg {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+.stl-expand-btn {
+  background: none;
+  border: none;
+  color: #00e676;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 0;
+  font-family: inherit;
+  width: 100%;
+  text-align: center;
+}
+.stl-expand-btn:hover { text-decoration: underline; }
+
+.stl-tracklist {
+  width: 100%;
+  margin-top: 8px;
+  background: #0d0d0d;
+  border: 1px solid #1e1e1e;
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.stl-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 3px;
+  transition: background 0.1s;
+  cursor: default;
+}
+.stl-track:hover { background: #161616; }
+
+.stl-track-time {
+  font-family: 'Courier New', monospace;
+  color: #555;
+  font-size: 10px;
+  min-width: 36px;
+}
+
+.stl-track-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stl-track-artist { color: #fff; font-weight: 600; }
+.stl-track-title { color: #888; }
+
+.stl-track-conf {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 8px;
+  border: 1px solid;
+}
+
+.stl-track--recurring {
+  border-left: 2px solid #ffd740;
+  padding-left: 4px;
+}
+.stl-track--recurring:hover {
+  background: #1a1a0a;
+}
+
+.stl-track--highlight {
+  background: #2a2a0a !important;
+  outline: 1px solid #ffd740;
+}
+
+.stl-arcs {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  overflow: visible;
+}
+
+.stl-arc {
+  fill: none;
+  stroke: #ffd740;
+  stroke-width: 1;
+  opacity: 0.15;
+  transition: opacity 0.2s;
+}
+
+.stl-arc--highlight {
+  opacity: 0.6;
+  stroke-width: 2;
+}
 """
 
 
@@ -2085,6 +2291,215 @@ def _render_signature_analysis(track_counter, track_info: dict, set_summaries: l
   {trends_html}
   {genres_html}
 </div>'''
+
+
+def _render_set_timeline(set_summaries: list) -> str:
+    """Render an interactive horizontal set timeline with expandable tracklists and SVG continuity arcs."""
+    if not set_summaries:
+        return '<p class="empty">No sets to display in timeline.</p>'
+
+    # Build recurring_map: track_key -> [set_index, ...]
+    # Only keep tracks appearing in 2+ sets; limit to top 20 by frequency for performance
+    track_counts: dict[str, int] = {}
+    track_sets: dict[str, list[int]] = {}
+    for s in set_summaries:
+        seen_in_set: set[str] = set()
+        for t in s.get('tracks', []):
+            key = t.get('track_key', '')
+            if not key or key in seen_in_set:
+                continue
+            seen_in_set.add(key)
+            track_counts[key] = track_counts.get(key, 0) + 1
+            if key not in track_sets:
+                track_sets[key] = []
+            track_sets[key].append(s.get('index', 0))
+
+    # Filter to tracks in 2+ sets, then take top 20 most recurring
+    recurring_map = {k: v for k, v in track_sets.items() if track_counts.get(k, 0) >= 2}
+    recurring_keys: set[str] = set(
+        sorted(recurring_map.keys(), key=lambda k: track_counts[k], reverse=True)[:20]
+    )
+
+    conf_colors = {
+        'HIGH': '#00e676',
+        'MEDIUM': '#ffd740',
+        'LOW': '#ff9100',
+        'UNCERTAIN': '#757575',
+    }
+
+    # Render each set node
+    nodes_html_parts = []
+    for s in set_summaries:
+        idx = s.get('index', 0)
+        title_esc = _esc(s['title'])
+        total = s.get('total_tracks', 0)
+        tracks = s.get('tracks', [])
+
+        # Set title link
+        set_html_rel = s.get('set_html_rel')
+        source_url = s.get('url', '')
+        if set_html_rel:
+            href = _esc(quote(set_html_rel, safe='/'))
+            title_html = f'<a class="stl-node-title" href="{href}">{title_esc}</a>'
+        elif source_url:
+            title_html = f'<a class="stl-node-title" href="{_esc(source_url)}" target="_blank" rel="noopener">{title_esc}</a>'
+        else:
+            title_html = f'<div class="stl-node-title">{title_esc}</div>'
+
+        # Mini-timeline: colored segments for each track
+        mini_segs = []
+        if tracks and total > 0:
+            n = len(tracks)
+            seg_width = 100.0 / n if n > 0 else 100.0
+            for ti, t in enumerate(tracks):
+                color = conf_colors.get(t.get('confidence', 'UNCERTAIN'), '#757575')
+                left = ti * seg_width
+                mini_segs.append(
+                    f'<div class="stl-mini-seg" '
+                    f'style="left:{left:.2f}%;width:{seg_width:.2f}%;background:{color};opacity:0.7;"></div>'
+                )
+        mini_timeline_html = '\n'.join(mini_segs)
+
+        # Tracklist rows
+        track_rows = []
+        for t in tracks:
+            tkey = t.get('track_key', '')
+            is_recurring = tkey in recurring_keys
+            cls = 'stl-track stl-track--recurring' if is_recurring else 'stl-track'
+            conf = t.get('confidence', 'UNCERTAIN')
+            conf_color = conf_colors.get(conf, '#757575')
+            artist_esc = _esc(t.get('artist', ''))
+            track_title_esc = _esc(t.get('title', ''))
+            time_esc = _esc(t.get('start_time_formatted', ''))
+            tkey_esc = _esc(tkey)
+            track_rows.append(
+                f'<div class="{cls}" data-track-key="{tkey_esc}">'
+                f'<span class="stl-track-time">{time_esc}</span>'
+                f'<span class="stl-track-name">'
+                f'<span class="stl-track-artist">{artist_esc}</span>'
+                f' \u2014 '
+                f'<span class="stl-track-title">{track_title_esc}</span>'
+                f'</span>'
+                f'<span class="stl-track-conf" style="border-color:{conf_color};color:{conf_color};">{_esc(conf)}</span>'
+                f'</div>'
+            )
+        tracklist_html = '\n'.join(track_rows)
+
+        nodes_html_parts.append(f'''<div class="stl-node" data-set-idx="{idx}">
+  <div class="stl-node-dot"></div>
+  <div class="stl-node-card">
+    {title_html}
+    <div class="stl-node-meta">{_esc(str(total))} tracks</div>
+    <div class="stl-node-mini-timeline">
+      {mini_timeline_html}
+    </div>
+    <button class="stl-expand-btn" onclick="toggleSetExpand({idx})">&#9660; Show Tracklist</button>
+  </div>
+  <div class="stl-tracklist" id="stlTracklist{idx}" hidden>
+    {tracklist_html}
+  </div>
+</div>''')
+
+    nodes_html = '\n'.join(nodes_html_parts)
+
+    timeline_js = """<script>
+function toggleSetExpand(idx) {
+  var tracklist = document.getElementById('stlTracklist' + idx);
+  var node = document.querySelector('.stl-node[data-set-idx="' + idx + '"]');
+  var btn = node ? node.querySelector('.stl-expand-btn') : null;
+  if (!tracklist) return;
+  if (tracklist.hidden) {
+    tracklist.hidden = false;
+    if (btn) btn.innerHTML = '&#9650; Hide Tracklist';
+    drawContinuityArcs();
+  } else {
+    tracklist.hidden = true;
+    if (btn) btn.innerHTML = '&#9660; Show Tracklist';
+    drawContinuityArcs();
+  }
+}
+
+// ── Recurring track hover highlighting ──
+document.querySelectorAll('.stl-track[data-track-key]').forEach(function(track) {
+  track.addEventListener('mouseenter', function() {
+    var key = this.dataset.trackKey;
+    document.querySelectorAll('.stl-track[data-track-key]').forEach(function(t) {
+      if (t.dataset.trackKey === key) t.classList.add('stl-track--highlight');
+    });
+    document.querySelectorAll('.stl-arc').forEach(function(arc) {
+      if (arc.dataset.trackKey === key) arc.classList.add('stl-arc--highlight');
+    });
+  });
+  track.addEventListener('mouseleave', function() {
+    document.querySelectorAll('.stl-track--highlight').forEach(function(t) {
+      t.classList.remove('stl-track--highlight');
+    });
+    document.querySelectorAll('.stl-arc--highlight').forEach(function(arc) {
+      arc.classList.remove('stl-arc--highlight');
+    });
+  });
+});
+
+// ── SVG continuity arcs ──
+function drawContinuityArcs() {
+  var svg = document.getElementById('stlArcs');
+  if (!svg) return;
+  var container = svg.parentElement;
+  var containerRect = container.getBoundingClientRect();
+  svg.innerHTML = '';
+
+  var trackSets = {};
+  var nodes = document.querySelectorAll('.stl-node');
+  nodes.forEach(function(node, i) {
+    var dot = node.querySelector('.stl-node-dot');
+    if (!dot) return;
+    var dotRect = dot.getBoundingClientRect();
+    var cx = dotRect.left + dotRect.width / 2 - containerRect.left + container.scrollLeft;
+    var cy = dotRect.top + dotRect.height / 2 - containerRect.top + container.scrollTop;
+
+    var tracks = node.querySelectorAll('.stl-track[data-track-key]');
+    tracks.forEach(function(t) {
+      var key = t.dataset.trackKey;
+      if (!trackSets[key]) trackSets[key] = [];
+      var alreadyAdded = trackSets[key].some(function(p) { return p.idx === i; });
+      if (!alreadyAdded) trackSets[key].push({idx: i, x: cx, y: cy});
+    });
+  });
+
+  Object.keys(trackSets).forEach(function(key) {
+    var positions = trackSets[key];
+    if (positions.length < 2) return;
+    for (var i = 0; i < positions.length - 1; i++) {
+      var p1 = positions[i];
+      var p2 = positions[i + 1];
+      var midX = (p1.x + p2.x) / 2;
+      var arcHeight = Math.min(40, Math.abs(p2.x - p1.x) * 0.15);
+      var midY = p1.y - arcHeight - 20;
+      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M ' + p1.x + ' ' + p1.y + ' Q ' + midX + ' ' + midY + ' ' + p2.x + ' ' + p2.y);
+      path.setAttribute('class', 'stl-arc');
+      path.dataset.trackKey = key;
+      svg.appendChild(path);
+    }
+  });
+}
+
+drawContinuityArcs();
+var stlScroll = document.querySelector('.stl-scroll');
+if (stlScroll) stlScroll.addEventListener('scroll', drawContinuityArcs);
+window.addEventListener('resize', drawContinuityArcs);
+</script>"""
+
+    return f'''<div class="stl-container">
+  <div class="stl-scroll">
+    <svg class="stl-arcs" id="stlArcs" aria-hidden="true"></svg>
+    <div class="stl-axis"></div>
+    <div class="stl-nodes">
+      {nodes_html}
+    </div>
+  </div>
+</div>
+{timeline_js}'''
 
 
 def _render_set_cards(set_summaries: list) -> str:
@@ -2531,6 +2946,7 @@ class HtmlFormatter:
         heatmap_data    = _build_heatmap_data(track_counter, track_info, set_summaries)
         heatmap_html    = _render_heatmap(heatmap_data)
         signature_html  = _render_signature_analysis(track_counter, track_info, set_summaries)
+        timeline_html   = _render_set_timeline(set_summaries)
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -2570,6 +2986,11 @@ class HtmlFormatter:
   <section>
     <h2>DJ Signature</h2>
     {signature_html}
+  </section>
+
+  <section>
+    <h2>Set Timeline</h2>
+    {timeline_html}
   </section>
 
   <section>
