@@ -214,7 +214,7 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
     return '\n'.join(segments_html)
 
 
-def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
+def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_controls: bool = False) -> str:
     """Render individual track cards as HTML."""
     cards = []
     for t in tracks:
@@ -227,12 +227,36 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
         title_esc  = _esc(t['title'])
         copy_val   = _esc(f"{t['artist']} - {t['title']}")
 
+        # Spotify per-track controls (checkbox, save to liked, embed toggle)
+        checkbox_html = ''
+        add_spotify_btn = ''
+        spotify_embed_btn = ''
+        if show_spotify_controls and t.get('spotify_url'):
+            _spot_id = t['spotify_url'].split('/')[-1].split('?')[0]
+            _spot_id_esc = _esc(_spot_id)
+            checkbox_html = (
+                f'<input type="checkbox" class="track-select" '
+                f'data-spotify-id="{_spot_id_esc}" checked>'
+            )
+            add_spotify_btn = (
+                f'<button class="btn btn-add-spotify" '
+                f'onclick="addToSpotify(this, \'{_spot_id_esc}\')" '
+                f'title="Save to Liked Songs">+ Save</button>'
+            )
+            spotify_embed_btn = (
+                f'<button class="btn btn-spotify-embed" '
+                f'onclick="toggleSpotifyEmbed(this, \'{_spot_id_esc}\')" '
+                f'title="Spotify embed player">\u25b6 Spotify</button>'
+            )
+
         # Platform links
         links_html = []
         if t['spotify_url']:
             links_html.append(
                 f'<a href="{_esc(t["spotify_url"])}" class="btn btn-spotify" target="_blank" rel="noopener">Spotify</a>'
             )
+            if add_spotify_btn:
+                links_html.append(add_spotify_btn)
         if t['youtube_url']:
             links_html.append(
                 f'<a href="{_esc(t["youtube_url"])}" class="btn btn-youtube" target="_blank" rel="noopener">YouTube</a>'
@@ -360,8 +384,10 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
     </div>
   </div>
   <div class="track-actions">
+    {checkbox_html}
     {play_btn}
     {links_block}
+    {spotify_embed_btn}
     {preview_btn}
     <button class="btn btn-expand-details" onclick="toggleDetails(this)" title="Detection details">&#8943;</button>
     <button class="btn btn-copy" onclick="copyTrack(this)" data-text="{copy_val}" title="Copy to clipboard">&#128203;</button>
@@ -874,6 +900,48 @@ a { color: inherit; text-decoration: none; }
 .tl-tip-track { font-size: 13px; font-weight: 600; color: #fff; line-height: 1.3; word-break: break-word; }
 .tl-tip-time { font-size: 11px; font-family: 'Courier New', monospace; color: #888; font-variant-numeric: tabular-nums; }
 .tl-tip-badge { margin-top: 2px; align-self: flex-start; padding: 1px 7px; border-radius: 10px; border: 1px solid; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+
+/* ── Spotify Integration ── */
+.track-select {
+  accent-color: #1db954;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.playlist-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: #161616;
+  border: 1px solid #222;
+  border-radius: 8px;
+}
+
+.select-controls { display: flex; gap: 8px; align-items: center; }
+.select-count { font-size: 12px; color: #888; }
+.btn-select { color: #888; border-color: #333; }
+
+.btn-create-playlist {
+  color: #1db954;
+  border-color: #1db954;
+  font-size: 13px;
+  padding: 8px 16px;
+}
+.btn-create-playlist:hover { background: #1db954; color: #000; }
+
+.btn-add-spotify { color: #1db954; border-color: #1db954; font-size: 10px; padding: 3px 8px; }
+.btn-add-spotify--saved { background: #1db954; color: #000; border-color: #1db954; cursor: default; }
+
+.spotify-embed { grid-column: 1 / -1; margin-top: 8px; }
+.btn-spotify-embed { color: #1db954; border-color: #1db954; font-size: 10px; }
+
+.playlist-result { width: 100%; padding-top: 8px; font-size: 12px; color: #888; }
 """
 
 JS = """
@@ -1912,6 +1980,225 @@ restoreTrackOrder();
 </script>"""
 
 
+def _render_spotify_js(spotify_client_id: str) -> str:
+    """Return Spotify OAuth PKCE + playlist creation + liked songs JS as a <script> block."""
+    client_id_esc = _esc(spotify_client_id)
+    return f"""<script>
+// ── Spotify Integration ──
+const SPOTIFY_CLIENT_ID = '{client_id_esc}';
+
+function selectAll() {{
+  document.querySelectorAll('.track-select').forEach(cb => cb.checked = true);
+  updateSelectCount();
+}}
+
+function deselectAll() {{
+  document.querySelectorAll('.track-select').forEach(cb => cb.checked = false);
+  updateSelectCount();
+}}
+
+function updateSelectCount() {{
+  const count = document.querySelectorAll('.track-select:checked').length;
+  const el = document.getElementById('selectCount');
+  if (el) el.textContent = count + ' track' + (count !== 1 ? 's' : '') + ' selected';
+}}
+
+document.addEventListener('change', function(e) {{
+  if (e.target.classList.contains('track-select')) updateSelectCount();
+}});
+updateSelectCount();
+
+function getSelectedTrackIds() {{
+  return Array.from(document.querySelectorAll('.track-select:checked'))
+    .map(cb => cb.dataset.spotifyId);
+}}
+
+function generateRandomString(length) {{
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(length)))
+    .map(x => chars[x % chars.length]).join('');
+}}
+
+async function sha256base64url(plain) {{
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+}}
+
+async function authorizeSpotify() {{
+  const verifier = generateRandomString(128);
+  const challenge = await sha256base64url(verifier);
+
+  const params = new URLSearchParams({{
+    client_id: SPOTIFY_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: 'http://127.0.0.1:8888/callback',
+    scope: 'playlist-modify-public playlist-modify-private user-library-modify',
+    code_challenge_method: 'S256',
+    code_challenge: challenge,
+  }});
+
+  const authUrl = 'https://accounts.spotify.com/authorize?' + params.toString();
+  const popup = window.open(authUrl, 'spotify-auth', 'width=500,height=700');
+  const code = await waitForAuthCode(popup);
+  if (!code) return null;
+
+  const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+    body: new URLSearchParams({{
+      client_id: SPOTIFY_CLIENT_ID,
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: 'http://127.0.0.1:8888/callback',
+      code_verifier: verifier,
+    }}),
+  }});
+
+  const data = await tokenResponse.json();
+  return data.access_token || null;
+}}
+
+function waitForAuthCode(popup) {{
+  return new Promise((resolve) => {{
+    const interval = setInterval(() => {{
+      try {{
+        if (popup.closed) {{ clearInterval(interval); resolve(null); return; }}
+        const url = popup.location.href;
+        if (url.startsWith('http://127.0.0.1:8888/callback')) {{
+          const code = new URL(url).searchParams.get('code');
+          popup.close();
+          clearInterval(interval);
+          resolve(code);
+        }}
+      }} catch (e) {{ /* cross-origin, keep waiting */ }}
+    }}, 500);
+  }});
+}}
+
+async function startPlaylistCreation() {{
+  const selected = getSelectedTrackIds();
+  if (selected.length === 0) {{ alert('No tracks selected'); return; }}
+
+  let token = sessionStorage.getItem('spotify_token');
+  if (!token) {{
+    token = await authorizeSpotify();
+    if (!token) return;
+    sessionStorage.setItem('spotify_token', token);
+  }}
+
+  await createPlaylist(token, selected);
+}}
+
+async function createPlaylist(token, trackIds) {{
+  const btn = document.getElementById('createPlaylistBtn');
+  btn.textContent = 'Creating...';
+  btn.disabled = true;
+
+  try {{
+    const meResp = await fetch('https://api.spotify.com/v1/me', {{
+      headers: {{ 'Authorization': 'Bearer ' + token }}
+    }});
+    const me = await meResp.json();
+
+    const titleEl = document.querySelector('.header h1');
+    const playlistName = titleEl ? titleEl.textContent : document.title;
+    const createResp = await fetch('https://api.spotify.com/v1/users/' + me.id + '/playlists', {{
+      method: 'POST',
+      headers: {{
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      }},
+      body: JSON.stringify({{
+        name: playlistName,
+        description: 'Generated from DJ set setlist',
+        public: false
+      }})
+    }});
+    const playlist = await createResp.json();
+
+    const uris = trackIds.map(id => 'spotify:track:' + id);
+    for (let i = 0; i < uris.length; i += 100) {{
+      await fetch('https://api.spotify.com/v1/playlists/' + playlist.id + '/tracks', {{
+        method: 'POST',
+        headers: {{
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        }},
+        body: JSON.stringify({{ uris: uris.slice(i, i + 100) }})
+      }});
+    }}
+
+    showPlaylistResult(playlist.external_urls.spotify, trackIds.length);
+
+  }} catch (e) {{
+    alert('Failed to create playlist: ' + e.message);
+  }} finally {{
+    btn.textContent = '\U0001F3B5 Create Spotify Playlist';
+    btn.disabled = false;
+  }}
+}}
+
+function showPlaylistResult(url, count) {{
+  const container = document.getElementById('playlistControls');
+  const result = document.createElement('div');
+  result.className = 'playlist-result';
+  result.innerHTML = '\u2713 Playlist created with ' + count + ' tracks! ' +
+    '<a href="' + url + '" target="_blank" style="color:#1db954;">Open in Spotify \u2192</a>';
+  container.appendChild(result);
+}}
+
+async function addToSpotify(btn, trackId) {{
+  let token = sessionStorage.getItem('spotify_token');
+  if (!token) {{
+    token = await authorizeSpotify();
+    if (!token) return;
+    sessionStorage.setItem('spotify_token', token);
+  }}
+
+  btn.textContent = '...';
+  btn.disabled = true;
+  try {{
+    const resp = await fetch('https://api.spotify.com/v1/me/tracks', {{
+      method: 'PUT',
+      headers: {{
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      }},
+      body: JSON.stringify({{ ids: [trackId] }})
+    }});
+    if (resp.ok) {{
+      btn.textContent = '\u2713 Saved';
+      btn.classList.add('btn-add-spotify--saved');
+    }} else {{
+      btn.textContent = '\u2717 Error';
+      btn.disabled = false;
+    }}
+  }} catch (e) {{
+    btn.textContent = '\u2717 Error';
+    btn.disabled = false;
+  }}
+}}
+
+function toggleSpotifyEmbed(btn, trackId) {{
+  const card = btn.closest('.track-card');
+  let embed = card.querySelector('.spotify-embed');
+  if (embed) {{
+    embed.remove();
+    btn.textContent = '\u25b6 Spotify';
+    return;
+  }}
+  embed = document.createElement('div');
+  embed.className = 'spotify-embed';
+  embed.innerHTML = '<iframe style="border-radius:8px" src="https://open.spotify.com/embed/track/' + trackId + '?utm_source=generator&theme=0" width="100%" height="80" frameBorder="0" allow="autoplay; clipboard-write; encrypted-media" loading="lazy"></iframe>';
+  card.appendChild(embed);
+  btn.textContent = '\u2715 Close';
+}}
+</script>"""
+
+
 class HtmlFormatter:
     """Generate self-contained interactive HTML setlist pages."""
 
@@ -1962,10 +2249,14 @@ class HtmlFormatter:
         total     = len(tracks)
         recognized = sum(1 for t in tracks if t['title'] != 'Unknown Track')
 
+        # Spotify features: only if client ID is configured and tracks have Spotify URLs
+        has_spotify_tracks = any(t.get('spotify_url') for t in tracks)
+        show_spotify_features = bool(Config.SPOTIFY_CLIENT_ID) and has_spotify_tracks
+
         # Section HTML
         stats_html    = _render_stats(counts, total, recognized)
         timeline_html = _render_timeline(tracks, total_duration)
-        cards_html    = _render_track_cards(tracks, platform)
+        cards_html    = _render_track_cards(tracks, platform, show_spotify_controls=show_spotify_features)
         player_html   = _render_player(platform, embed_id)
         player_js     = _render_player_js(platform, embed_id, tracks)
 
@@ -1995,6 +2286,23 @@ class HtmlFormatter:
                     f'<button class="filter-btn" data-conf="{level}">'
                     f'{level} ({counts[level]})</button>'
                 )
+
+        # Playlist controls bar (only when Spotify features are active)
+        if show_spotify_features:
+            playlist_controls_html = '''<div class="playlist-controls" id="playlistControls">
+  <div class="select-controls">
+    <button class="btn btn-select" onclick="selectAll()">Select All</button>
+    <button class="btn btn-select" onclick="deselectAll()">Deselect All</button>
+    <span class="select-count" id="selectCount">0 tracks selected</span>
+  </div>
+  <button class="btn btn-create-playlist" id="createPlaylistBtn" onclick="startPlaylistCreation()">
+    &#127925; Create Spotify Playlist
+  </button>
+</div>'''
+            spotify_js = _render_spotify_js(Config.SPOTIFY_CLIENT_ID)
+        else:
+            playlist_controls_html = ''
+            spotify_js = ''
 
         # Algorithm parameter footer
         footer_items = [
@@ -2054,6 +2362,9 @@ class HtmlFormatter:
     <button class="btn" style="color:#555;border-color:#333;" onclick="localStorage.removeItem('trackOrder_' + document.title); location.reload();" title="Reset to original order">&#8635; Reset Order</button>
   </div>
 
+  <!-- Spotify Playlist Controls -->
+  {playlist_controls_html}
+
   <!-- Tracklist -->
   <div class="tracklist" id="tracklist">
     {cards_html}
@@ -2078,6 +2389,7 @@ class HtmlFormatter:
 <script>{JS}</script>
 {_render_track_card_js()}
 {player_js}
+{spotify_js}
 </body>
 </html>"""
 
