@@ -62,12 +62,26 @@ class ArtistSummarizer:
                 except ValueError:
                     pass  # output_dir outside expected tree — skip relative link
 
+            set_tracks = []
+            for track in tracks:
+                if track.get("title") != "Unknown Track":
+                    set_tracks.append({
+                        "artist": track.get("artist", "Unknown"),
+                        "title": track.get("title", "Unknown Track"),
+                        "start_time_formatted": track.get("start_time_formatted", ""),
+                        "confidence": track.get("confidence", "UNCERTAIN"),
+                        "spotify_url": track.get("spotify_url"),
+                        "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
+                    })
+
             set_summaries.append({
                 "title": mix_info.get("title", result.get("mix_name", "Unknown")),
                 "url": result["url"],
                 "total_tracks": metadata.get("total_tracks", len(tracks)),
                 "high_confidence": metadata.get("high_confidence_tracks", 0),
                 "set_html_rel": set_html_rel,
+                "tracks": set_tracks,
+                "index": len(set_summaries),
             })
 
             set_title = mix_info.get("title", "Unknown")
@@ -122,12 +136,26 @@ class ArtistSummarizer:
                 except ValueError:
                     pass
 
+            set_tracks = []
+            for track in tracks:
+                if track.get("title") != "Unknown Track":
+                    set_tracks.append({
+                        "artist": track.get("artist", "Unknown"),
+                        "title": track.get("title", "Unknown Track"),
+                        "start_time_formatted": track.get("start_time_formatted", ""),
+                        "confidence": track.get("confidence", "UNCERTAIN"),
+                        "spotify_url": track.get("spotify_url"),
+                        "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
+                    })
+
             set_summaries.append({
                 "title": mix_info.get("title", set_dir.name),
                 "url": url,
                 "total_tracks": metadata.get("total_tracks", len(tracks)),
                 "high_confidence": metadata.get("high_confidence_tracks", 0),
                 "set_html_rel": set_html_rel,
+                "tracks": set_tracks,
+                "index": len(set_summaries),
             })
 
             set_title = mix_info.get("title", set_dir.name)
