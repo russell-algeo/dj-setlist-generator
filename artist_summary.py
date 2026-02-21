@@ -62,12 +62,26 @@ class ArtistSummarizer:
                 except ValueError:
                     pass  # output_dir outside expected tree — skip relative link
 
+            set_tracks = []
+            for track in tracks:
+                if track.get("title") != "Unknown Track":
+                    set_tracks.append({
+                        "artist": track.get("artist", "Unknown"),
+                        "title": track.get("title", "Unknown Track"),
+                        "start_time_formatted": track.get("start_time_formatted", ""),
+                        "confidence": track.get("confidence", "UNCERTAIN"),
+                        "spotify_url": track.get("spotify_url"),
+                        "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
+                    })
+
             set_summaries.append({
                 "title": mix_info.get("title", result.get("mix_name", "Unknown")),
                 "url": result["url"],
                 "total_tracks": metadata.get("total_tracks", len(tracks)),
                 "high_confidence": metadata.get("high_confidence_tracks", 0),
                 "set_html_rel": set_html_rel,
+                "tracks": set_tracks,
+                "index": len(set_summaries),
             })
 
             set_title = mix_info.get("title", "Unknown")
@@ -85,6 +99,7 @@ class ArtistSummarizer:
                         "source_deep_link": track.get("source_deep_link"),
                         "set_html_rel":    set_html_rel,
                         "confidence":      track.get("confidence", "UNCERTAIN"),
+                        "genres":          track.get("spotify_genres", []),
                     })
 
         # Include manually-migrated sets that weren't part of this discovery run.
@@ -121,12 +136,26 @@ class ArtistSummarizer:
                 except ValueError:
                     pass
 
+            set_tracks = []
+            for track in tracks:
+                if track.get("title") != "Unknown Track":
+                    set_tracks.append({
+                        "artist": track.get("artist", "Unknown"),
+                        "title": track.get("title", "Unknown Track"),
+                        "start_time_formatted": track.get("start_time_formatted", ""),
+                        "confidence": track.get("confidence", "UNCERTAIN"),
+                        "spotify_url": track.get("spotify_url"),
+                        "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
+                    })
+
             set_summaries.append({
                 "title": mix_info.get("title", set_dir.name),
                 "url": url,
                 "total_tracks": metadata.get("total_tracks", len(tracks)),
                 "high_confidence": metadata.get("high_confidence_tracks", 0),
                 "set_html_rel": set_html_rel,
+                "tracks": set_tracks,
+                "index": len(set_summaries),
             })
 
             set_title = mix_info.get("title", set_dir.name)
@@ -144,10 +173,12 @@ class ArtistSummarizer:
                         "source_deep_link": track.get("source_deep_link"),
                         "set_html_rel":    set_html_rel,
                         "confidence":      track.get("confidence", "UNCERTAIN"),
+                        "genres":          track.get("spotify_genres", []),
                     })
 
         track_counter = Counter()
         track_info = {}
+        _genre_counters: dict = {}
         for t in all_tracks:
             key = f"{t['artist']} - {t['title']}"
             track_counter[key] += 1
@@ -157,7 +188,9 @@ class ArtistSummarizer:
                     "title":       t["title"],
                     "spotify_url": t.get("spotify_url"),
                     "appearances": [],
+                    "genres":      [],
                 }
+                _genre_counters[key] = Counter()
             track_info[key]["appearances"].append({
                 "set_title":       t["from_set"],
                 "time_range":      t.get("time_range", ""),
@@ -165,6 +198,12 @@ class ArtistSummarizer:
                 "set_html_rel":    t.get("set_html_rel"),
                 "confidence":      t.get("confidence", "UNCERTAIN"),
             })
+            for genre in t.get("genres", []):
+                _genre_counters[key][genre] += 1
+
+        # Materialise genre lists (most-common first) from per-track counters
+        for key in track_info:
+            track_info[key]["genres"] = [g for g, _ in _genre_counters[key].most_common(5)]
 
         output_fmt = OutputFormatter(artist_manager=self._artist_manager)
         html_fmt   = HtmlFormatter(artist_manager=self._artist_manager)
