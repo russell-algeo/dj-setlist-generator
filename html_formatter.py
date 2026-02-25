@@ -146,6 +146,20 @@ function togglePillPlay() {
   else playPlayer();
 }
 
+function scrollToActiveCard() {
+  if (activeIdx === null) return;
+  const card = document.querySelector('.track-card[data-track-idx="' + activeIdx + '"]');
+  if (!card || card.hidden) return;
+  const rect = card.getBoundingClientRect();
+  const viewH = window.innerHeight;
+  const targetTop = viewH * 0.67;
+  window.scrollBy({ top: rect.top - targetTop, behavior: 'smooth' });
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function formatPillTime(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -164,6 +178,20 @@ function updateProgressBar() {
   if (fill) fill.style.width = Math.min(100, (currentTime / total) * 100) + '%';
   if (timeEl) timeEl.textContent = formatPillTime(currentTime);
 }
+
+(function() {
+  const bar = document.getElementById('pillProgressBar');
+  if (!bar) return;
+  bar.addEventListener('click', function(e) {
+    const pill = document.getElementById('playerPill');
+    if (!pill) return;
+    const total = parseFloat(pill.dataset.duration) || 0;
+    if (!total) return;
+    const rect = bar.getBoundingClientRect();
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seekPlayer(fraction * total);
+  });
+})();
 
 let nowPlayingInterval = null;
 let seekLockUntil = 0;
@@ -190,8 +218,7 @@ function updateNowPlaying() {
   }
 }
 
-function highlightTrackAt(seconds) {
-  if (Date.now() < seekLockUntil) return;
+function _applyTrackHighlight(seconds) {
   const matches = trackTimes.filter(t => seconds >= t.start && seconds < t.end);
   if (!matches.length) return;
   // When tracks overlap, prefer the one that started most recently (highest start time)
@@ -199,6 +226,11 @@ function highlightTrackAt(seconds) {
   if (match.idx !== String(activeIdx)) {
     setActive(String(match.idx), false);
   }
+}
+
+function highlightTrackAt(seconds) {
+  if (Date.now() < seekLockUntil) return;
+  _applyTrackHighlight(seconds);
 }
 """
 
@@ -287,9 +319,10 @@ function onYouTubeIframeAPIReady() {{
 }}
 
 function seekPlayer(seconds) {{
-  seekLockUntil = Date.now() + 1500;
   currentTime = seconds;
   updateProgressBar();
+  _applyTrackHighlight(seconds);
+  seekLockUntil = Date.now() + 1500;
   if (ytEmbedFailed) {{
     window.open('https://www.youtube.com/watch?v={embed_id}&t=' + Math.floor(seconds) + 's', '_blank');
     return;
@@ -321,9 +354,10 @@ widget.bind(SC.Widget.Events.PAUSE,  function() {{ isPlaying = false; updatePill
 widget.bind(SC.Widget.Events.FINISH, function() {{ isPlaying = false; updatePillIcon(); stopNowPlaying(); }});
 
 function seekPlayer(seconds) {{
-  seekLockUntil = Date.now() + 1500;
   currentTime = seconds;
   updateProgressBar();
+  _applyTrackHighlight(seconds);
+  seekLockUntil = Date.now() + 1500;
   widget.seekTo(seconds * 1000);
   widget.play();
 }}
@@ -1077,11 +1111,13 @@ a { color: inherit; text-decoration: none; }
 }
 .pill-progress-bar {
   width: 100%;
-  height: 4px;
+  height: 6px;
   background: #333;
-  border-radius: 2px;
+  border-radius: 3px;
   overflow: hidden;
+  cursor: pointer;
 }
+.pill-progress-bar:hover { background: #444; }
 .pill-progress-fill {
   height: 100%;
   background: #00e676;
@@ -1108,6 +1144,9 @@ a { color: inherit; text-decoration: none; }
 .pill-skip:hover { color: #ccc; border-color: #666; opacity: 1; }
 .pill-play { color: #00e676; border-color: #00e676; min-width: 40px; text-align: center; font-size: 13px; padding: 5px 12px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
 .pill-play:hover { opacity: 1; }
+.pill-nav { display: flex; gap: 6px; }
+.pill-nav-btn { flex: 1; color: #555; border-color: #2a2a2a; font-size: 10px; text-align: center; padding: 3px 6px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+.pill-nav-btn:hover { color: #999; border-color: #555; opacity: 1; }
 """
 
 JS = """
@@ -3118,7 +3157,7 @@ class HtmlFormatter:
         player_js     = _render_player_js(platform, embed_id, tracks)
         pill_html = (
             f'<div class="player-pill" id="playerPill" onclick="event.stopPropagation()" data-duration="{total_duration:.3f}">'
-            f'<div class="pill-progress-bar"><div class="pill-progress-fill" id="pillProgressFill"></div></div>'
+            f'<div class="pill-progress-bar" id="pillProgressBar"><div class="pill-progress-fill" id="pillProgressFill"></div></div>'
             f'<div class="pill-time-row">'
             f'<span id="pillTimeCurrent">0:00</span>'
             f'<span>{_esc(format_time(total_duration))}</span>'
@@ -3127,6 +3166,10 @@ class HtmlFormatter:
             f'<button class="btn pill-skip" onclick="skipPlayer(-15)" title="Back 15 seconds">\u221215</button>'
             f'<button class="btn pill-play" id="pillPlayBtn" onclick="togglePillPlay()" title="Play / Pause">&#9654;</button>'
             f'<button class="btn pill-skip" onclick="skipPlayer(15)" title="Forward 15 seconds">+15</button>'
+            f'</div>'
+            f'<div class="pill-nav">'
+            f'<button class="btn pill-nav-btn" onclick="scrollToTop()" title="Scroll to top">\u2191 top</button>'
+            f'<button class="btn pill-nav-btn" onclick="scrollToActiveCard()" title="Scroll to current track">\u2193 track</button>'
             f'</div>'
             f'</div>'
         ) if platform in ('youtube', 'soundcloud') else ''
