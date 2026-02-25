@@ -85,6 +85,11 @@ All settings in `.env` file (see `config.py` for defaults):
 - **Overlap resolution**: `OVERLAP_RESOLUTION_ENABLED`, `OVERLAP_THRESHOLD`
 - **Cleanup**: `CLEANUP_TEMP_FILES`, `CLEANUP_CHECKPOINTS`
 
+## Git Workflow
+
+- **Never commit design docs** (e.g. `docs/plans/`) unless explicitly asked. Writing a design doc is a planning artifact — it stays local until the user says to commit it.
+- Only commit code changes when the user explicitly requests a commit.
+
 ## Directory Structure
 
 **URL mode** (`python main.py "https://..."`)

@@ -428,191 +428,88 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
 
 
 def _render_journey_chart(tracks: list, total_duration: float) -> str:
-    """Render a collapsible SVG line chart of BPM, energy, and danceability over time.
+    """Render a collapsible JS-driven journey chart.
 
-    Returns an empty string if no tracks have any metric data.
-    The chart is hidden by default and revealed via a toggle button.
+    Emits a journeyData JSON array and HTML container shell. All drawing is
+    handled client-side by drawJourneyChart() in the JS constant.
+    Returns an empty string if no tracks have metric data.
     """
     if total_duration <= 0:
         return ''
 
-    # Collect points per metric, using each track's midpoint as the x position
-    bpm_points = []
-    energy_points = []
-    dance_points = []
+    import json
 
+    points = []
     for t in tracks:
+        if t.get('title') == 'Unknown Track':
+            continue
         start = t.get('start_time', 0) or 0
-        end = t.get('end_time', 0) or start
-        mid = (start + end) / 2.0
-        x_norm = mid / total_duration  # 0.0 – 1.0
 
-        title = t.get('title', '') or ''
-        artist = t.get('artist', '') or ''
-        label_base = (
-            f"{artist} \u2014 {title}" if artist and title
-            else (title or artist or 'Unknown')
-        )
-
-        bpm = t.get('bpm')
-        if bpm is not None:
-            try:
-                bpm_points.append({'x': x_norm, 'val': float(bpm), 'label': label_base})
-            except (TypeError, ValueError):
-                pass
-
+        bpm    = t.get('bpm')
         energy = t.get('energy')
-        if energy is not None:
-            try:
-                energy_points.append({'x': x_norm, 'val': float(energy), 'label': label_base})
-            except (TypeError, ValueError):
-                pass
+        dance  = t.get('danceability')
 
-        dance = t.get('danceability')
-        if dance is not None:
-            try:
-                dance_points.append({'x': x_norm, 'val': float(dance), 'label': label_base})
-            except (TypeError, ValueError):
-                pass
+        if bpm is None and energy is None and dance is None:
+            continue
 
-    # Return empty string if no metric data at all
-    if not bpm_points and not energy_points and not dance_points:
+        title  = t.get('title', '') or ''
+        artist = t.get('artist', '') or ''
+
+        points.append({
+            'idx':    str(t.get('position', '')),
+            'start':  round(start, 3),
+            'title':  title,
+            'artist': artist,
+            'bpm':    round(float(bpm),    1) if bpm    is not None else None,
+            'energy': round(float(energy), 3) if energy is not None else None,
+            'dance':  round(float(dance),  3) if dance  is not None else None,
+        })
+
+    if not points:
         return ''
 
-    # SVG layout constants
-    VB_W = 1000
-    VB_H = 120
-    Y_TOP = 10   # y for maximum value (top of chart)
-    Y_BOT = 110  # y for minimum value (bottom of chart)
-    Y_RANGE = Y_BOT - Y_TOP  # 100
+    has_bpm    = any(p['bpm']    is not None for p in points)
+    has_energy = any(p['energy'] is not None for p in points)
+    has_dance  = any(p['dance']  is not None for p in points)
 
-    # Compute BPM normalisation range
-    bpm_min = bpm_max = None
-    if bpm_points:
-        bpm_vals = [p['val'] for p in bpm_points]
-        bpm_min = min(bpm_vals)
-        bpm_max = max(bpm_vals)
-        if bpm_min == bpm_max:
-            bpm_min -= 1.0
-            bpm_max += 1.0
-
-    def x_to_svg(x_norm_val):
-        return x_norm_val * VB_W
-
-    def bpm_to_y(val):
-        norm = (val - bpm_min) / (bpm_max - bpm_min)
-        return Y_BOT - norm * Y_RANGE
-
-    def ratio_to_y(val):
-        norm = max(0.0, min(1.0, val))
-        return Y_BOT - norm * Y_RANGE
-
-    svg_parts = []
-
-    # Background rect
-    svg_parts.append(
-        f'<rect x="0" y="0" width="{VB_W}" height="{VB_H}" fill="#1a1a1a"/>'
-    )
-
-    # Subtle horizontal gridlines at 25 / 50 / 75 %
-    for pct in (0.25, 0.50, 0.75):
-        gy = round(Y_BOT - pct * Y_RANGE, 1)
-        svg_parts.append(
-            f'<line x1="0" y1="{gy}" x2="{VB_W}" y2="{gy}" '
-            f'stroke="#333" stroke-width="0.8" stroke-dasharray="4 4"/>'
+    filter_btns = []
+    if has_bpm:
+        filter_btns.append(
+            '<button class="journey-filter active" data-metric="bpm" '
+            'style="--mc:#00e676">BPM</button>'
+        )
+    if has_energy:
+        filter_btns.append(
+            '<button class="journey-filter active" data-metric="energy" '
+            'style="--mc:#ff9800">Energy</button>'
+        )
+    if has_dance:
+        filter_btns.append(
+            '<button class="journey-filter active" data-metric="dance" '
+            'style="--mc:#64b5f6">Dance</button>'
         )
 
-    def _build_metric(points, color, to_y_fn, metric_name, fmt_fn):
-        """Return SVG element strings for one metric: dashed line + dots."""
-        if not points:
-            return []
-        inner_parts = []
-        sorted_pts = sorted(points, key=lambda p: p['x'])
-        coords = []
-        for p in sorted_pts:
-            sx = round(x_to_svg(p['x']), 2)
-            sy = round(to_y_fn(p['val']), 2)
-            coords.append((sx, sy, p['val'], p['label']))
-
-        # Dashed connecting polyline
-        pts_str = ' '.join(f'{sx},{sy}' for sx, sy, _, _ in coords)
-        inner_parts.append(
-            f'<polyline points="{pts_str}" fill="none" stroke="{color}" '
-            f'stroke-width="1.5" stroke-dasharray="4 4" '
-            f'stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>'
-        )
-
-        # Dots with tooltip data-label
-        for sx, sy, val, label in coords:
-            val_str = fmt_fn(val)
-            data_label = _esc(f"{label}\n{metric_name}: {val_str}")
-            inner_parts.append(
-                f'<circle class="journey-dot" cx="{sx}" cy="{sy}" r="4" '
-                f'fill="{color}" stroke="#1a1a1a" stroke-width="1.5" '
-                f'data-label="{data_label}" style="cursor:default;"/>'
-            )
-        return inner_parts
-
-    svg_parts.extend(_build_metric(
-        bpm_points, '#00e676', bpm_to_y, 'BPM', lambda v: f'{v:.0f} BPM'
-    ))
-    svg_parts.extend(_build_metric(
-        energy_points, '#ff9800', ratio_to_y, 'Energy', lambda v: f'{v:.2f}'
-    ))
-    svg_parts.extend(_build_metric(
-        dance_points, '#64b5f6', ratio_to_y, 'Dance', lambda v: f'{v:.2f}'
-    ))
-
-    # Legend in top-right corner, items laid out right-to-left
-    legend_items = []
-    if bpm_points:
-        legend_items.append(('BPM', '#00e676'))
-    if energy_points:
-        legend_items.append(('Energy', '#ff9800'))
-    if dance_points:
-        legend_items.append(('Dance', '#64b5f6'))
-
-    leg_x = VB_W - 8
-    leg_y = 12
-    for lbl, col in reversed(legend_items):
-        # Approximate pixel width: ~6px/char + 18px for dot + gap
-        item_width = len(lbl) * 6 + 18
-        leg_x -= item_width
-        dot_cx = round(leg_x + 4, 1)
-        text_x = round(leg_x + 10, 1)
-        text_y = round(leg_y + 4, 1)
-        svg_parts.append(
-            f'<circle cx="{dot_cx}" cy="{leg_y}" r="3" fill="{col}"/>'
-        )
-        svg_parts.append(
-            f'<text x="{text_x}" y="{text_y}" fill="#888" font-size="9" '
-            f'font-family="\'Segoe UI\', system-ui, sans-serif">'
-            f'{_esc(lbl)}</text>'
-        )
-
-    svg_inner = '\n  '.join(svg_parts)
-    svg_html = (
-        f'<svg viewBox="0 0 {VB_W} {VB_H}" preserveAspectRatio="none" '
-        f'xmlns="http://www.w3.org/2000/svg" height="120">\n'
-        f'  {svg_inner}\n'
-        f'</svg>'
-    )
-
-    # Inline onclick: toggle .visible on sibling div, update button text
-    toggle_js = (
-        "var c=this.nextElementSibling;"
-        "c.classList.toggle('visible');"
-        "this.textContent=c.classList.contains('visible')"
-        "?'\U0001F4C8 Journey \u25be':'\U0001F4C8 Journey';"
+    data_js = (
+        f'var journeyData={json.dumps(points)};'
+        f'var journeyTotalDuration={total_duration:.3f};'
     )
 
     return (
         f'<div class="journey-section">'
-        f'<button class="btn btn-journey" onclick="{_esc(toggle_js)}">'
+        f'<div class="journey-header">'
+        f'<button class="btn btn-journey" onclick="toggleJourneyChart()">'
         f'\U0001F4C8 Journey</button>'
-        f'<div class="journey-chart">'
-        f'{svg_html}'
+        f'<div class="journey-filters" id="journeyFilters" style="display:none">'
+        f'{"".join(filter_btns)}'
         f'</div>'
+        f'</div>'
+        f'<div class="journey-chart" id="journeyChart">'
+        f'<div class="journey-yaxis-left" id="journeyYLeft"></div>'
+        f'<svg id="journeySvg" preserveAspectRatio="none" '
+        f'xmlns="http://www.w3.org/2000/svg"></svg>'
+        f'<div class="journey-yaxis-right" id="journeyYRight"></div>'
+        f'</div>'
+        f'<script>{data_js}</script>'
         f'</div>\n'
     )
 
@@ -1463,8 +1360,13 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ── Journey chart ── */
-.journey-section {
-  margin-bottom: 20px;
+.journey-section { margin-bottom: 20px; }
+
+.journey-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .btn-journey {
@@ -1472,9 +1374,29 @@ a { color: inherit; text-decoration: none; }
   border-color: #2a2a2a;
   font-size: 11px;
   padding: 4px 10px;
-  margin-bottom: 8px;
+  flex-shrink: 0;
 }
 .btn-journey:hover { color: #888; border-color: #444; opacity: 1; }
+
+.journey-filters {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.journey-filter {
+  background: none;
+  border: 1px solid #333;
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 11px;
+  color: #555;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.journey-filter.active { border-color: var(--mc); color: var(--mc); }
+.journey-filter:hover { opacity: 0.8; }
 
 .journey-chart {
   display: none;
@@ -1482,14 +1404,27 @@ a { color: inherit; text-decoration: none; }
   background: #1a1a1a;
   border: 1px solid #222;
   border-radius: 6px;
-  overflow: hidden;
-  position: relative;
+  align-items: flex-start;
 }
-.journey-chart.visible { display: block; }
+.journey-chart.visible { display: flex; }
 
-.journey-chart svg {
+.journey-yaxis-left,
+.journey-yaxis-right {
+  position: relative;
+  width: 36px;
+  min-width: 36px;
+  flex-shrink: 0;
+  height: 140px;
+}
+.journey-yaxis-right { text-align: right; }
+
+#journeySvg {
   display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  height: 120px;
+  align-self: flex-start;
+  border-radius: 0 6px 6px 0;
 }
 
 /* Journey tooltip */
@@ -1602,6 +1537,7 @@ function clearActive() {
   }
   const nowPlaying = document.getElementById('pillNowPlaying');
   if (nowPlaying) nowPlaying.classList.remove('visible');
+  if (window._journeyUnhighlight) window._journeyUnhighlight();
   activeIdx = null;
 }
 
@@ -1650,6 +1586,7 @@ function setActive(idx, scroll = true) {
     }
   }
   _updatePillNowPlaying(idx);
+  if (window._journeyHighlight) window._journeyHighlight(idx);
   activeIdx = idx;
 }
 
@@ -1698,35 +1635,264 @@ document.querySelectorAll('.track-card').forEach(card => {
 document.addEventListener('click', () => { clearActive(); });
 
 
-// ── Journey Chart Tooltip ──
+// ── Journey Chart ──
 (function() {
-  var jTip = document.getElementById('journey-tooltip');
-  if (!jTip) return;
+  if (typeof journeyData === 'undefined') return;
 
-  function positionJTip(cx, cy) {
+  var COLORS        = { bpm: '#00e676', energy: '#ff9800', dance: '#64b5f6' };
+  var ALL_METRICS   = ['bpm', 'energy', 'dance'];
+  var jTip          = document.getElementById('journey-tooltip');
+  var activeJourneyIdx = null;
+
+  // SVG coordinate constants (must match drawJourneyChart)
+  var VB_W = 1000, VB_H = 120, Y_TOP = 10, Y_BOT = 110, Y_RANGE = Y_BOT - Y_TOP;
+
+  // Start with all metrics that have at least one data point
+  var activeMetrics = ALL_METRICS.filter(function(m) {
+    return journeyData.some(function(p) { return p[m] !== null; });
+  });
+
+  // Expose toggle for inline onclick
+  window.toggleJourneyChart = function() {
+    var chart   = document.getElementById('journeyChart');
+    var filters = document.getElementById('journeyFilters');
+    var btn     = document.querySelector('.btn-journey');
+    var visible = chart.classList.toggle('visible');
+    if (filters) filters.style.display = visible ? 'flex' : 'none';
+    if (btn) btn.textContent = visible ? '\U0001F4C8 Journey \u25be' : '\U0001F4C8 Journey';
+    if (visible) drawJourneyChart();
+  };
+
+  // Expose highlight hooks for setActive / clearActive
+  window._journeyHighlight = function(idx) {
+    activeJourneyIdx = String(idx);
+    _applyJourneyHighlight();
+  };
+  window._journeyUnhighlight = function() {
+    activeJourneyIdx = null;
+    _applyJourneyHighlight();
+  };
+
+  function _applyJourneyHighlight() {
+    var svg = document.getElementById('journeySvg');
+    if (!svg) return;
+    svg.querySelectorAll('.journey-dot').forEach(function(dot) {
+      var isActive = activeJourneyIdx !== null && dot.getAttribute('data-idx') === activeJourneyIdx;
+      dot.setAttribute('stroke', isActive ? '#fff' : '#1a1a1a');
+      dot.setAttribute('stroke-width', isActive ? '2.5' : '1.5');
+    });
+  }
+
+  // Filter buttons — click to isolate; click again to restore all
+  document.querySelectorAll('.journey-filter').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var m = btn.getAttribute('data-metric');
+      if (activeMetrics.length === 1 && activeMetrics[0] === m) {
+        // Already isolated — restore all available metrics
+        activeMetrics = ALL_METRICS.filter(function(metric) {
+          return journeyData.some(function(p) { return p[metric] !== null; });
+        });
+        document.querySelectorAll('.journey-filter').forEach(function(b) {
+          b.classList.add('active');
+        });
+      } else {
+        // Isolate to this metric
+        activeMetrics = [m];
+        document.querySelectorAll('.journey-filter').forEach(function(b) {
+          b.classList.toggle('active', b.getAttribute('data-metric') === m);
+        });
+      }
+      drawJourneyChart();
+    });
+  });
+
+  function drawJourneyChart() {
+    var svg    = document.getElementById('journeySvg');
+    var yLeft  = document.getElementById('journeyYLeft');
+    var yRight = document.getElementById('journeyYRight');
+    if (!svg) return;
+
+    var totalDur = typeof journeyTotalDuration !== 'undefined' ? journeyTotalDuration : 1;
+    var isolated = activeMetrics.length === 1;
+
+    // Gather sorted points per active metric
+    var metricPts = {};
+    activeMetrics.forEach(function(m) {
+      metricPts[m] = journeyData
+        .filter(function(p) { return p[m] !== null; })
+        .map(function(p) {
+          return { x: p.start / totalDur, val: p[m], idx: p.idx,
+                   start: p.start, title: p.title, artist: p.artist };
+        })
+        .sort(function(a, b) { return a.x - b.x; });
+    });
+
+    // ── Y-scale ──
+    var leftScale, rightScale;
+
+    if (isolated) {
+      var m0 = activeMetrics[0];
+      if (m0 === 'bpm') {
+        var vals = metricPts[m0].map(function(p) { return p.val; });
+        var vmin = Math.min.apply(null, vals);
+        var vmax = Math.max.apply(null, vals);
+        if (vmin === vmax) { vmin -= 1; vmax += 1; }
+        leftScale = { min: vmin, max: vmax, isBpm: true };
+      } else {
+        leftScale = { min: 0, max: 1, isBpm: false };
+      }
+      rightScale = null;
+    } else {
+      leftScale  = { min: 0, max: 1, isBpm: false };
+      rightScale = null;
+      if (activeMetrics.indexOf('bpm') !== -1 && metricPts['bpm'].length) {
+        var bvals = metricPts['bpm'].map(function(p) { return p.val; });
+        var bmin  = Math.min.apply(null, bvals);
+        var bmax  = Math.max.apply(null, bvals);
+        if (bmin === bmax) { bmin -= 1; bmax += 1; }
+        rightScale = { min: bmin, max: bmax, isBpm: true };
+      }
+    }
+
+    function scaleToY(val, scale) {
+      return Y_BOT - ((val - scale.min) / (scale.max - scale.min)) * Y_RANGE;
+    }
+
+    function getScaleFor(m) {
+      if (isolated) return leftScale;
+      return (m === 'bpm' && rightScale) ? rightScale : leftScale;
+    }
+
+    // ── Build SVG ──
+    var parts = [];
+    parts.push('<rect x="0" y="0" width="' + VB_W + '" height="' + VB_H + '" fill="#1a1a1a"/>');
+    [0.25, 0.5, 0.75].forEach(function(pct) {
+      var gy = (Y_BOT - pct * Y_RANGE).toFixed(1);
+      parts.push('<line x1="0" y1="' + gy + '" x2="' + VB_W + '" y2="' + gy +
+                 '" stroke="#333" stroke-width="0.8" stroke-dasharray="4 4"/>');
+    });
+
+    activeMetrics.forEach(function(m) {
+      var pts   = metricPts[m];
+      if (!pts.length) return;
+      var color = COLORS[m];
+      var scale = getScaleFor(m);
+
+      // Polyline
+      var ptStr = pts.map(function(p) {
+        return (p.x * VB_W).toFixed(2) + ',' + scaleToY(p.val, scale).toFixed(2);
+      }).join(' ');
+      parts.push('<polyline points="' + ptStr + '" fill="none" stroke="' + color +
+                 '" stroke-width="1.5" stroke-dasharray="4 4"' +
+                 ' stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>');
+
+      // Dots
+      pts.forEach(function(p) {
+        var cx      = (p.x * VB_W).toFixed(2);
+        var cy      = scaleToY(p.val, scale).toFixed(2);
+        var valStr  = m === 'bpm' ? p.val.toFixed(0) + ' BPM'
+                    : m === 'energy' ? 'Energy: ' + p.val.toFixed(2)
+                    : 'Danceability: ' + p.val.toFixed(2);
+        var lbl     = (p.artist && p.title)
+          ? p.artist + ' \u2014 ' + p.title
+          : (p.title || p.artist || 'Unknown');
+        var isActive = activeJourneyIdx !== null && String(p.idx) === activeJourneyIdx;
+        parts.push(
+          '<circle class="journey-dot" cx="' + cx + '" cy="' + cy + '" r="5"' +
+          ' fill="' + color + '"' +
+          ' stroke="' + (isActive ? '#fff' : '#1a1a1a') + '"' +
+          ' stroke-width="' + (isActive ? '2.5' : '1.5') + '"' +
+          ' style="cursor:pointer;"' +
+          ' data-idx="' + p.idx + '" data-start="' + p.start + '"' +
+          ' data-label="' + lbl.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"' +
+          ' data-value="' + valStr + '"' +
+          '/>'
+        );
+      });
+    });
+
+    svg.setAttribute('viewBox', '0 0 ' + VB_W + ' ' + VB_H);
+    svg.setAttribute('height', '120');
+    svg.innerHTML = parts.join('');
+
+    // ── Dot events: tooltip + click-to-seek ──
+    svg.querySelectorAll('.journey-dot').forEach(function(dot) {
+      if (jTip) {
+        dot.addEventListener('mouseenter', function(e) {
+          jTip.querySelector('.jt-title').textContent = dot.getAttribute('data-label') || '';
+          jTip.querySelector('.jt-value').textContent = dot.getAttribute('data-value') || '';
+          _jtPos(e.clientX, e.clientY);
+          jTip.classList.add('visible');
+        });
+        dot.addEventListener('mousemove', function(e) { _jtPos(e.clientX, e.clientY); });
+        dot.addEventListener('mouseleave', function() { jTip.classList.remove('visible'); });
+      }
+      dot.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var start = parseFloat(dot.getAttribute('data-start'));
+        var idx   = dot.getAttribute('data-idx');
+        if (typeof seekPlayer === 'function') seekPlayer(start);
+        if (typeof setActive  === 'function') setActive(idx, false);
+      });
+    });
+
+    // ── Y-axis labels (pixel positions aligned with SVG coordinate space) ──
+    var leftColors = [], rightColors = [];
+    if (isolated) {
+      leftColors = [COLORS[activeMetrics[0]]];
+    } else {
+      if (activeMetrics.indexOf('energy') !== -1) leftColors.push(COLORS['energy']);
+      if (activeMetrics.indexOf('dance')  !== -1) leftColors.push(COLORS['dance']);
+      if (rightScale && activeMetrics.indexOf('bpm') !== -1) rightColors = [COLORS['bpm']];
+    }
+    _renderYAxis(yLeft,  leftScale,  false, leftColors);
+    _renderYAxis(yRight, rightScale, true,  rightColors);
+  }
+
+  function _renderYAxis(el, scale, isRight, colors) {
+    if (!el) return;
+    if (!scale) { el.innerHTML = ''; return; }
+    // el is 120px tall matching VB_H; labels positioned using SVG Y coordinates:
+    // topPx = Y_BOT - pct*Y_RANGE maps min→Y_BOT=110px, max→Y_TOP=10px
+    var html  = '';
+    var ticks = 5;
+    var align = isRight ? 'right:2px' : 'left:2px';
+    for (var i = 0; i < ticks; i++) {
+      var pct   = i / (ticks - 1);
+      var val   = scale.min + pct * (scale.max - scale.min);
+      var topPx = Y_BOT - pct * Y_RANGE;
+      var lbl   = scale.isBpm ? val.toFixed(0) : val.toFixed(2);
+      html += '<span style="position:absolute;top:' + topPx.toFixed(0) + 'px;' + align +
+              ';transform:translateY(-50%);font-size:9px;color:#888;white-space:nowrap">' +
+              lbl + '</span>';
+    }
+    // Colored metric label words below the chart area (below Y_BOT=110px)
+    if (colors && colors.length) {
+      var METRIC_LABELS = { '#00e676': 'BPM', '#ff9800': 'NRG', '#64b5f6': 'DNC' };
+      var labelAlign = isRight ? 'right:2px;text-align:right' : 'left:2px;text-align:left';
+      var labelsHtml = '<span style="position:absolute;top:116px;' + labelAlign +
+                       ';display:flex;flex-direction:column;gap:1px;line-height:1">';
+      colors.forEach(function(c) {
+        var lbl = METRIC_LABELS[c] || '';
+        labelsHtml += '<span style="font-size:8px;color:' + c + ';white-space:nowrap">' + lbl + '</span>';
+      });
+      labelsHtml += '</span>';
+      html += labelsHtml;
+    }
+    el.innerHTML = html;
+  }
+
+  function _jtPos(cx, cy) {
+    if (!jTip) return;
     var OFFSET = 14, vw = window.innerWidth, vh = window.innerHeight;
-    var tw = jTip.offsetWidth || 180, th = jTip.offsetHeight || 70;
+    var tw = jTip.offsetWidth || 180, th = jTip.offsetHeight || 60;
     var left = cx + OFFSET, top = cy + OFFSET;
     if (left + tw > vw - 8) left = cx - tw - OFFSET;
     if (top  + th > vh - 8) top  = cy - th - OFFSET;
     jTip.style.left = Math.max(8, left) + 'px';
     jTip.style.top  = Math.max(8, top)  + 'px';
   }
-
-  document.querySelectorAll('.journey-dot').forEach(function(dot) {
-    dot.addEventListener('mouseenter', function(e) {
-      var label = dot.getAttribute('data-label') || '';
-      var parts = label.split('\\n');
-      var titleEl = jTip.querySelector('.jt-title');
-      var valueEl = jTip.querySelector('.jt-value');
-      if (titleEl) titleEl.textContent = parts[0] || '';
-      if (valueEl) valueEl.textContent = parts.slice(1).join(' \u00b7 ');
-      positionJTip(e.clientX, e.clientY);
-      jTip.classList.add('visible');
-    });
-    dot.addEventListener('mousemove', function(e) { positionJTip(e.clientX, e.clientY); });
-    dot.addEventListener('mouseleave', function() { jTip.classList.remove('visible'); });
-  });
 })();
 """
 
