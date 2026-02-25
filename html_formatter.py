@@ -106,7 +106,67 @@ def _render_player_js(platform: str, embed_id: str, tracks: list) -> str:
     track_times_js = 'const trackTimes = [\n' + ',\n'.join(track_times_entries) + '\n];'
 
     now_playing_js = """
+let currentTime = 0;
+let isPlaying = false;
+
+function updatePillIcon() {
+  const btn = document.getElementById('pillPlayBtn');
+  if (btn) btn.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
+}
+
+function playPlayer() {
+  if (typeof player !== 'undefined' && player && player.playVideo) {
+    player.playVideo();
+  } else if (typeof widget !== 'undefined' && widget && widget.play) {
+    widget.play();
+  }
+}
+
+let _skipTarget = null;
+let _skipClearTimer = null;
+
+function skipPlayer(delta) {
+  let base;
+  if (_skipTarget !== null) {
+    base = _skipTarget;
+  } else if (typeof player !== 'undefined' && player && player.getCurrentTime) {
+    base = player.getCurrentTime();
+  } else {
+    base = currentTime;
+  }
+  const target = Math.max(0, base + delta);
+  _skipTarget = target;
+  clearTimeout(_skipClearTimer);
+  _skipClearTimer = setTimeout(function() { _skipTarget = null; }, 2000);
+  seekPlayer(target);
+}
+
+function togglePillPlay() {
+  if (isPlaying) pausePlayer();
+  else playPlayer();
+}
+
+function formatPillTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function updateProgressBar() {
+  const pill = document.getElementById('playerPill');
+  if (!pill) return;
+  const total = parseFloat(pill.dataset.duration) || 0;
+  if (!total) return;
+  const fill = document.getElementById('pillProgressFill');
+  const timeEl = document.getElementById('pillTimeCurrent');
+  if (fill) fill.style.width = Math.min(100, (currentTime / total) * 100) + '%';
+  if (timeEl) timeEl.textContent = formatPillTime(currentTime);
+}
+
 let nowPlayingInterval = null;
+let seekLockUntil = 0;
 
 function startNowPlaying() {
   if (nowPlayingInterval) return;
@@ -120,19 +180,24 @@ function stopNowPlaying() {
 
 function updateNowPlaying() {
   if (typeof player !== 'undefined' && player && player.getCurrentTime) {
-    highlightTrackAt(player.getCurrentTime());
+    currentTime = player.getCurrentTime();
+    highlightTrackAt(currentTime);
+    updateProgressBar();
     return;
   }
   if (typeof widget !== 'undefined' && widget && widget.getPosition) {
-    widget.getPosition(function(pos) { highlightTrackAt(pos / 1000); });
+    widget.getPosition(function(pos) { currentTime = pos / 1000; highlightTrackAt(currentTime); updateProgressBar(); });
   }
 }
 
 function highlightTrackAt(seconds) {
-  const match = trackTimes.find(t => seconds >= t.start && seconds < t.end);
-  if (match && match.idx !== String(activeIdx)) {
-    clearActive();
-    setActive(String(match.idx));
+  if (Date.now() < seekLockUntil) return;
+  const matches = trackTimes.filter(t => seconds >= t.start && seconds < t.end);
+  if (!matches.length) return;
+  // When tracks overlap, prefer the one that started most recently (highest start time)
+  const match = matches.reduce((best, t) => t.start > best.start ? t : best);
+  if (match.idx !== String(activeIdx)) {
+    setActive(String(match.idx), false);
   }
 }
 """
@@ -147,25 +212,97 @@ var firstScriptTag = document.getElementsByTagName('script')[0];
 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
 var player;
+var ytEmbedFailed = false;
+var ytPlayerReady = false;
+var ytHasPlayed = false;
+
+function showYtFallback() {{
+  ytEmbedFailed = true;
+  stopNowPlaying();
+  var wrap = document.getElementById('playerWrap');
+  wrap.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px;color:#aaa;text-align:center;">'
+    + '<div style="font-size:18px;margin-bottom:12px;">Video cannot be embedded</div>'
+    + '<a href="https://www.youtube.com/watch?v={embed_id}" target="_blank" rel="noopener" '
+    + 'style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:#ff0000;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">'
+    + '\u25B6 Watch on YouTube</a>'
+    + '<div style="font-size:12px;margin-top:8px;color:#666;">Timestamp links will open YouTube at the correct position</div>'
+    + '</div>';
+  var pill = document.getElementById('playerPill');
+  if (pill) pill.style.display = 'none';
+}}
+
+function rebuildYtPlayer() {{
+  var wrap = document.getElementById('playerWrap');
+  wrap.innerHTML = '<div id="ytPlayer"></div>';
+  player = new YT.Player('ytPlayer', {{
+    videoId: '{embed_id}',
+    playerVars: {{ autoplay: 1, modestbranding: 1, rel: 0, start: Math.floor(window._ytPendingSeek || 0) }},
+    events: {{
+      onReady: function() {{
+        ytPlayerReady = true;
+        console.log('YT player rebuilt');
+      }},
+      onStateChange: onYtStateChange,
+      onError: onYtError
+    }}
+  }});
+}}
+
+function onYtStateChange(e) {{
+  if (e.data === YT.PlayerState.PLAYING) {{
+    ytHasPlayed = true;
+    isPlaying = true;
+    startNowPlaying();
+  }} else {{
+    isPlaying = false;
+    stopNowPlaying();
+  }}
+  updatePillIcon();
+}}
+
+function onYtError(e) {{
+  console.warn('YT embed error code:', e.data);
+  if (!ytHasPlayed) {{
+    showYtFallback();
+  }} else {{
+    console.log('YT error after successful playback, rebuilding player...');
+    ytPlayerReady = false;
+    rebuildYtPlayer();
+  }}
+}}
+
 function onYouTubeIframeAPIReady() {{
   player = new YT.Player('ytPlayer', {{
     videoId: '{embed_id}',
     playerVars: {{ autoplay: 0, modestbranding: 1, rel: 0 }},
     events: {{
-      onReady: function() {{ console.log('YT player ready'); }},
-      onStateChange: function(e) {{
-        if (e.data === YT.PlayerState.PLAYING) startNowPlaying();
-        else stopNowPlaying();
-      }}
+      onReady: function() {{
+        ytPlayerReady = true;
+        console.log('YT player ready');
+      }},
+      onStateChange: onYtStateChange,
+      onError: onYtError
     }}
   }});
 }}
 
 function seekPlayer(seconds) {{
-  if (player && player.seekTo) {{
+  seekLockUntil = Date.now() + 1500;
+  currentTime = seconds;
+  updateProgressBar();
+  if (ytEmbedFailed) {{
+    window.open('https://www.youtube.com/watch?v={embed_id}&t=' + Math.floor(seconds) + 's', '_blank');
+    return;
+  }}
+  window._ytPendingSeek = seconds;
+  if (player && player.seekTo && ytPlayerReady) {{
     player.seekTo(seconds, true);
     player.playVideo();
   }}
+}}
+
+function pausePlayer() {{
+  if (player && player.pauseVideo) player.pauseVideo();
 }}
 {now_playing_js}
 </script>"""
@@ -179,13 +316,20 @@ var widget = SC.Widget(document.getElementById('scWidget'));
 widget.bind(SC.Widget.Events.READY, function() {{
   console.log('SC widget ready');
 }});
-widget.bind(SC.Widget.Events.PLAY, function() {{ startNowPlaying(); }});
-widget.bind(SC.Widget.Events.PAUSE, function() {{ stopNowPlaying(); }});
-widget.bind(SC.Widget.Events.FINISH, function() {{ stopNowPlaying(); }});
+widget.bind(SC.Widget.Events.PLAY,   function() {{ isPlaying = true;  updatePillIcon(); startNowPlaying(); }});
+widget.bind(SC.Widget.Events.PAUSE,  function() {{ isPlaying = false; updatePillIcon(); stopNowPlaying(); }});
+widget.bind(SC.Widget.Events.FINISH, function() {{ isPlaying = false; updatePillIcon(); stopNowPlaying(); }});
 
 function seekPlayer(seconds) {{
+  seekLockUntil = Date.now() + 1500;
+  currentTime = seconds;
+  updateProgressBar();
   widget.seekTo(seconds * 1000);
   widget.play();
+}}
+
+function pausePlayer() {{
+  widget.pause();
 }}
 {now_playing_js}
 </script>"""
@@ -215,7 +359,7 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
     return '\n'.join(segments_html)
 
 
-def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_controls: bool = False) -> str:
+def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
     """Render individual track cards as HTML."""
     cards = []
     for t in tracks:
@@ -226,24 +370,12 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
 
         artist_esc = _esc(t['artist'])
         title_esc  = _esc(t['title'])
-        copy_val   = _esc(f"{t['artist']} - {t['title']}")
 
-        # Spotify per-track controls (checkbox, save to liked, embed toggle)
-        checkbox_html = ''
-        add_spotify_btn = ''
+        # Spotify embed toggle
         spotify_embed_btn = ''
-        if show_spotify_controls and t.get('spotify_url'):
+        if t.get('spotify_url'):
             _spot_id = t['spotify_url'].split('/')[-1].split('?')[0]
             _spot_id_esc = _esc(_spot_id)
-            checkbox_html = (
-                f'<input type="checkbox" class="track-select" '
-                f'data-spotify-id="{_spot_id_esc}" checked>'
-            )
-            add_spotify_btn = (
-                f'<button class="btn btn-add-spotify" '
-                f'onclick="addToSpotify(this, \'{_spot_id_esc}\')" '
-                f'title="Save to Liked Songs">+ Save</button>'
-            )
             spotify_embed_btn = (
                 f'<button class="btn btn-spotify-embed" '
                 f'onclick="toggleSpotifyEmbed(this, \'{_spot_id_esc}\')" '
@@ -254,17 +386,15 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
         links_html = []
         if t['spotify_url']:
             links_html.append(
-                f'<a href="{_esc(t["spotify_url"])}" class="btn btn-spotify" target="_blank" rel="noopener">Spotify</a>'
+                f'<a href="{_esc(t["spotify_url"])}" class="ext-link ext-link-spotify" target="_blank" rel="noopener">Spotify</a>'
             )
-            if add_spotify_btn:
-                links_html.append(add_spotify_btn)
         if t['youtube_url']:
             links_html.append(
-                f'<a href="{_esc(t["youtube_url"])}" class="btn btn-youtube" target="_blank" rel="noopener">YouTube</a>'
+                f'<a href="{_esc(t["youtube_url"])}" class="ext-link ext-link-youtube" target="_blank" rel="noopener">YouTube</a>'
             )
         if t['discogs_url']:
             links_html.append(
-                f'<a href="{_esc(t["discogs_url"])}" class="btn btn-discogs" target="_blank" rel="noopener">Discogs</a>'
+                f'<a href="{_esc(t["discogs_url"])}" class="ext-link ext-link-discogs" target="_blank" rel="noopener">Discogs</a>'
             )
         links_block = ''.join(links_html)
 
@@ -272,17 +402,23 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
 
         deep_link = t.get('source_deep_link') or ''
         start_esc = _esc(t['start_time_formatted'])
-        end_esc   = _esc(t['end_time_formatted'])
         start_seconds = t['start_time']
+
+        # Play button (seeks embedded player) — built here so it can be embedded in time_cell
+        play_btn = (
+            f'<button class="btn btn-play" onclick="event.stopPropagation(); if(String(activeIdx)===\'{t["position"]}\'){{pausePlayer();clearActive();}}else{{seekPlayer({start_seconds:.3f});setActive(\'{t["position"]}\');}}" '
+            f'title="Play / Pause">&#9654;</button>'
+            if platform in ('youtube', 'soundcloud') else ''
+        )
 
         if platform in ('youtube', 'soundcloud'):
             # Timestamp seeks the embedded player instead of opening a new tab
             time_cell = (
                 f'<div class="track-time">'
+                f'{play_btn}'
                 f'<a class="track-time-link" href="#" '
-                f'onclick="seekPlayer({start_seconds:.3f}); return false;" '
+                f'onclick="event.stopPropagation(); seekPlayer({start_seconds:.3f}); setActive(\'{t["position"]}\'); return false;" '
                 f'title="Jump to this track">{start_esc}</a>'
-                f'<span class="track-time-sep"> \u2013 </span>{end_esc}'
                 f'</div>'
             )
         elif deep_link:
@@ -291,13 +427,12 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
                 f'<a class="track-time-link" '
                 f'href="{_esc(deep_link)}" target="_blank" rel="noopener" '
                 f'title="Open at this timestamp">{start_esc}</a>'
-                f'<span class="track-time-sep"> \u2013 </span>{end_esc}'
                 f'</div>'
             )
         else:
             time_cell = (
                 f'<div class="track-time">'
-                f'{start_esc}<span class="track-time-sep"> \u2013 </span>{end_esc}'
+                f'{start_esc}'
                 f'</div>'
             )
 
@@ -368,16 +503,8 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
   </div>
 </div>'''
 
-        # Play button (seeks embedded player)
-        play_btn = (
-            f'<button class="btn btn-play" onclick="seekPlayer({start_seconds:.3f})" '
-            f'title="Play from here">&#9654;</button>'
-            if platform in ('youtube', 'soundcloud') else ''
-        )
-
-
         cards.append(f'''
-<div class="track-card" draggable="true" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
+<div class="track-card" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
   <div class="track-num">{t["position"]}</div>
   {art_cell}
   {time_cell}
@@ -396,13 +523,12 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
     </div>
   </div>
   <div class="track-actions">
-    {checkbox_html}
-    {play_btn}
-    {links_block}
-    {spotify_embed_btn}
-    {preview_btn}
-    <button class="btn btn-expand-details" onclick="toggleDetails(this)" title="Detection details">&#8943;</button>
-    <button class="btn btn-copy" onclick="copyTrack(this)" data-text="{copy_val}" title="Copy to clipboard">&#128203;</button>
+    <div class="track-links">{links_block}</div>
+    <div class="track-btns">
+      {spotify_embed_btn}
+      {preview_btn}
+      <button class="btn btn-expand-details" onclick="toggleDetails(this)" title="Detection details">&#8943;</button>
+    </div>
   </div>
   {details_panel}
 </div>''')
@@ -596,7 +722,6 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid #1e1e1e;
   border-radius: 6px;
   transition: background 0.15s, border-color 0.15s;
-  cursor: grab;
 }
 .track-card:hover { background: #161616; border-color: #2a2a2a; }
 .track-card[hidden] { display: none; }
@@ -615,6 +740,10 @@ a { color: inherit; text-decoration: none; }
   color: #666;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
 .track-time-link {
@@ -667,11 +796,39 @@ a { color: inherit; text-decoration: none; }
 
 .track-actions {
   display: flex;
-  gap: 6px;
+  gap: 10px;
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+
+.track-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.track-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── External links (open in new tab) ── */
+.ext-link {
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  opacity: 0.65;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.ext-link:hover { opacity: 1; text-decoration: underline; }
+.ext-link-spotify { color: #1db954; }
+.ext-link-youtube { color: #ff4444; }
+.ext-link-discogs { color: #e8472f; }
 
 .btn {
   display: inline-block;
@@ -688,10 +845,6 @@ a { color: inherit; text-decoration: none; }
 }
 .btn:hover { opacity: 0.8; }
 
-.btn-spotify { color: #1db954; border-color: #1db954; }
-.btn-youtube { color: #ff0000; border-color: #ff0000; }
-.btn-discogs { color: #e8472f; border-color: #e8472f; }
-.btn-copy    { color: #666; border-color: #333; font-size: 13px; padding: 3px 8px; }
 
 /* ── No-results message ── */
 .no-results {
@@ -715,24 +868,6 @@ a { color: inherit; text-decoration: none; }
 
 .footer span { white-space: nowrap; }
 
-/* ── Copy toast ── */
-#toast {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  background: #1e2e1e;
-  border: 1px solid #00e676;
-  color: #00e676;
-  padding: 8px 18px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  opacity: 0;
-  transition: opacity 0.3s;
-  pointer-events: none;
-  z-index: 9999;
-}
-#toast.show { opacity: 1; }
 
 /* ── Responsive ── */
 @media (max-width: 600px) {
@@ -863,10 +998,6 @@ a { color: inherit; text-decoration: none; }
 .btn-preview { color: #1db954; border-color: #1db954; }
 .btn-preview--playing { background: #1db954; color: #000; }
 
-/* ── Drag to reorder ── */
-.track-card:active { cursor: grabbing; }
-.track-card--dragging { opacity: 0.4; }
-.track-card--dragover { border-color: #00e676 !important; background: #1a2a1a !important; }
 
 /* ── Player ── */
 .player-wrap {
@@ -883,7 +1014,7 @@ a { color: inherit; text-decoration: none; }
 }
 .player-wrap.sc iframe { height: 166px; aspect-ratio: auto; }
 
-.btn-play { color: #00e676; border-color: #00e676; font-size: 11px; padding: 3px 8px; }
+.btn-play { color: #00e676; border-color: #00e676; font-size: 11px; padding: 3px 8px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
 
 .track-card--now-playing {
   border-left: 3px solid #00e676;
@@ -925,47 +1056,58 @@ a { color: inherit; text-decoration: none; }
 .tl-tip-time { font-size: 11px; font-family: 'Courier New', monospace; color: #888; font-variant-numeric: tabular-nums; }
 .tl-tip-badge { margin-top: 2px; align-self: flex-start; padding: 1px 7px; border-radius: 10px; border: 1px solid; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
 
-/* ── Spotify Integration ── */
-.track-select {
-  accent-color: #1db954;
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.playlist-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
-  padding: 12px 16px;
-  background: #161616;
-  border: 1px solid #222;
-  border-radius: 8px;
-}
-
-.select-controls { display: flex; gap: 8px; align-items: center; }
-.select-count { font-size: 12px; color: #888; }
-.btn-select { color: #888; border-color: #333; }
-
-.btn-create-playlist {
-  color: #1db954;
-  border-color: #1db954;
-  font-size: 13px;
-  padding: 8px 16px;
-}
-.btn-create-playlist:hover { background: #1db954; color: #000; }
-
-.btn-add-spotify { color: #1db954; border-color: #1db954; font-size: 10px; padding: 3px 8px; }
-.btn-add-spotify--saved { background: #1db954; color: #000; border-color: #1db954; cursor: default; }
-
 .spotify-embed { grid-column: 1 / -1; margin-top: 8px; }
 .btn-spotify-embed { color: #1db954; border-color: #1db954; font-size: 10px; }
 
-.playlist-result { width: 100%; padding-top: 8px; font-size: 12px; color: #888; }
+/* ── Floating player pill ── */
+.player-pill {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 500;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 16px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pill-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #333;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.pill-progress-fill {
+  height: 100%;
+  background: #00e676;
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.5s linear;
+}
+.pill-time-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-family: 'Courier New', monospace;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+  margin-top: -6px;
+}
+.pill-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+.pill-skip { color: #888; border-color: #444; min-width: 48px; text-align: center; font-size: 12px; }
+.pill-skip:hover { color: #ccc; border-color: #666; opacity: 1; }
+.pill-play { color: #00e676; border-color: #00e676; min-width: 40px; text-align: center; font-size: 13px; padding: 5px 12px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+.pill-play:hover { opacity: 1; }
 """
 
 JS = """
@@ -1016,30 +1158,6 @@ function applyFilters() {
   }
 }
 
-// ── Copy to clipboard ──
-function copyTrack(btn) {
-  const text = btn.dataset.text;
-  if (!navigator.clipboard) {
-    // Fallback for older browsers
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity  = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    showToast();
-    return;
-  }
-  navigator.clipboard.writeText(text).then(showToast);
-}
-
-function showToast() {
-  const toast = document.getElementById('toast');
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 1800);
-}
 
 // ── Timeline Interactivity ──
 const tooltip  = document.getElementById('tl-tooltip');
@@ -1072,11 +1190,16 @@ function clearActive() {
   document.querySelector('.tl-segment[data-track-idx="' + activeIdx + '"]')
     ?.classList.remove('tl-segment--active');
   const card = document.querySelector('.track-card[data-track-idx="' + activeIdx + '"]');
-  if (card) { card.classList.remove('track-card--active'); void card.offsetWidth; }
+  if (card) {
+    card.classList.remove('track-card--active'); void card.offsetWidth;
+    const playBtn = card.querySelector('.btn-play');
+    if (playBtn) playBtn.innerHTML = '&#9654;';
+  }
   activeIdx = null;
 }
 
-function setActive(idx) {
+function setActive(idx, scroll = true) {
+  clearActive();
   const seg  = document.querySelector('.tl-segment[data-track-idx="' + idx + '"]');
   const card = document.querySelector('.track-card[data-track-idx="' + idx + '"]');
   if (!seg) return;
@@ -1084,13 +1207,17 @@ function setActive(idx) {
   if (card && !card.hidden) {
     card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
     card.classList.add('track-card--active');
-    const rect = card.getBoundingClientRect();
-    const viewH = window.innerHeight;
-    // Target: card top at ~67% down the viewport (bottom third)
-    const targetTop = viewH * 0.67;
-    const offset = rect.top - targetTop;
-    if (offset > 0 || rect.bottom > viewH) {
-      window.scrollBy({ top: offset, behavior: 'smooth' });
+    const playBtn = card.querySelector('.btn-play');
+    if (playBtn) playBtn.innerHTML = '&#9646;&#9646;';
+    if (scroll) {
+      const rect = card.getBoundingClientRect();
+      const viewH = window.innerHeight;
+      // Target: card top at ~67% down the viewport (bottom third)
+      const targetTop = viewH * 0.67;
+      const offset = rect.top - targetTop;
+      if (offset > 0 || rect.bottom > viewH) {
+        window.scrollBy({ top: offset, behavior: 'smooth' });
+      }
     }
   }
   activeIdx = idx;
@@ -1114,7 +1241,7 @@ document.querySelectorAll('.tl-segment').forEach(seg => {
     const idx = seg.dataset.trackIdx;
     if (String(activeIdx) === idx) { clearActive(); }
     else {
-      clearActive(); setActive(idx);
+      setActive(idx, false);
       if (typeof trackTimes !== 'undefined') {
         const trackTime = trackTimes.find(t => t.idx === idx);
         if (trackTime && typeof seekPlayer === 'function') seekPlayer(trackTime.start);
@@ -2875,7 +3002,7 @@ def _render_failed_section(failed: list) -> str:
 
 
 def _render_track_card_js() -> str:
-    """Return a <script> block with JS for track card upgrades: preview, expand details, drag-to-reorder."""
+    """Return a <script> block with JS for track card upgrades: preview, expand details, Spotify embed."""
     return """<script>
 // ── Toggle detection details ──
 function toggleDetails(btn) {
@@ -2915,297 +3042,23 @@ function togglePreview(btn, url) {
   };
 }
 
-// ── Drag to reorder ──
-var dragSrcEl = null;
-
-document.querySelectorAll('.track-card').forEach(function(card) {
-  card.addEventListener('dragstart', function(e) {
-    dragSrcEl = this;
-    this.classList.add('track-card--dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', this.dataset.trackIdx);
-  });
-  card.addEventListener('dragover', function(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    this.classList.add('track-card--dragover');
-  });
-  card.addEventListener('dragleave', function() {
-    this.classList.remove('track-card--dragover');
-  });
-  card.addEventListener('drop', function(e) {
-    e.preventDefault();
-    this.classList.remove('track-card--dragover');
-    if (dragSrcEl !== this) {
-      var tracklist = document.getElementById('tracklist');
-      var allCards = Array.from(tracklist.querySelectorAll('.track-card'));
-      var srcIdx = allCards.indexOf(dragSrcEl);
-      var tgtIdx = allCards.indexOf(this);
-      if (srcIdx < tgtIdx) {
-        tracklist.insertBefore(dragSrcEl, this.nextSibling);
-      } else {
-        tracklist.insertBefore(dragSrcEl, this);
-      }
-      renumberTracks();
-      saveTrackOrder();
-    }
-  });
-  card.addEventListener('dragend', function() {
-    this.classList.remove('track-card--dragging');
-  });
-});
-
-function renumberTracks() {
-  var cards = document.querySelectorAll('.track-card');
-  cards.forEach(function(card, i) {
-    var numEl = card.querySelector('.track-num');
-    if (numEl) numEl.textContent = i + 1;
-  });
-}
-
-function saveTrackOrder() {
-  var order = Array.from(document.querySelectorAll('.track-card')).map(function(c) {
-    return c.dataset.trackIdx;
-  });
-  var key = 'trackOrder_' + document.title;
-  localStorage.setItem(key, JSON.stringify(order));
-}
-
-function restoreTrackOrder() {
-  var key = 'trackOrder_' + document.title;
-  var saved = localStorage.getItem(key);
-  if (!saved) return;
-  try {
-    var order = JSON.parse(saved);
-    var tracklist = document.getElementById('tracklist');
-    order.forEach(function(idx) {
-      var card = tracklist.querySelector('.track-card[data-track-idx="' + idx + '"]');
-      if (card) tracklist.appendChild(card);
-    });
-    renumberTracks();
-  } catch(e) { /* invalid saved order, ignore */ }
-}
-restoreTrackOrder();
-</script>"""
-
-
-def _render_spotify_js(spotify_client_id: str) -> str:
-    """Return Spotify OAuth PKCE + playlist creation + liked songs JS as a <script> block."""
-    client_id_esc = _esc(spotify_client_id)
-    return f"""<script>
-// ── Spotify Integration ──
-const SPOTIFY_CLIENT_ID = '{client_id_esc}';
-
-function selectAll() {{
-  document.querySelectorAll('.track-select').forEach(cb => cb.checked = true);
-  updateSelectCount();
-}}
-
-function deselectAll() {{
-  document.querySelectorAll('.track-select').forEach(cb => cb.checked = false);
-  updateSelectCount();
-}}
-
-function updateSelectCount() {{
-  const count = document.querySelectorAll('.track-select:checked').length;
-  const el = document.getElementById('selectCount');
-  if (el) el.textContent = count + ' track' + (count !== 1 ? 's' : '') + ' selected';
-}}
-
-document.addEventListener('change', function(e) {{
-  if (e.target.classList.contains('track-select')) updateSelectCount();
-}});
-updateSelectCount();
-
-function getSelectedTrackIds() {{
-  return Array.from(document.querySelectorAll('.track-select:checked'))
-    .map(cb => cb.dataset.spotifyId);
-}}
-
-function generateRandomString(length) {{
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  return Array.from(crypto.getRandomValues(new Uint8Array(length)))
-    .map(x => chars[x % chars.length]).join('');
-}}
-
-async function sha256base64url(plain) {{
-  const encoder = new TextEncoder();
-  const data = encoder.encode(plain);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
-}}
-
-async function authorizeSpotify() {{
-  const verifier = generateRandomString(128);
-  const challenge = await sha256base64url(verifier);
-
-  const params = new URLSearchParams({{
-    client_id: SPOTIFY_CLIENT_ID,
-    response_type: 'code',
-    redirect_uri: 'http://127.0.0.1:8888/callback',
-    scope: 'playlist-modify-public playlist-modify-private user-library-modify',
-    code_challenge_method: 'S256',
-    code_challenge: challenge,
-  }});
-
-  const authUrl = 'https://accounts.spotify.com/authorize?' + params.toString();
-  const popup = window.open(authUrl, 'spotify-auth', 'width=500,height=700');
-  const code = await waitForAuthCode(popup);
-  if (!code) return null;
-
-  const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {{
-    method: 'POST',
-    headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
-    body: new URLSearchParams({{
-      client_id: SPOTIFY_CLIENT_ID,
-      grant_type: 'authorization_code',
-      code: code,
-      redirect_uri: 'http://127.0.0.1:8888/callback',
-      code_verifier: verifier,
-    }}),
-  }});
-
-  const data = await tokenResponse.json();
-  return data.access_token || null;
-}}
-
-function waitForAuthCode(popup) {{
-  return new Promise((resolve) => {{
-    const interval = setInterval(() => {{
-      try {{
-        if (popup.closed) {{ clearInterval(interval); resolve(null); return; }}
-        const url = popup.location.href;
-        if (url.startsWith('http://127.0.0.1:8888/callback')) {{
-          const code = new URL(url).searchParams.get('code');
-          popup.close();
-          clearInterval(interval);
-          resolve(code);
-        }}
-      }} catch (e) {{ /* cross-origin, keep waiting */ }}
-    }}, 500);
-  }});
-}}
-
-async function startPlaylistCreation() {{
-  const selected = getSelectedTrackIds();
-  if (selected.length === 0) {{ alert('No tracks selected'); return; }}
-
-  let token = sessionStorage.getItem('spotify_token');
-  if (!token) {{
-    token = await authorizeSpotify();
-    if (!token) return;
-    sessionStorage.setItem('spotify_token', token);
-  }}
-
-  await createPlaylist(token, selected);
-}}
-
-async function createPlaylist(token, trackIds) {{
-  const btn = document.getElementById('createPlaylistBtn');
-  btn.textContent = 'Creating...';
-  btn.disabled = true;
-
-  try {{
-    const meResp = await fetch('https://api.spotify.com/v1/me', {{
-      headers: {{ 'Authorization': 'Bearer ' + token }}
-    }});
-    const me = await meResp.json();
-
-    const titleEl = document.querySelector('.header h1');
-    const playlistName = titleEl ? titleEl.textContent : document.title;
-    const createResp = await fetch('https://api.spotify.com/v1/users/' + me.id + '/playlists', {{
-      method: 'POST',
-      headers: {{
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      }},
-      body: JSON.stringify({{
-        name: playlistName,
-        description: 'Generated from DJ set setlist',
-        public: false
-      }})
-    }});
-    const playlist = await createResp.json();
-
-    const uris = trackIds.map(id => 'spotify:track:' + id);
-    for (let i = 0; i < uris.length; i += 100) {{
-      await fetch('https://api.spotify.com/v1/playlists/' + playlist.id + '/tracks', {{
-        method: 'POST',
-        headers: {{
-          'Authorization': 'Bearer ' + token,
-          'Content-Type': 'application/json'
-        }},
-        body: JSON.stringify({{ uris: uris.slice(i, i + 100) }})
-      }});
-    }}
-
-    showPlaylistResult(playlist.external_urls.spotify, trackIds.length);
-
-  }} catch (e) {{
-    alert('Failed to create playlist: ' + e.message);
-  }} finally {{
-    btn.textContent = '\U0001F3B5 Create Spotify Playlist';
-    btn.disabled = false;
-  }}
-}}
-
-function showPlaylistResult(url, count) {{
-  const container = document.getElementById('playlistControls');
-  const result = document.createElement('div');
-  result.className = 'playlist-result';
-  result.innerHTML = '\u2713 Playlist created with ' + count + ' tracks! ' +
-    '<a href="' + url + '" target="_blank" style="color:#1db954;">Open in Spotify \u2192</a>';
-  container.appendChild(result);
-}}
-
-async function addToSpotify(btn, trackId) {{
-  let token = sessionStorage.getItem('spotify_token');
-  if (!token) {{
-    token = await authorizeSpotify();
-    if (!token) return;
-    sessionStorage.setItem('spotify_token', token);
-  }}
-
-  btn.textContent = '...';
-  btn.disabled = true;
-  try {{
-    const resp = await fetch('https://api.spotify.com/v1/me/tracks', {{
-      method: 'PUT',
-      headers: {{
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      }},
-      body: JSON.stringify({{ ids: [trackId] }})
-    }});
-    if (resp.ok) {{
-      btn.textContent = '\u2713 Saved';
-      btn.classList.add('btn-add-spotify--saved');
-    }} else {{
-      btn.textContent = '\u2717 Error';
-      btn.disabled = false;
-    }}
-  }} catch (e) {{
-    btn.textContent = '\u2717 Error';
-    btn.disabled = false;
-  }}
-}}
-
-function toggleSpotifyEmbed(btn, trackId) {{
-  const card = btn.closest('.track-card');
-  let embed = card.querySelector('.spotify-embed');
-  if (embed) {{
+// ── Spotify embed player ──
+function toggleSpotifyEmbed(btn, trackId) {
+  var card = btn.closest('.track-card');
+  var embed = card.querySelector('.spotify-embed');
+  if (embed) {
     embed.remove();
     btn.textContent = '\u25b6 Spotify';
     return;
-  }}
+  }
   embed = document.createElement('div');
   embed.className = 'spotify-embed';
   embed.innerHTML = '<iframe style="border-radius:8px" src="https://open.spotify.com/embed/track/' + trackId + '?utm_source=generator&theme=0" width="100%" height="80" frameBorder="0" allow="autoplay; clipboard-write; encrypted-media" loading="lazy"></iframe>';
   card.appendChild(embed);
   btn.textContent = '\u2715 Close';
-}}
+}
 </script>"""
+
 
 
 class HtmlFormatter:
@@ -3257,16 +3110,27 @@ class HtmlFormatter:
         total     = len(tracks)
         recognized = sum(1 for t in tracks if t['title'] != 'Unknown Track')
 
-        # Spotify features: only if client ID is configured and tracks have Spotify URLs
-        has_spotify_tracks = any(t.get('spotify_url') for t in tracks)
-        show_spotify_features = bool(Config.SPOTIFY_CLIENT_ID) and has_spotify_tracks
-
         # Section HTML
         stats_html    = _render_stats(counts, total, recognized)
         timeline_html = _render_timeline(tracks, total_duration)
-        cards_html    = _render_track_cards(tracks, platform, show_spotify_controls=show_spotify_features)
+        cards_html    = _render_track_cards(tracks, platform)
         player_html   = _render_player(platform, embed_id)
         player_js     = _render_player_js(platform, embed_id, tracks)
+        pill_html = (
+            f'<div class="player-pill" id="playerPill" onclick="event.stopPropagation()" data-duration="{total_duration:.3f}">'
+            f'<div class="pill-progress-bar"><div class="pill-progress-fill" id="pillProgressFill"></div></div>'
+            f'<div class="pill-time-row">'
+            f'<span id="pillTimeCurrent">0:00</span>'
+            f'<span>{_esc(format_time(total_duration))}</span>'
+            f'</div>'
+            f'<div class="pill-controls">'
+            f'<button class="btn pill-skip" onclick="skipPlayer(-15)" title="Back 15 seconds">\u221215</button>'
+            f'<button class="btn pill-play" id="pillPlayBtn" onclick="togglePillPlay()" title="Play / Pause">&#9654;</button>'
+            f'<button class="btn pill-skip" onclick="skipPlayer(15)" title="Forward 15 seconds">+15</button>'
+            f'</div>'
+            f'</div>'
+        ) if platform in ('youtube', 'soundcloud') else ''
+
 
         # Timeline tick marks (0%, 25%, 50%, 75%, 100%)
         ticks_html = ''.join(
@@ -3295,22 +3159,6 @@ class HtmlFormatter:
                     f'{level} ({counts[level]})</button>'
                 )
 
-        # Playlist controls bar (only when Spotify features are active)
-        if show_spotify_features:
-            playlist_controls_html = '''<div class="playlist-controls" id="playlistControls">
-  <div class="select-controls">
-    <button class="btn btn-select" onclick="selectAll()">Select All</button>
-    <button class="btn btn-select" onclick="deselectAll()">Deselect All</button>
-    <span class="select-count" id="selectCount">0 tracks selected</span>
-  </div>
-  <button class="btn btn-create-playlist" id="createPlaylistBtn" onclick="startPlaylistCreation()">
-    &#127925; Create Spotify Playlist
-  </button>
-</div>'''
-            spotify_js = _render_spotify_js(Config.SPOTIFY_CLIENT_ID)
-        else:
-            playlist_controls_html = ''
-            spotify_js = ''
 
         # Algorithm parameter footer
         footer_items = [
@@ -3367,11 +3215,7 @@ class HtmlFormatter:
     <div class="filter-buttons">
       {filter_buttons}
     </div>
-    <button class="btn" style="color:#555;border-color:#333;" onclick="localStorage.removeItem('trackOrder_' + document.title); location.reload();" title="Reset to original order">&#8635; Reset Order</button>
   </div>
-
-  <!-- Spotify Playlist Controls -->
-  {playlist_controls_html}
 
   <!-- Tracklist -->
   <div class="tracklist" id="tracklist">
@@ -3392,12 +3236,12 @@ class HtmlFormatter:
   <div class="tl-tip-time"></div>
   <div class="tl-tip-badge"></div>
 </div>
-<div id="toast">Copied!</div>
+
+{pill_html}
 
 <script>{JS}</script>
 {_render_track_card_js()}
 {player_js}
-{spotify_js}
 </body>
 </html>"""
 
