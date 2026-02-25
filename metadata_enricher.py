@@ -1,12 +1,19 @@
-"""Enrich tracks with metadata from Spotify, YouTube, and Discogs."""
+"""Enrich tracks with metadata from Spotify, YouTube, Discogs, and ReccoBeats."""
 
 import functools
+import time
 import requests
 import yt_dlp
 from typing import Optional
 from config import Config
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+
+# ReccoBeats API base URL (free, no API key required)
+_RECCOBEATS_BASE = "https://api.reccobeats.com/v1"
+
+# Spotify pitch class → note name (used by ReccoBeats key/mode mapping)
+_KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 
 def _platform_search(platform_name: str):
@@ -65,17 +72,22 @@ class MetadataEnricher:
             track: Track object
 
         Returns:
-            Dictionary with platform links and rich Spotify metadata
+            Dictionary with platform links and rich metadata
         """
         enriched = {
             'spotify_url': None,
             'spotify_album_art': None,
             'spotify_preview_url': None,
             'spotify_genres': [],
-            'spotify_bpm': None,
-            'spotify_key': None,
+            'bpm': None,
+            'key': None,
+            'energy': None,
+            'danceability': None,
             'youtube_url': None,
             'discogs_url': None,
+            'discogs_genres': [],
+            'discogs_styles': [],
+            'discogs_label': None,
         }
 
         # Skip unknown tracks
@@ -96,9 +108,14 @@ class MetadataEnricher:
         if self.youtube_enabled:
             enriched['youtube_url'] = self._search_youtube(track.title, track.artist)
 
-        # Discogs
+        # Discogs (rich: URL + genres + styles + label)
         if self.discogs_enabled:
-            enriched['discogs_url'] = self._search_discogs(track.title, track.artist)
+            discogs_data = self._search_discogs_rich(track.title, track.artist)
+            if discogs_data:
+                enriched['discogs_url'] = discogs_data['url']
+                enriched['discogs_genres'] = discogs_data.get('genres', [])
+                enriched['discogs_styles'] = discogs_data.get('styles', [])
+                enriched['discogs_label'] = discogs_data.get('label')
 
         return enriched
 
@@ -126,43 +143,99 @@ class MetadataEnricher:
 
             print(f"  [{i}/{len(tracks)}] {track.artist} - {track.title}")
 
-        # Batch fetch audio features from Spotify (tempo/BPM and musical key)
-        if self.spotify_enabled and self.spotify:
-            track_ids = []
-            for item in enriched_tracks:
-                url = item['metadata'].get('spotify_url')
-                if url:
-                    tid = url.split('/')[-1].split('?')[0]
-                    track_ids.append(tid)
-                else:
-                    track_ids.append(None)
-
-            key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-            valid_ids = [tid for tid in track_ids if tid]
-            all_features = []
-            if valid_ids:
-                for i in range(0, len(valid_ids), 100):
-                    batch = valid_ids[i:i + 100]
-                    try:
-                        features = self.spotify.audio_features(batch)
-                        all_features.extend(features)
-                    except Exception:
-                        all_features.extend([None] * len(batch))
-
-            feature_idx = 0
-            for item, tid in zip(enriched_tracks, track_ids):
-                if tid:
-                    if feature_idx < len(all_features) and all_features[feature_idx]:
-                        f = all_features[feature_idx]
-                        key_idx = f.get('key', -1)
-                        mode = f.get('mode', 0)
-                        key_str = key_names[key_idx] + ('m' if mode == 0 else '') if key_idx >= 0 else ''
-                        item['metadata']['spotify_bpm'] = round(f.get('tempo', 0), 1)
-                        item['metadata']['spotify_key'] = key_str
-                    feature_idx += 1
+        # Batch fetch audio features from ReccoBeats (BPM, key, energy, danceability)
+        self._batch_fetch_reccobeats(enriched_tracks)
 
         print("Enrichment complete")
         return enriched_tracks
+
+    def _batch_fetch_reccobeats(self, enriched_tracks: list) -> None:
+        """Batch fetch audio features from ReccoBeats using Spotify track IDs.
+
+        Populates bpm, key, energy, and danceability in each track's metadata.
+        """
+        track_ids = []
+        for item in enriched_tracks:
+            url = item['metadata'].get('spotify_url')
+            if url:
+                tid = url.split('/')[-1].split('?')[0]
+                track_ids.append(tid)
+            else:
+                track_ids.append(None)
+
+        valid_ids = [tid for tid in track_ids if tid]
+        if not valid_ids:
+            return
+
+        print(f"\n  Fetching audio features from ReccoBeats for {len(valid_ids)} tracks...")
+        all_features = {}  # track_id -> features dict
+        batch_size = 50
+        for i in range(0, len(valid_ids), batch_size):
+            batch = valid_ids[i:i + batch_size]
+            try:
+                ids_param = ",".join(batch)
+                resp = requests.get(
+                    f"{_RECCOBEATS_BASE}/audio-features",
+                    params={"ids": ids_param},
+                    timeout=15,
+                )
+                if resp.status_code == 429:
+                    print("    [ReccoBeats] Rate limited, waiting 2s...")
+                    time.sleep(2)
+                    resp = requests.get(
+                        f"{_RECCOBEATS_BASE}/audio-features",
+                        params={"ids": ids_param},
+                        timeout=15,
+                    )
+                resp.raise_for_status()
+                data = resp.json()
+                features_list = data.get("content", data if isinstance(data, list) else [])
+                for feat in features_list:
+                    if feat and isinstance(feat, dict):
+                        fid = feat.get("id") or feat.get("trackId")
+                        if fid:
+                            all_features[fid] = feat
+                        elif len(batch) == 1:
+                            all_features[batch[0]] = feat
+            except Exception as e:
+                print(f"    [ReccoBeats] Batch fetch error: {e}")
+            if i + batch_size < len(valid_ids):
+                time.sleep(0.5)
+
+        # Apply features to enriched tracks
+        applied = 0
+        for item, tid in zip(enriched_tracks, track_ids):
+            if not tid or tid not in all_features:
+                continue
+            feat = all_features[tid]
+            meta = item['metadata']
+
+            # BPM
+            tempo = feat.get('tempo')
+            if tempo:
+                meta['bpm'] = round(float(tempo), 1)
+
+            # Key (integer 0-11 pitch class + mode 0/1)
+            key_idx = feat.get('key')
+            mode = feat.get('mode')
+            if key_idx is not None and int(key_idx) >= 0:
+                key_str = _KEY_NAMES[int(key_idx)]
+                if mode is not None and int(mode) == 0:
+                    key_str += 'm'
+                meta['key'] = key_str
+
+            # Energy and danceability
+            if feat.get('energy') is not None:
+                meta['energy'] = round(float(feat['energy']), 3)
+            if feat.get('danceability') is not None:
+                meta['danceability'] = round(float(feat['danceability']), 3)
+
+            applied += 1
+
+        if applied:
+            print(f"    [ReccoBeats] Applied audio features to {applied} tracks")
+        else:
+            print("    [ReccoBeats] No audio features returned")
 
     @_platform_search("Spotify")
     def _search_spotify(self, title: str, artist: str) -> Optional[str]:
@@ -273,28 +346,58 @@ class MetadataEnricher:
 
     @_platform_search("Discogs")
     def _search_discogs(self, title: str, artist: str) -> Optional[str]:
-        """Search Discogs for track."""
+        """Search Discogs for track URL (delegates to _search_discogs_rich)."""
+        result = self._search_discogs_rich(title, artist)
+        return result['url'] if result else None
+
+    def _search_discogs_rich(self, title: str, artist: str) -> Optional[dict]:
+        """Search Discogs and return rich metadata dict with URL, genres, styles, and label.
+
+        Returns:
+            Dict with 'url', 'genres', 'styles', 'label', or None on failure.
+        """
         if not Config.DISCOGS_TOKEN:
             return None
 
-        query = f"{artist} {title}"
-        url = "https://api.discogs.com/database/search"
+        try:
+            query = f"{artist} {title}"
+            url = "https://api.discogs.com/database/search"
 
-        headers = {
-            'Authorization': f'Discogs token={Config.DISCOGS_TOKEN}'
-        }
+            headers = {
+                'Authorization': f'Discogs token={Config.DISCOGS_TOKEN}'
+            }
 
-        params = {
-            'q': query,
-            'type': 'release',
-            'per_page': 1
-        }
+            params = {
+                'q': query,
+                'type': 'release',
+                'per_page': 1
+            }
 
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json()
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
 
-        if data.get('results'):
-            return data['results'][0]['uri']
+            if not data.get('results'):
+                return None
 
-        return None
+            result = data['results'][0]
+
+            # Build full Discogs URL from the URI path
+            uri = result.get('uri', '')
+            discogs_url = f"https://www.discogs.com{uri}" if uri and not uri.startswith('http') else uri
+
+            # Extract genres, styles, and label from search result
+            genres = result.get('genre', result.get('genres', []))
+            styles = result.get('style', result.get('styles', []))
+            labels = result.get('label', [])
+            label = labels[0] if labels else None
+
+            return {
+                'url': discogs_url,
+                'genres': genres[:3],
+                'styles': styles[:5],
+                'label': label,
+            }
+        except Exception as e:
+            print(f"    [Discogs] Search error: {e}")
+            return None

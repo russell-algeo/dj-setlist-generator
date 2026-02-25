@@ -101,10 +101,15 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
         'spotify_album_art': meta.get('spotify_album_art'),
         'spotify_preview_url': meta.get('spotify_preview_url'),
         'spotify_genres': meta.get('spotify_genres', []),
-        'spotify_bpm': meta.get('spotify_bpm'),
-        'spotify_key': meta.get('spotify_key'),
+        'bpm': meta.get('bpm'),
+        'key': meta.get('key'),
+        'energy': meta.get('energy'),
+        'danceability': meta.get('danceability'),
         'youtube_url': meta.get('youtube_url'),
         'discogs_url': meta.get('discogs_url'),
+        'discogs_genres': meta.get('discogs_genres', []),
+        'discogs_styles': meta.get('discogs_styles', []),
+        'discogs_label': meta.get('discogs_label'),
     }
 
 

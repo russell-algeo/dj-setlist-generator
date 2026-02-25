@@ -155,7 +155,7 @@ class ArtistSummarizer:
                         "source_deep_link": track.get("source_deep_link"),
                         "set_html_rel":    set_html_rel,
                         "confidence":      track.get("confidence", "UNCERTAIN"),
-                        "genres":          track.get("spotify_genres", []),
+                        "genres":          (track.get("discogs_styles") or []) + (track.get("discogs_genres") or []) + (track.get("spotify_genres") or []),
                     })
 
         # Include manually-migrated sets that weren't part of this discovery run.
@@ -267,7 +267,7 @@ class ArtistSummarizer:
                         "source_deep_link": track.get("source_deep_link"),
                         "set_html_rel":    set_html_rel,
                         "confidence":      track.get("confidence", "UNCERTAIN"),
-                        "genres":          track.get("spotify_genres", []),
+                        "genres":          (track.get("discogs_styles") or []) + (track.get("discogs_genres") or []) + (track.get("spotify_genres") or []),
                     })
 
         track_counter = Counter()
