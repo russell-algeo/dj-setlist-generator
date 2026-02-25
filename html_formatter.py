@@ -312,15 +312,25 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
         else:
             art_cell = '<div class="track-art track-art--empty">\u266a</div>'
 
-        # Genre tags
-        genres = t.get('spotify_genres') or []
+        # Genre tags — combine Discogs styles/genres (track-level) + Spotify genres (artist-level)
+        seen_lower = set()
+        combined_genres = []
+        for g in (t.get('discogs_styles') or []) + (t.get('discogs_genres') or []) + (t.get('spotify_genres') or []):
+            gl = g.lower()
+            if gl not in seen_lower:
+                seen_lower.add(gl)
+                combined_genres.append(g)
         genre_tags = ''.join(
-            f'<span class="genre-tag">{_esc(g)}</span>' for g in genres
+            f'<span class="genre-tag">{_esc(g)}</span>' for g in combined_genres
         )
 
-        # BPM and key
-        bpm = t.get('spotify_bpm')
-        key = t.get('spotify_key') or ''
+        # Label
+        label = t.get('discogs_label') or ''
+        label_html = f'<span class="track-label">{_esc(label)}</span>' if label else ''
+
+        # BPM and key (from ReccoBeats)
+        bpm = t.get('bpm')
+        key = t.get('key') or ''
         bpm_key_html = ''
         if bpm or key:
             parts = []
@@ -381,6 +391,7 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
       <span class="conf-badge {cls}" style="border-color:{color};color:{color};">{_esc(conf)}</span>
       <span class="track-stats">{t["detection_count"]} detections &middot; {density_pct} density</span>
       {genre_tags}
+      {label_html}
       {bpm_key_html}
     </div>
   </div>
@@ -787,6 +798,18 @@ a { color: inherit; text-decoration: none; }
   font-size: 10px;
   color: #666;
   white-space: nowrap;
+}
+
+/* ── Label ── */
+.track-label {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #111;
+  border: 1px solid #333;
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+  font-style: italic;
 }
 
 /* ── BPM / Key ── */
