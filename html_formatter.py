@@ -748,7 +748,7 @@ a { color: inherit; text-decoration: none; }
 
 .track-card {
   display: grid;
-  grid-template-columns: 36px 48px max-content 1fr auto;
+  grid-template-columns: 36px 48px 56px 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
