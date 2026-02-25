@@ -328,9 +328,9 @@ def _render_track_cards(tracks: list, platform: str = 'unknown', show_spotify_co
         label = t.get('discogs_label') or ''
         label_html = f'<span class="track-label">{_esc(label)}</span>' if label else ''
 
-        # BPM and key (from ReccoBeats; fall back to legacy spotify_bpm/spotify_key)
-        bpm = t.get('bpm') or t.get('spotify_bpm')
-        key = t.get('key') or t.get('spotify_key') or ''
+        # BPM and key (from ReccoBeats)
+        bpm = t.get('bpm')
+        key = t.get('key') or ''
         bpm_key_html = ''
         if bpm or key:
             parts = []

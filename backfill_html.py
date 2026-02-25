@@ -59,9 +59,8 @@ def _json_to_enriched_tracks(tracks_data: list[dict]) -> list[dict]:
                 "spotify_album_art": t.get("spotify_album_art"),
                 "spotify_preview_url": t.get("spotify_preview_url"),
                 "spotify_genres": t.get("spotify_genres", []),
-                # New field names; fall back to legacy spotify_bpm/spotify_key
-                "bpm": t.get("bpm") or t.get("spotify_bpm"),
-                "key": t.get("key") or t.get("spotify_key"),
+                "bpm": t.get("bpm"),
+                "key": t.get("key"),
                 "energy": t.get("energy"),
                 "danceability": t.get("danceability"),
                 "youtube_url": t.get("youtube_url"),
