@@ -11,9 +11,12 @@ from setlist_builder import CONFIDENCE_ICONS
 
 
 def format_time(seconds: float) -> str:
-    """Convert seconds to MM:SS format."""
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
+    """Convert seconds to H:MM:SS or M:SS format."""
+    hours   = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs    = int(seconds % 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes}:{secs:02d}"
 
 
