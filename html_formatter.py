@@ -100,8 +100,12 @@ def _render_player_js(platform: str, embed_id: str, tracks: list) -> str:
     # Build trackTimes array from tracks list
     track_times_entries = []
     for t in tracks:
+        title_js = t.get('title', '').replace('\\', '\\\\').replace('"', '\\"')
+        artist_js = t.get('artist', '').replace('\\', '\\\\').replace('"', '\\"')
+        art_js = (t.get('spotify_album_art') or '').replace('\\', '\\\\').replace('"', '\\"')
         track_times_entries.append(
-            f'  {{idx: "{t["position"]}", start: {t["start_time"]:.3f}, end: {t["end_time"]:.3f}}}'
+            f'  {{idx: "{t["position"]}", start: {t["start_time"]:.3f}, end: {t["end_time"]:.3f}, '
+            f'title: "{title_js}", artist: "{artist_js}", art: "{art_js}"}}'
         )
     track_times_js = 'const trackTimes = [\n' + ',\n'.join(track_times_entries) + '\n];'
 
@@ -112,6 +116,13 @@ let isPlaying = false;
 function updatePillIcon() {
   const btn = document.getElementById('pillPlayBtn');
   if (btn) btn.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
+  if (activeIdx !== null) {
+    const card = document.querySelector('.track-card[data-track-idx="' + activeIdx + '"]');
+    if (card) {
+      const playBtn = card.querySelector('.btn-play');
+      if (playBtn) playBtn.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
+    }
+  }
 }
 
 function playPlayer() {
@@ -231,6 +242,28 @@ function _applyTrackHighlight(seconds) {
 function highlightTrackAt(seconds) {
   if (Date.now() < seekLockUntil) return;
   _applyTrackHighlight(seconds);
+}
+
+let _prevPressTime = 0;
+
+function skipToNextTrack() {
+  const sorted = [...trackTimes].sort((a, b) => a.start - b.start);
+  const next = sorted.find(t => t.start > currentTime + 1);
+  if (next) { seekPlayer(next.start); setActive(next.idx, false); }
+}
+
+function skipToPrevTrack() {
+  const sorted = [...trackTimes].sort((a, b) => a.start - b.start);
+  const now = Date.now();
+  const currentTrack = [...sorted].reverse().find(t => t.start <= currentTime);
+  if (currentTrack && (now - _prevPressTime < 2000)) {
+    const prev = [...sorted].reverse().find(t => t.start < currentTrack.start);
+    if (prev) { seekPlayer(prev.start); setActive(prev.idx, false); }
+  } else {
+    if (currentTrack) { seekPlayer(currentTrack.start); setActive(currentTrack.idx, false); }
+    else { seekPlayer(0); }
+  }
+  _prevPressTime = now;
 }
 """
 
@@ -393,6 +426,197 @@ def _render_timeline(tracks: list, total_duration: float) -> str:
     return '\n'.join(segments_html)
 
 
+
+def _render_journey_chart(tracks: list, total_duration: float) -> str:
+    """Render a collapsible SVG line chart of BPM, energy, and danceability over time.
+
+    Returns an empty string if no tracks have any metric data.
+    The chart is hidden by default and revealed via a toggle button.
+    """
+    if total_duration <= 0:
+        return ''
+
+    # Collect points per metric, using each track's midpoint as the x position
+    bpm_points = []
+    energy_points = []
+    dance_points = []
+
+    for t in tracks:
+        start = t.get('start_time', 0) or 0
+        end = t.get('end_time', 0) or start
+        mid = (start + end) / 2.0
+        x_norm = mid / total_duration  # 0.0 – 1.0
+
+        title = t.get('title', '') or ''
+        artist = t.get('artist', '') or ''
+        label_base = (
+            f"{artist} \u2014 {title}" if artist and title
+            else (title or artist or 'Unknown')
+        )
+
+        bpm = t.get('bpm')
+        if bpm is not None:
+            try:
+                bpm_points.append({'x': x_norm, 'val': float(bpm), 'label': label_base})
+            except (TypeError, ValueError):
+                pass
+
+        energy = t.get('energy')
+        if energy is not None:
+            try:
+                energy_points.append({'x': x_norm, 'val': float(energy), 'label': label_base})
+            except (TypeError, ValueError):
+                pass
+
+        dance = t.get('danceability')
+        if dance is not None:
+            try:
+                dance_points.append({'x': x_norm, 'val': float(dance), 'label': label_base})
+            except (TypeError, ValueError):
+                pass
+
+    # Return empty string if no metric data at all
+    if not bpm_points and not energy_points and not dance_points:
+        return ''
+
+    # SVG layout constants
+    VB_W = 1000
+    VB_H = 120
+    Y_TOP = 10   # y for maximum value (top of chart)
+    Y_BOT = 110  # y for minimum value (bottom of chart)
+    Y_RANGE = Y_BOT - Y_TOP  # 100
+
+    # Compute BPM normalisation range
+    bpm_min = bpm_max = None
+    if bpm_points:
+        bpm_vals = [p['val'] for p in bpm_points]
+        bpm_min = min(bpm_vals)
+        bpm_max = max(bpm_vals)
+        if bpm_min == bpm_max:
+            bpm_min -= 1.0
+            bpm_max += 1.0
+
+    def x_to_svg(x_norm_val):
+        return x_norm_val * VB_W
+
+    def bpm_to_y(val):
+        norm = (val - bpm_min) / (bpm_max - bpm_min)
+        return Y_BOT - norm * Y_RANGE
+
+    def ratio_to_y(val):
+        norm = max(0.0, min(1.0, val))
+        return Y_BOT - norm * Y_RANGE
+
+    svg_parts = []
+
+    # Background rect
+    svg_parts.append(
+        f'<rect x="0" y="0" width="{VB_W}" height="{VB_H}" fill="#1a1a1a"/>'
+    )
+
+    # Subtle horizontal gridlines at 25 / 50 / 75 %
+    for pct in (0.25, 0.50, 0.75):
+        gy = round(Y_BOT - pct * Y_RANGE, 1)
+        svg_parts.append(
+            f'<line x1="0" y1="{gy}" x2="{VB_W}" y2="{gy}" '
+            f'stroke="#333" stroke-width="0.8" stroke-dasharray="4 4"/>'
+        )
+
+    def _build_metric(points, color, to_y_fn, metric_name, fmt_fn):
+        """Return SVG element strings for one metric: dashed line + dots."""
+        if not points:
+            return []
+        inner_parts = []
+        sorted_pts = sorted(points, key=lambda p: p['x'])
+        coords = []
+        for p in sorted_pts:
+            sx = round(x_to_svg(p['x']), 2)
+            sy = round(to_y_fn(p['val']), 2)
+            coords.append((sx, sy, p['val'], p['label']))
+
+        # Dashed connecting polyline
+        pts_str = ' '.join(f'{sx},{sy}' for sx, sy, _, _ in coords)
+        inner_parts.append(
+            f'<polyline points="{pts_str}" fill="none" stroke="{color}" '
+            f'stroke-width="1.5" stroke-dasharray="4 4" '
+            f'stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>'
+        )
+
+        # Dots with tooltip data-label
+        for sx, sy, val, label in coords:
+            val_str = fmt_fn(val)
+            data_label = _esc(f"{label}\n{metric_name}: {val_str}")
+            inner_parts.append(
+                f'<circle class="journey-dot" cx="{sx}" cy="{sy}" r="4" '
+                f'fill="{color}" stroke="#1a1a1a" stroke-width="1.5" '
+                f'data-label="{data_label}" style="cursor:default;"/>'
+            )
+        return inner_parts
+
+    svg_parts.extend(_build_metric(
+        bpm_points, '#00e676', bpm_to_y, 'BPM', lambda v: f'{v:.0f} BPM'
+    ))
+    svg_parts.extend(_build_metric(
+        energy_points, '#ff9800', ratio_to_y, 'Energy', lambda v: f'{v:.2f}'
+    ))
+    svg_parts.extend(_build_metric(
+        dance_points, '#64b5f6', ratio_to_y, 'Dance', lambda v: f'{v:.2f}'
+    ))
+
+    # Legend in top-right corner, items laid out right-to-left
+    legend_items = []
+    if bpm_points:
+        legend_items.append(('BPM', '#00e676'))
+    if energy_points:
+        legend_items.append(('Energy', '#ff9800'))
+    if dance_points:
+        legend_items.append(('Dance', '#64b5f6'))
+
+    leg_x = VB_W - 8
+    leg_y = 12
+    for lbl, col in reversed(legend_items):
+        # Approximate pixel width: ~6px/char + 18px for dot + gap
+        item_width = len(lbl) * 6 + 18
+        leg_x -= item_width
+        dot_cx = round(leg_x + 4, 1)
+        text_x = round(leg_x + 10, 1)
+        text_y = round(leg_y + 4, 1)
+        svg_parts.append(
+            f'<circle cx="{dot_cx}" cy="{leg_y}" r="3" fill="{col}"/>'
+        )
+        svg_parts.append(
+            f'<text x="{text_x}" y="{text_y}" fill="#888" font-size="9" '
+            f'font-family="\'Segoe UI\', system-ui, sans-serif">'
+            f'{_esc(lbl)}</text>'
+        )
+
+    svg_inner = '\n  '.join(svg_parts)
+    svg_html = (
+        f'<svg viewBox="0 0 {VB_W} {VB_H}" preserveAspectRatio="none" '
+        f'xmlns="http://www.w3.org/2000/svg" height="120">\n'
+        f'  {svg_inner}\n'
+        f'</svg>'
+    )
+
+    # Inline onclick: toggle .visible on sibling div, update button text
+    toggle_js = (
+        "var c=this.nextElementSibling;"
+        "c.classList.toggle('visible');"
+        "this.textContent=c.classList.contains('visible')"
+        "?'\U0001F4C8 Journey \u25be':'\U0001F4C8 Journey';"
+    )
+
+    return (
+        f'<div class="journey-section">'
+        f'<button class="btn btn-journey" onclick="{_esc(toggle_js)}">'
+        f'\U0001F4C8 Journey</button>'
+        f'<div class="journey-chart">'
+        f'{svg_html}'
+        f'</div>'
+        f'</div>\n'
+    )
+
+
 def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
     """Render individual track cards as HTML."""
     cards = []
@@ -440,7 +664,7 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
 
         # Play button (seeks embedded player) — built here so it can be embedded in time_cell
         play_btn = (
-            f'<button class="btn btn-play" onclick="event.stopPropagation(); if(String(activeIdx)===\'{t["position"]}\'){{pausePlayer();clearActive();}}else{{seekPlayer({start_seconds:.3f});setActive(\'{t["position"]}\');}}" '
+            f'<button class="btn btn-play" onclick="event.stopPropagation(); if(String(activeIdx)===\'{t["position"]}\'){{if(isPlaying){{pausePlayer();}}else{{playPlayer();}}}}else{{seekPlayer({start_seconds:.3f});setActive(\'{t["position"]}\');}}" '
             f'title="Play / Pause">&#9654;</button>'
             if platform in ('youtube', 'soundcloud') else ''
         )
@@ -570,7 +794,46 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
     return '\n'.join(cards)
 
 
-def _render_stats(counts: dict, total: int, recognized: int) -> str:
+def _render_sparkline_pill(label: str, values: list, color: str) -> str:
+    """Render a small SVG sparkline as a stat-pill."""
+    if not values:
+        return ''
+    n = len(values)
+    w, h = 60, 16  # SVG dimensions
+    vmin, vmax = min(values), max(values)
+    vrange = vmax - vmin if vmax != vmin else 1.0
+
+    pts = []
+    for i, v in enumerate(values):
+        x = i / max(n - 1, 1) * w
+        y = h - ((v - vmin) / vrange) * (h - 4) - 2
+        pts.append((x, y))
+
+    polyline = ' '.join(f'{x:.1f},{y:.1f}' for x, y in pts)
+    dots = ''.join(
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.5" fill="{color}"/>'
+        for x, y in pts
+    )
+
+    avg = sum(values) / n
+    tooltip = f'{label}: min={vmin:.1f} avg={avg:.1f} max={vmax:.1f}'
+
+    svg = (
+        f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="overflow:visible;vertical-align:middle">'
+        f'<polyline points="{polyline}" fill="none" stroke="{color}" stroke-width="1.5"/>'
+        f'{dots}'
+        f'</svg>'
+    )
+
+    return (
+        f'<span class="stat-pill sparkline-pill" title="{tooltip}" '
+        f'style="border-color:{color};color:{color};display:inline-flex;align-items:center;gap:4px;padding:2px 8px;">'
+        f'<span style="font-size:9px;letter-spacing:0.5px">{label}</span>{svg}'
+        f'</span>'
+    )
+
+
+def _render_stats(counts: dict, total: int, recognized: int, tracks: list = None) -> str:
     """Render the stats bar."""
     recognition_rate = (recognized / total * 100) if total else 0
     pills = []
@@ -586,11 +849,24 @@ def _render_stats(counts: dict, total: int, recognized: int) -> str:
         )
     pills_html = ''.join(pills)
 
+    sparkline_html = ''
+    if tracks:
+        sorted_tracks = sorted(tracks, key=lambda t: t.get('start_time', 0))
+        bpm_vals = [t['bpm'] for t in sorted_tracks if t.get('bpm') is not None]
+        energy_vals = [t['energy'] for t in sorted_tracks if t.get('energy') is not None]
+        dance_vals = [t['danceability'] for t in sorted_tracks if t.get('danceability') is not None]
+        sparkline_html = (
+            _render_sparkline_pill('BPM', bpm_vals, '#00e676')
+            + _render_sparkline_pill('NRG', energy_vals, '#ff9800')
+            + _render_sparkline_pill('DNC', dance_vals, '#64b5f6')
+        )
+
     return f'''
 <div class="stats-bar">
   <span class="stat-total">{total} tracks</span>
   <span class="stat-rate">{recognition_rate:.0f}% identified</span>
   {pills_html}
+  {sparkline_html}
 </div>'''
 
 
@@ -701,6 +977,7 @@ a { color: inherit; text-decoration: none; }
   font-size: 10px;
   color: #444;
 }
+
 
 /* ── Controls ── */
 .controls {
@@ -1138,15 +1415,104 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
-.pill-skip { color: #888; border-color: #444; min-width: 48px; text-align: center; font-size: 12px; }
+.pill-skip { flex: 1; color: #888; border-color: #444; text-align: center; font-size: 12px; padding: 4px 8px; }
 .pill-skip:hover { color: #ccc; border-color: #666; opacity: 1; }
 .pill-play { color: #00e676; border-color: #00e676; min-width: 40px; text-align: center; font-size: 13px; padding: 5px 12px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
 .pill-play:hover { opacity: 1; }
+.pill-track-nav { display: flex; gap: 6px; }
+.pill-track-nav-btn { flex: 1; color: #888; border-color: #444; text-align: center; font-size: 13px; padding: 2px 6px; }
+.pill-track-nav-btn:hover { color: #ccc; border-color: #666; opacity: 1; }
 .pill-nav { display: flex; gap: 6px; }
 .pill-nav-btn { flex: 1; color: #555; border-color: #2a2a2a; font-size: 10px; text-align: center; padding: 3px 6px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
 .pill-nav-btn:hover { color: #999; border-color: #555; opacity: 1; }
+.pill-now-playing {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.pill-now-playing.visible { display: flex; }
+.pill-album-art {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: none;
+}
+.pill-album-art.visible { display: block; }
+.pill-track-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pill-track-artist {
+  font-size: 11px;
+  color: #888;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: -4px;
+}
+
+/* ── Journey chart ── */
+.journey-section {
+  margin-bottom: 20px;
+}
+
+.btn-journey {
+  color: #555;
+  border-color: #2a2a2a;
+  font-size: 11px;
+  padding: 4px 10px;
+  margin-bottom: 8px;
+}
+.btn-journey:hover { color: #888; border-color: #444; opacity: 1; }
+
+.journey-chart {
+  display: none;
+  width: 100%;
+  background: #1a1a1a;
+  border: 1px solid #222;
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+.journey-chart.visible { display: block; }
+
+.journey-chart svg {
+  display: block;
+  width: 100%;
+}
+
+/* Journey tooltip */
+#journey-tooltip {
+  position: fixed;
+  z-index: 9001;
+  pointer-events: none;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 7px;
+  padding: 8px 12px;
+  min-width: 160px;
+  max-width: 260px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  opacity: 0;
+  transition: opacity 0.12s;
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.5;
+}
+#journey-tooltip.visible { opacity: 1; }
+#journey-tooltip .jt-title { font-weight: 600; color: #fff; font-size: 13px; margin-bottom: 2px; }
+#journey-tooltip .jt-value { color: #888; font-size: 11px; }
 """
 
 JS = """
@@ -1234,7 +1600,31 @@ function clearActive() {
     const playBtn = card.querySelector('.btn-play');
     if (playBtn) playBtn.innerHTML = '&#9654;';
   }
+  const nowPlaying = document.getElementById('pillNowPlaying');
+  if (nowPlaying) nowPlaying.classList.remove('visible');
   activeIdx = null;
+}
+
+function _updatePillNowPlaying(idx) {
+  const nowPlaying = document.getElementById('pillNowPlaying');
+  if (!nowPlaying) return;
+  const track = typeof trackTimes !== 'undefined' ? trackTimes.find(t => t.idx === String(idx)) : null;
+  if (!track) return;
+  const titleEl  = document.getElementById('pillTrackTitle');
+  const artistEl = document.getElementById('pillTrackArtist');
+  const artEl    = document.getElementById('pillAlbumArt');
+  if (titleEl)  titleEl.textContent  = track.title  || '';
+  if (artistEl) artistEl.textContent = track.artist || '';
+  if (artEl) {
+    if (track.art) {
+      artEl.src = track.art;
+      artEl.classList.add('visible');
+    } else {
+      artEl.src = '';
+      artEl.classList.remove('visible');
+    }
+  }
+  nowPlaying.classList.add('visible');
 }
 
 function setActive(idx, scroll = true) {
@@ -1259,6 +1649,7 @@ function setActive(idx, scroll = true) {
       }
     }
   }
+  _updatePillNowPlaying(idx);
   activeIdx = idx;
 }
 
@@ -1305,6 +1696,38 @@ document.querySelectorAll('.track-card').forEach(card => {
 });
 
 document.addEventListener('click', () => { clearActive(); });
+
+
+// ── Journey Chart Tooltip ──
+(function() {
+  var jTip = document.getElementById('journey-tooltip');
+  if (!jTip) return;
+
+  function positionJTip(cx, cy) {
+    var OFFSET = 14, vw = window.innerWidth, vh = window.innerHeight;
+    var tw = jTip.offsetWidth || 180, th = jTip.offsetHeight || 70;
+    var left = cx + OFFSET, top = cy + OFFSET;
+    if (left + tw > vw - 8) left = cx - tw - OFFSET;
+    if (top  + th > vh - 8) top  = cy - th - OFFSET;
+    jTip.style.left = Math.max(8, left) + 'px';
+    jTip.style.top  = Math.max(8, top)  + 'px';
+  }
+
+  document.querySelectorAll('.journey-dot').forEach(function(dot) {
+    dot.addEventListener('mouseenter', function(e) {
+      var label = dot.getAttribute('data-label') || '';
+      var parts = label.split('\\n');
+      var titleEl = jTip.querySelector('.jt-title');
+      var valueEl = jTip.querySelector('.jt-value');
+      if (titleEl) titleEl.textContent = parts[0] || '';
+      if (valueEl) valueEl.textContent = parts.slice(1).join(' \u00b7 ');
+      positionJTip(e.clientX, e.clientY);
+      jTip.classList.add('visible');
+    });
+    dot.addEventListener('mousemove', function(e) { positionJTip(e.clientX, e.clientY); });
+    dot.addEventListener('mouseleave', function() { jTip.classList.remove('visible'); });
+  });
+})();
 """
 
 
@@ -3150,21 +3573,31 @@ class HtmlFormatter:
         recognized = sum(1 for t in tracks if t['title'] != 'Unknown Track')
 
         # Section HTML
-        stats_html    = _render_stats(counts, total, recognized)
-        timeline_html = _render_timeline(tracks, total_duration)
-        cards_html    = _render_track_cards(tracks, platform)
+        stats_html         = _render_stats(counts, total, recognized, tracks)
+        timeline_html      = _render_timeline(tracks, total_duration)
+        journey_chart_html = _render_journey_chart(tracks, total_duration)
+        cards_html         = _render_track_cards(tracks, platform)
         player_html   = _render_player(platform, embed_id)
         player_js     = _render_player_js(platform, embed_id, tracks)
         pill_html = (
             f'<div class="player-pill" id="playerPill" onclick="event.stopPropagation()" data-duration="{total_duration:.3f}">'
+            f'<div class="pill-now-playing" id="pillNowPlaying">'
+            f'<img class="pill-album-art" id="pillAlbumArt" src="" alt="" />'
+            f'<div class="pill-track-title" id="pillTrackTitle"></div>'
+            f'<div class="pill-track-artist" id="pillTrackArtist"></div>'
+            f'</div>'
             f'<div class="pill-progress-bar" id="pillProgressBar"><div class="pill-progress-fill" id="pillProgressFill"></div></div>'
             f'<div class="pill-time-row">'
             f'<span id="pillTimeCurrent">0:00</span>'
             f'<span>{_esc(format_time(total_duration))}</span>'
             f'</div>'
             f'<div class="pill-controls">'
-            f'<button class="btn pill-skip" onclick="skipPlayer(-15)" title="Back 15 seconds">\u221215</button>'
+            f'<button class="btn pill-track-nav-btn" onclick="skipToPrevTrack()" title="Previous track">&#9198;</button>'
             f'<button class="btn pill-play" id="pillPlayBtn" onclick="togglePillPlay()" title="Play / Pause">&#9654;</button>'
+            f'<button class="btn pill-track-nav-btn" onclick="skipToNextTrack()" title="Next track">&#9197;</button>'
+            f'</div>'
+            f'<div class="pill-track-nav">'
+            f'<button class="btn pill-skip" onclick="skipPlayer(-15)" title="Back 15 seconds">\u221215</button>'
             f'<button class="btn pill-skip" onclick="skipPlayer(15)" title="Forward 15 seconds">+15</button>'
             f'</div>'
             f'<div class="pill-nav">'
@@ -3251,6 +3684,9 @@ class HtmlFormatter:
     <div class="timeline-ticks">{ticks_html}</div>
   </div>
 
+  <!-- Journey Chart -->
+  {journey_chart_html}
+
   <!-- Controls -->
   <div class="controls">
     <input id="searchInput" class="search-input" type="search"
@@ -3278,6 +3714,11 @@ class HtmlFormatter:
   <div class="tl-tip-track"></div>
   <div class="tl-tip-time"></div>
   <div class="tl-tip-badge"></div>
+</div>
+
+<div id="journey-tooltip" aria-hidden="true">
+  <div class="jt-title"></div>
+  <div class="jt-value"></div>
 </div>
 
 {pill_html}
