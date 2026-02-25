@@ -15,6 +15,8 @@ class Config:
     SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET', '')
     SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://127.0.0.1:8888/callback')
     DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
+    DISCOGS_CONSUMER_KEY = os.getenv('DISCOGS_CONSUMER_KEY', '')
+    DISCOGS_CONSUMER_SECRET = os.getenv('DISCOGS_CONSUMER_SECRET', '')
 
     # DJ Set Discovery Settings
     DISCOVERY_RESULTS_PER_QUERY = int(os.getenv('DISCOVERY_RESULTS_PER_QUERY', '20'))
@@ -83,8 +85,8 @@ class Config:
         if cls.ENABLE_SPOTIFY and (not cls.SPOTIFY_CLIENT_ID or not cls.SPOTIFY_CLIENT_SECRET):
             issues.append("Spotify enabled but credentials missing")
         
-        if cls.ENABLE_DISCOGS and not cls.DISCOGS_TOKEN:
-            issues.append("Discogs enabled but token missing")
+        if cls.ENABLE_DISCOGS and not cls.DISCOGS_TOKEN and not (cls.DISCOGS_CONSUMER_KEY and cls.DISCOGS_CONSUMER_SECRET):
+            issues.append("Discogs enabled but credentials missing (set DISCOGS_TOKEN or DISCOGS_CONSUMER_KEY + DISCOGS_CONSUMER_SECRET)")
 
         return issues
     

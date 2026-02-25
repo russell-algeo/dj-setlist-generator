@@ -83,7 +83,9 @@ def _batch_fetch_reccobeats(spotify_ids: list[str]) -> dict:
             features_list = data.get("content", data if isinstance(data, list) else [])
             for feat in features_list:
                 if feat and isinstance(feat, dict):
-                    fid = feat.get("id") or feat.get("trackId")
+                    # ReccoBeats returns a UUID as "id"; Spotify track ID is in "href"
+                    href = feat.get("href", "")
+                    fid = href.split("/")[-1].split("?")[0] if href else None
                     if fid:
                         all_features[fid] = feat
                     elif len(batch) == 1:
@@ -161,7 +163,7 @@ def _enrich_json(json_path: Path, enricher: MetadataEnricher, dry_run: bool) -> 
         reccobeats_features = _batch_fetch_reccobeats(ids_needing_audio)
 
     # --- Phase 3: Discogs enrichment (genres, styles, label, URL) ---
-    discogs_enabled = Config.ENABLE_DISCOGS and Config.DISCOGS_TOKEN
+    discogs_enabled = Config.ENABLE_DISCOGS and (Config.DISCOGS_TOKEN or (Config.DISCOGS_CONSUMER_KEY and Config.DISCOGS_CONSUMER_SECRET))
 
     # --- Apply all enrichment ---
     updated_count = 0

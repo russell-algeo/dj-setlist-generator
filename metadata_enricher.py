@@ -3,6 +3,8 @@
 import functools
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import yt_dlp
 from typing import Optional
 from config import Config
@@ -11,6 +13,27 @@ from spotipy.oauth2 import SpotifyClientCredentials
 
 # ReccoBeats API base URL (free, no API key required)
 _RECCOBEATS_BASE = "https://api.reccobeats.com/v1"
+
+
+def _make_discogs_session() -> requests.Session:
+    """Create a requests Session with retry logic for Discogs API calls.
+
+    Retries on 429/5xx with exponential backoff, honouring Retry-After headers.
+    Mirrors the intent of JitterRetry used in track_recognizer.py.
+    """
+    retry = Retry(
+        total=Config.MAX_RETRIES,
+        backoff_factor=Config.BASE_DELAY,
+        status_forcelist={429, 500, 502, 503, 504},
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
+
+
+_discogs_session = _make_discogs_session()
 
 # Spotify pitch class → note name (used by ReccoBeats key/mode mapping)
 _KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -192,7 +215,9 @@ class MetadataEnricher:
                 features_list = data.get("content", data if isinstance(data, list) else [])
                 for feat in features_list:
                     if feat and isinstance(feat, dict):
-                        fid = feat.get("id") or feat.get("trackId")
+                        # ReccoBeats returns a UUID as "id"; Spotify track ID is in "href"
+                        href = feat.get("href", "")
+                        fid = href.split("/")[-1].split("?")[0] if href else None
                         if fid:
                             all_features[fid] = feat
                         elif len(batch) == 1:
@@ -356,7 +381,11 @@ class MetadataEnricher:
         Returns:
             Dict with 'url', 'genres', 'styles', 'label', or None on failure.
         """
-        if not Config.DISCOGS_TOKEN:
+        if Config.DISCOGS_TOKEN:
+            auth_header = f'Discogs token={Config.DISCOGS_TOKEN}'
+        elif Config.DISCOGS_CONSUMER_KEY and Config.DISCOGS_CONSUMER_SECRET:
+            auth_header = f'Discogs key={Config.DISCOGS_CONSUMER_KEY}, secret={Config.DISCOGS_CONSUMER_SECRET}'
+        else:
             return None
 
         try:
@@ -364,7 +393,7 @@ class MetadataEnricher:
             url = "https://api.discogs.com/database/search"
 
             headers = {
-                'Authorization': f'Discogs token={Config.DISCOGS_TOKEN}'
+                'Authorization': auth_header
             }
 
             params = {
@@ -373,7 +402,7 @@ class MetadataEnricher:
                 'per_page': 1
             }
 
-            response = requests.get(url, headers=headers, params=params)
+            response = _discogs_session.get(url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
 
