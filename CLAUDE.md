@@ -49,13 +49,13 @@ python main.py "url1" "url2" "url3" --no-resume
 1. **Download** - `audio_downloader.py` uses yt-dlp to fetch audio
 2. **Stream: Segment + Recognize** - `audio_segmenter.py` + `track_recognizer.py` work in a batch pipeline: each batch of segments is extracted on-the-fly via FFmpeg (no full-file RAM load), recognized with Shazam (Semaphore + asyncio.gather), then segment files are deleted immediately — only `BATCH_SIZE` segment files exist on disk at any time
 3. **Build Setlist** - `setlist_builder.py` clusters and deduplicates detections
-4. **Enrich** - `metadata_enricher.py` adds Spotify/YouTube/Discogs links
+4. **Enrich** - `metadata_enricher.py` adds Spotify/YouTube/Discogs links; fetches BPM and key from ReccoBeats
 5. **Output** - `output_formatter.py` generates JSON and Markdown; `html_formatter.py` generates an interactive HTML setlist (if `ENABLE_HTML_OUTPUT=true`) — all saved to `output/<mix_name>/`
 6. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
 7. **Notify** (optional) - `notifier.py` sends a push notification via ntfy.sh when a set completes (if `NTFY_TOPIC` is configured)
 
 **Utility scripts:**
-- `backfill_html.py` - Regenerate HTML files from existing JSON outputs (for sets processed before HTML output was added). Accepts an optional artist name argument or `--dry-run`.
+- `backfill_html.py` - Regenerate HTML files from existing JSON outputs (e.g. after HTML changes or for sets processed before HTML output was added). Accepts an optional artist name argument or `--dry-run`.
 
 ### DJ Set Discovery (dj_set_discovery.py)
 Uses yt-dlp to search YouTube (`ytsearch`) and SoundCloud (`scsearch`) directly with multiple query strategies (generic searches, known DJ set channels like Boiler Room, HOR Berlin, Cercle, etc.). Results are filtered by duration (>= `MIN_SET_DURATION_MINUTES`) and title keywords to exclude non-sets. Results are cached to `checkpoints/<artist>/discovery.json` during processing and cleaned up after completion (controlled by `CLEANUP_CHECKPOINTS`).
@@ -73,7 +73,7 @@ Saves progress during long recognition runs. Checkpoints stored in `checkpoints/
 ## Configuration
 
 All settings in `.env` file (see `config.py` for defaults):
-- **API credentials**: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN`
+- **API credentials**: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN` (or OAuth: `DISCOGS_CONSUMER_KEY` + `DISCOGS_CONSUMER_SECRET`)
 - **Discovery**: `DISCOVERY_RESULTS_PER_QUERY` (default: `20`), `MIN_SET_DURATION_MINUTES` (default: `20`), `MAX_SETS_PER_ARTIST` (limit sets per artist; replaces the old `--max-sets` CLI flag)
 - **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`, `AUTO_CREATE_SPOTIFY_PLAYLIST`, `ENABLE_HTML_OUTPUT`
 - **Notifications**: `NTFY_TOPIC` (ntfy.sh topic; leave empty to disable)

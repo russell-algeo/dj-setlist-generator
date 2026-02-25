@@ -45,9 +45,9 @@ Get credentials from: https://developer.spotify.com/dashboard
 - Add to `.env`
 
 #### Discogs (Optional)
-Get token from: https://www.discogs.com/settings/developers
-- Generate a personal access token
-- Add to `.env`
+Get credentials from: https://www.discogs.com/settings/developers
+- Option A: Generate a personal access token → set `DISCOGS_TOKEN`
+- Option B: Create an OAuth app → set `DISCOGS_CONSUMER_KEY` + `DISCOGS_CONSUMER_SECRET`
 
 ## Usage
 
@@ -177,14 +177,14 @@ Structured data with all track information and metadata.
 Human-readable setlist with timestamps and clickable links.
 
 ### 3. HTML file
-Interactive setlist with a clickable mix timeline, track cards, and direct YouTube/SoundCloud timestamp deep-links. Open in any browser.
+Interactive setlist with an embedded YouTube/SoundCloud player, a clickable mix timeline, track cards with timestamp deep-links, and a floating playback pill. The pill shows a progress bar (clickable to seek), current/total time, play/pause, ±15s skip, scroll-to-track, and scroll-to-top controls. Open in any browser.
 
 Example markdown output:
 
     # DJ Set Name
 
     **By:** DJ Name
-    **Duration:** 60:00
+    **Duration:** 1:30:00
 
     ## Tracklist
 
@@ -229,7 +229,7 @@ Limit the number of sets processed with `MAX_SETS_PER_ARTIST` in `.env`.
 ## Utility Scripts
 
 ### backfill_html.py
-Regenerate HTML files from existing JSON outputs (useful for sets processed before HTML output was added):
+Regenerate HTML files from existing JSON outputs (useful after HTML changes, or for sets processed before HTML output was added):
 
 ```bash
 python backfill_html.py                 # Regenerate all outputs
