@@ -616,7 +616,13 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
 
         # Label
         label = t.get('discogs_label') or ''
-        label_html = f'<span class="track-label">{_esc(label)}</span>' if label else ''
+        label_url = t.get('discogs_label_url') or ''
+        if label and label_url:
+            label_html = f'<a class="track-label" href="{_esc(label_url)}" target="_blank" rel="noopener">{_esc(label)}</a>'
+        elif label:
+            label_html = f'<span class="track-label">{_esc(label)}</span>'
+        else:
+            label_html = ''
 
         # BPM and key (from ReccoBeats)
         bpm = t.get('bpm')
@@ -659,7 +665,7 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
 </div>'''
 
         cards.append(f'''
-<div class="track-card" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
+<div class="track-card" id="track-{t["position"]}" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
   <div class="track-num">{t["position"]}</div>
   {art_cell}
   {time_cell}
@@ -1153,6 +1159,15 @@ a { color: inherit; text-decoration: none; }
   color: #888;
   white-space: nowrap;
   font-style: italic;
+  text-decoration: none;
+}
+a.track-label {
+  cursor: pointer;
+}
+a.track-label:hover {
+  color: #bbb;
+  border-color: #555;
+  background: #1a1a1a;
 }
 
 /* ── BPM / Key ── */
@@ -1535,8 +1550,6 @@ function clearActive() {
     const playBtn = card.querySelector('.btn-play');
     if (playBtn) playBtn.innerHTML = '&#9654;';
   }
-  const nowPlaying = document.getElementById('pillNowPlaying');
-  if (nowPlaying) nowPlaying.classList.remove('visible');
   if (window._journeyUnhighlight) window._journeyUnhighlight();
   activeIdx = null;
 }
@@ -1631,8 +1644,6 @@ document.querySelectorAll('.track-card').forEach(card => {
         ?.classList.remove('tl-segment--hover');
   });
 });
-
-document.addEventListener('click', () => { clearActive(); });
 
 
 // ── Journey Chart ──
@@ -2030,8 +2041,16 @@ h2 {
 .sort-btn.active { border-color: #00e676; color: #00e676; }
 
 .sets-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.sets-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
@@ -2042,7 +2061,8 @@ h2 {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s, transform 0.15s;
+  transition: border-color 0.15s, transform 0.15s, height 0.2s;
+  height: 260px;
 }
 .set-card:hover { border-color: #2a2a2a; transform: translateY(-2px); }
 
@@ -2487,10 +2507,26 @@ h2 {
 }
 
 .sig-staples-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
+  display: flex;
+  gap: 12px;
   margin-top: 12px;
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.staple-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: visible;
+}
+
+.sig-staple-card--expanded {
+  position: relative;
+  z-index: 10;
+  /* width and transform are set by JS */
 }
 
 .sig-staple-card {
@@ -2498,7 +2534,29 @@ h2 {
   background: #111;
   border: 1px solid #1e1e1e;
   border-left: 3px solid #00e676;
-  border-radius: 6px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.sig-staple-card:hover { border-color: #2a2a2a; transform: translateY(-2px); }
+
+.sig-staple-art {
+  width: calc(100% + 32px);
+  margin: -12px -16px 8px;
+  height: 120px;
+  object-fit: cover;
+  display: block;
+  border-radius: 5px 5px 0 0;
+}
+
+.sig-staple-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .sig-staple-count {
@@ -2513,7 +2571,6 @@ h2 {
   font-size: 13px;
   font-weight: 600;
   color: #fff;
-  margin-top: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2526,6 +2583,80 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.sig-staple-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-staple-sets,
+.btn-staple-spotify {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: #aaa;
+  cursor: pointer;
+}
+.btn-staple-sets:hover { border-color: #00e676; color: #00e676; }
+.btn-staple-spotify:hover { border-color: #1db954; color: #1db954; }
+
+.staple-sets-panel {
+  margin-top: 8px;
+  border-top: 1px solid #1e1e1e;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.staple-sets-panel[hidden] { display: none; }
+
+.staple-sets-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.staple-sets-link {
+  color: #00e676;
+  text-decoration: none;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.staple-sets-link:hover { text-decoration: underline; }
+.staple-sets-time { color: #666; white-space: nowrap; }
+.staple-sets-conf { font-size: 10px; font-weight: 700; white-space: nowrap; }
+.staple-spotify-embed { margin-top: 8px; }
+
+/* ── Staple filter bar ── */
+.sig-staples-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.sig-staples-header h3 { margin: 0; }
+.staple-filter-bar { display: flex; gap: 4px; flex-wrap: wrap; }
+.staple-filter-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: #888;
+  cursor: pointer;
+}
+.staple-filter-btn--active { border-color: #00e676; color: #00e676; background: #0d1f14; }
+.staple-filter-btn:hover { border-color: #00e676; color: #00e676; }
 
 .sig-trend-list {
   display: flex;
@@ -2582,10 +2713,29 @@ h2 {
 
 .genre-bar-row {
   display: grid;
-  grid-template-columns: 120px 1fr 40px;
+  grid-template-columns: 16px 120px 1fr 40px;
   align-items: center;
   gap: 8px;
 }
+
+.genre-bar-arrow {
+  font-size: 12px;
+  color: #555;
+  display: inline-block;
+  transition: transform 0.2s, color 0.15s;
+  line-height: 1;
+}
+
+.genre-bar-row--clickable {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 0;
+  transition: background 0.15s;
+}
+.genre-bar-row--clickable:hover { background: #181818; }
+.genre-bar-row--clickable:hover .genre-bar-label { color: #fff; }
+.genre-bar-row--clickable:hover .genre-bar-arrow { color: #aaa; }
+.genre-bar-row--open .genre-bar-arrow { transform: rotate(90deg); color: #00e676; }
 
 .genre-bar-label {
   font-size: 12px;
@@ -2615,6 +2765,62 @@ h2 {
   color: #666;
   font-variant-numeric: tabular-nums;
 }
+
+.genre-tracks-panel {
+  margin: 4px 0 8px 0;
+  padding: 10px;
+  background: #0d0d0d;
+  border: 1px solid #1e1e1e;
+  border-radius: 6px;
+}
+.genre-tracks-panel[hidden] { display: none; }
+
+.genre-tracks-grid {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  align-items: flex-start;
+  overflow: visible;
+}
+
+/* ── Genre / Label distribution tabs ── */
+.distrib-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.distrib-tab {
+  font-size: 12px;
+  padding: 5px 14px;
+  border-radius: 12px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: #888;
+  cursor: pointer;
+}
+.distrib-tab--active { border-color: #00e676; color: #00e676; background: #0d1f14; }
+.distrib-tab:hover:not(.distrib-tab--active) { border-color: #555; color: #ccc; }
+.distrib-pane[hidden] { display: none; }
+
+.label-panel-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.btn-discogs-label {
+  display: inline-block;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: #aaa;
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn-discogs-label:hover { border-color: #f60; color: #f60; }
 
 /* ── Interactive Set Timeline ── */
 .stl-container {
@@ -2821,6 +3027,40 @@ h2 {
   opacity: 0.6;
   stroke-width: 2;
 }
+
+/* ── Set card: in-place expand on tracklist toggle ── */
+.set-card--expanded {
+  height: 520px;
+  transform: none !important;
+}
+.set-card--expanded .set-card-body {
+  flex: 0 0 auto;
+}
+.set-card--expanded .set-card-tracklist {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.set-card-tracklist {
+  border-top: 1px solid #1e1e1e;
+  padding: 10px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.set-card-tracklist[hidden] { display: none; }
+
+.sc-toggle-btn {
+  font-size: 11px;
+  color: #666;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+.sc-toggle-btn:hover { color: #00e676; text-decoration: underline; }
 """
 
 
@@ -3013,15 +3253,21 @@ def _compute_signature_analysis(track_counter, track_info: dict, set_summaries: 
     staples = []
     regulars = []
     one_offs = []
+    set_titles = [s['title'] for s in set_summaries]
 
     for key, count in track_counter.most_common():
         info = track_info.get(key, {})
+        appeared_in = {a['set_title'] for a in info.get('appearances', [])}
+        presence = [1 if title in appeared_in else 0 for title in set_titles]
         entry = {
             'key': key,
             'artist': info.get('artist', ''),
             'title': info.get('title', key),
             'count': count,
             'spotify_url': info.get('spotify_url'),
+            'spotify_album_art': info.get('spotify_album_art'),
+            'appearances': info.get('appearances', []),
+            'presence': presence,
         }
         if count >= 3:
             staples.append(entry)
@@ -3033,11 +3279,14 @@ def _compute_signature_analysis(track_counter, track_info: dict, set_summaries: 
     recurring = len(staples) + len(regulars)
     signature_score = (recurring / unique * 100) if unique else 0
 
-    # Genre distribution from track_info
+    # Genre and label distribution from track_info
     genre_counter: Counter = Counter()
+    label_counter: Counter = Counter()
     for info in track_info.values():
         for genre in info.get('genres', []):
             genre_counter[genre] += 1
+        if info.get('discogs_label'):
+            label_counter[info['discogs_label']] += 1
 
     return {
         'unique_tracks': unique,
@@ -3047,6 +3296,7 @@ def _compute_signature_analysis(track_counter, track_info: dict, set_summaries: 
         'signature_score': signature_score,
         'total_sets': len(set_summaries),
         'top_genres': genre_counter.most_common(10),
+        'top_labels': label_counter.most_common(15),
     }
 
 
@@ -3131,88 +3381,277 @@ def _render_signature_analysis(track_counter, track_info: dict, set_summaries: l
   <span class="sig-legend-item"><span class="sig-dot sig-oneoff"></span> One-offs: {n_oneoffs}</span>
 </div>'''
 
-    # Staple cards (top 12)
+    # All recurring tracks (count >= 2): staples + regulars, sorted by count desc
+    all_recurring = staples + regulars
     staple_cards_html = ''
-    if staples:
+    if all_recurring:
+        # Dynamic filter thresholds based on actual max play count
+        max_recurring_count = all_recurring[0]['count'] if all_recurring else 2
+        filter_thresholds = [t for t in [2, 3, 4, 5, 10] if t <= max_recurring_count]
+        if max_recurring_count > 10:
+            filter_thresholds.append(max_recurring_count)
+
+        filter_btns = ''.join(
+            f'<button class="staple-filter-btn{" staple-filter-btn--active" if thresh == 3 else ""}" '
+            f'data-min="{thresh}" onclick="filterStaples({thresh})">{thresh}+ sets</button>'
+            for i, thresh in enumerate(filter_thresholds)
+        )
+
+        _conf_colors_map = {'HIGH': '#00e676', 'MEDIUM': '#ffd740', 'LOW': '#ff9100', 'UNCERTAIN': '#757575'}
         cards = []
-        for entry in staples[:12]:
-            spotify_link = (
-                f'<a class="btn-spotify" href="{_esc(entry["spotify_url"])}" target="_blank" rel="noopener">Spotify</a>'
-                if entry.get('spotify_url') else ''
+        for entry in all_recurring:
+            count = entry['count']
+            sparkline = _render_sparkline(entry['presence'])
+
+            # Spotify embed button
+            spotify_btn = ''
+            if entry.get('spotify_url'):
+                spot_id = entry['spotify_url'].split('/')[-1].split('?')[0]
+                spot_id_esc = _esc(spot_id)
+                spotify_btn = (
+                    f'<button class="btn-staple-spotify" '
+                    f'onclick="toggleStapleSpotify(this, \'{spot_id_esc}\')">'
+                    f'\u25b6 Spotify</button>'
+                )
+
+            # Sets panel rows
+            appearances = entry.get('appearances', [])
+            sets_rows = []
+            for app in appearances:
+                set_html_rel = app.get('set_html_rel')
+                pos = app.get('track_position')
+                anchor = f'#track-{pos}' if pos else ''
+                if set_html_rel:
+                    href = quote(set_html_rel, safe='/') + anchor
+                    target = '_self'
+                elif app.get('source_deep_link'):
+                    href = _esc(app['source_deep_link'])
+                    target = '_blank'
+                else:
+                    href = '#'
+                    target = '_self'
+                set_title_esc = _esc(app.get('set_title', 'Unknown Set'))
+                time_esc = _esc(app.get('time_range', ''))
+                conf = app.get('confidence', 'UNCERTAIN')
+                conf_color = _conf_colors_map.get(conf, '#757575')
+                sets_rows.append(
+                    f'<div class="staple-sets-row">'
+                    f'<a class="staple-sets-link" href="{href}" target="{target}">{set_title_esc}</a>'
+                    f'<span class="staple-sets-time">{time_esc}</span>'
+                    f'<span class="staple-sets-conf" style="color:{conf_color};">{_esc(conf)}</span>'
+                    f'</div>'
+                )
+
+            sets_panel = (
+                f'<div class="staple-sets-panel" hidden>'
+                + '\n'.join(sets_rows)
+                + '</div>'
+            ) if sets_rows else ''
+
+            sets_btn = (
+                f'<button class="btn-staple-sets" onclick="toggleStapleSets(this)">'
+                f'\u25b8 Sets ({count})</button>'
+            ) if sets_rows else ''
+
+            art_url = entry.get('spotify_album_art') or ''
+            art_html = (
+                f'<img class="sig-staple-art" src="{_esc(art_url)}" alt="" loading="lazy">'
+            ) if art_url else ''
+            cards.append(
+                f'<div class="sig-staple-card" data-count="{count}">'
+                f'{art_html}'
+                f'<div class="sig-staple-header">'
+                f'<div class="sig-staple-count">{count} sets</div>'
+                f'{sparkline}'
+                f'</div>'
+                f'<div class="sig-staple-artist">{_esc(entry["artist"])}</div>'
+                f'<div class="sig-staple-title">{_esc(entry["title"])}</div>'
+                f'<div class="sig-staple-actions">'
+                f'{sets_btn}'
+                f'{spotify_btn}'
+                f'</div>'
+                f'{sets_panel}'
+                f'</div>'
             )
-            cards.append(f'''<div class="sig-staple-card">
-  <div class="sig-staple-count">{entry["count"]} sets</div>
-  <div class="sig-staple-artist">{_esc(entry["artist"])}</div>
-  <div class="sig-staple-title">{_esc(entry["title"])}</div>
-  {spotify_link}
-</div>''')
-        staple_cards_html = f'''<div class="sig-staples">
-  <h3>DJ Staples</h3>
-  <div class="sig-staples-grid">
-    {''.join(cards)}
-  </div>
-</div>'''
 
-    # Track trends with sparklines (only useful when there are multiple sets)
-    trends_html = ''
-    if len(set_summaries) > 1:
-        trends = _build_trend_data(track_counter, track_info, set_summaries)
-        if trends:
-            rows = []
-            for rank, t in enumerate(trends, 1):
-                sparkline = _render_sparkline(t['presence'])
-                rows.append(f'''<div class="sig-trend-row">
-  <span class="sig-trend-rank">#{rank}</span>
-  <div class="sig-trend-info">
-    <span class="sig-trend-artist">{_esc(t["artist"])}</span>
-    <span class="sig-trend-sep"> — </span>
-    <span class="sig-trend-title">{_esc(t["title"])}</span>
-  </div>
-  {sparkline}
-  <span class="sig-trend-count">{t["count"]} sets</span>
-</div>''')
-            trends_html = f'''<div class="sig-trends">
-  <h3>Track Trends</h3>
-  <div class="sig-trend-list">
-    {''.join(rows)}
-  </div>
-</div>'''
+        staple_cards_html = (
+            f'<div class="sig-staples">'
+            f'<div class="sig-staples-header">'
+            f'<div class="staple-filter-bar">{filter_btns}</div>'
+            f'</div>'
+            f'<div class="sig-staples-grid" id="staplesGrid">'
+            + ''.join(cards)
+            + '</div></div>'
+        )
 
-    # Genre distribution (conditional — only shown when genre data is present)
-    genres_html = ''
+    # Genre + Label distribution (tabbed)
+    distrib_html = ''
     top_genres = sig['top_genres']
-    if top_genres:
-        max_count = top_genres[0][1]
-        genre_rows = []
-        for genre, count in top_genres:
-            pct = count / max_count * 100
-            genre_rows.append(f'''<div class="genre-bar-row">
-  <span class="genre-bar-label">{_esc(genre)}</span>
-  <div class="genre-bar-track">
-    <div class="genre-bar-fill" style="width:{pct:.1f}%;"></div>
-  </div>
-  <span class="genre-bar-count">{count}</span>
-</div>''')
-        genres_html = f'''<div class="sig-genres">
-  <h3>Genre Distribution</h3>
-  <div class="genre-bars">
-    {''.join(genre_rows)}
-  </div>
-</div>'''
+    top_labels = sig['top_labels']
+    if top_genres or top_labels:
+        _gc_map = {'HIGH': '#00e676', 'MEDIUM': '#ffd740', 'LOW': '#ff9100', 'UNCERTAIN': '#757575'}
+        _set_titles = [s['title'] for s in set_summaries]
 
-    return f'''<div class="sig-section">
-  <div class="sig-score">
-    <span class="sig-score-value">{signature_score:.0f}%</span>
-    <span class="sig-score-label">Signature Score</span>
-    <span class="sig-score-desc">of unique tracks played in 2+ sets</span>
-  </div>
-  <div class="sig-breakdown">
-    {breakdown_bar}
-  </div>
-  {staple_cards_html}
-  {trends_html}
-  {genres_html}
-</div>'''
+        def _make_track_entry(key, info):
+            _appeared_in = {a['set_title'] for a in info.get('appearances', [])}
+            return {
+                'key': key,
+                'artist': info.get('artist', ''),
+                'title': info.get('title', key),
+                'count': track_counter.get(key, 1),
+                'spotify_url': info.get('spotify_url'),
+                'spotify_album_art': info.get('spotify_album_art'),
+                'appearances': info.get('appearances', []),
+                'presence': [1 if t in _appeared_in else 0 for t in _set_titles],
+                'discogs_label_url': info.get('discogs_label_url'),
+            }
+
+        def _render_track_card(ge):
+            ge_count = ge['count']
+            ge_spotify_btn = ''
+            if ge.get('spotify_url'):
+                ge_spot_id = _esc(ge['spotify_url'].split('/')[-1].split('?')[0])
+                ge_spotify_btn = (
+                    f'<button class="btn-staple-spotify" '
+                    f'onclick="toggleStapleSpotify(this, \'{ge_spot_id}\')">'
+                    f'\u25b6 Spotify</button>'
+                )
+            ge_sets_rows = []
+            for app in ge.get('appearances', []):
+                set_html_rel = app.get('set_html_rel')
+                pos = app.get('track_position')
+                anchor = f'#track-{pos}' if pos else ''
+                if set_html_rel:
+                    href = quote(set_html_rel, safe='/') + anchor
+                    target = '_self'
+                elif app.get('source_deep_link'):
+                    href = _esc(app['source_deep_link'])
+                    target = '_blank'
+                else:
+                    href = '#'
+                    target = '_self'
+                conf = app.get('confidence', 'UNCERTAIN')
+                ge_sets_rows.append(
+                    f'<div class="staple-sets-row">'
+                    f'<a class="staple-sets-link" href="{href}" target="{target}">{_esc(app.get("set_title", "Unknown Set"))}</a>'
+                    f'<span class="staple-sets-time">{_esc(app.get("time_range", ""))}</span>'
+                    f'<span class="staple-sets-conf" style="color:{_gc_map.get(conf, "#757575")};">{_esc(conf)}</span>'
+                    f'</div>'
+                )
+            ge_sets_panel = (
+                '<div class="staple-sets-panel" hidden>' + '\n'.join(ge_sets_rows) + '</div>'
+            ) if ge_sets_rows else ''
+            ge_sets_btn = (
+                f'<button class="btn-staple-sets" onclick="toggleStapleSets(this)">'
+                f'\u25b8 Sets ({ge_count})</button>'
+            ) if ge_sets_rows else ''
+            ge_art = ge.get('spotify_album_art') or ''
+            ge_art_html = (
+                f'<img class="sig-staple-art" src="{_esc(ge_art)}" alt="" loading="lazy">'
+            ) if ge_art else ''
+            return (
+                f'<div class="sig-staple-card" data-count="{ge_count}">'
+                f'{ge_art_html}'
+                f'<div class="sig-staple-header">'
+                f'<div class="sig-staple-count">{ge_count} set{"s" if ge_count != 1 else ""}</div>'
+                f'{_render_sparkline(ge["presence"])}'
+                f'</div>'
+                f'<div class="sig-staple-artist">{_esc(ge["artist"])}</div>'
+                f'<div class="sig-staple-title">{_esc(ge["title"])}</div>'
+                f'<div class="sig-staple-actions">{ge_sets_btn}{ge_spotify_btn}</div>'
+                f'{ge_sets_panel}'
+                f'</div>'
+            )
+
+        def _render_bar_rows(top_items, lookup, label_urls=None):
+            max_count = top_items[0][1]
+            rows = []
+            for name, count in top_items:
+                pct = count / max_count * 100
+                entries = lookup.get(name, [])
+                cards_html = ''.join(_render_track_card(e) for e in entries)
+                discogs_hdr = ''
+                if label_urls:
+                    lurl = label_urls.get(name)
+                    if lurl:
+                        discogs_hdr = (
+                            f'<div class="label-panel-header">'
+                            f'<a class="btn-discogs-label" href="{_esc(lurl)}" target="_blank">'
+                            f'View Label on Discogs \u2192</a></div>'
+                        )
+                panel_html = (
+                    f'<div class="genre-tracks-panel" hidden>'
+                    f'{discogs_hdr}'
+                    f'<div class="genre-tracks-grid">{cards_html}</div></div>'
+                ) if cards_html else ''
+                clickable = bool(cards_html)
+                row_cls = 'genre-bar-row genre-bar-row--clickable' if clickable else 'genre-bar-row'
+                click_attr = ' onclick="toggleGenreTracks(this)"' if clickable else ''
+                arrow_html = '<span class="genre-bar-arrow">&#8250;</span>' if clickable else '<span></span>'
+                rows.append(
+                    f'<div class="{row_cls}"{click_attr}>'
+                    f'{arrow_html}'
+                    f'<span class="genre-bar-label">{_esc(name)}</span>'
+                    f'<div class="genre-bar-track"><div class="genre-bar-fill" style="width:{pct:.1f}%;"></div></div>'
+                    f'<span class="genre-bar-count">{count}</span>'
+                    f'</div>' + panel_html
+                )
+            return f'<div class="sig-genres"><div class="genre-bars">{"".join(rows)}</div></div>'
+
+        # ── Genre pane ──
+        genre_pane_html = ''
+        if top_genres:
+            genre_to_tracks: dict = {}
+            for _key, _info in track_info.items():
+                if not _info.get('genres'):
+                    continue
+                _entry = _make_track_entry(_key, _info)
+                for _g in _info['genres']:
+                    genre_to_tracks.setdefault(_g, []).append(_entry)
+            for _g in genre_to_tracks:
+                genre_to_tracks[_g].sort(key=lambda x: x['count'], reverse=True)
+            genre_pane_html = _render_bar_rows(top_genres, genre_to_tracks)
+
+        # ── Label pane ──
+        label_pane_html = ''
+        if top_labels:
+            label_to_tracks: dict = {}
+            label_to_url: dict = {}
+            for _key, _info in track_info.items():
+                label = _info.get('discogs_label')
+                if not label:
+                    continue
+                _entry = _make_track_entry(_key, _info)
+                label_to_tracks.setdefault(label, []).append(_entry)
+                if _info.get('discogs_label_url') and label not in label_to_url:
+                    label_to_url[label] = _info['discogs_label_url']
+            for lb in label_to_tracks:
+                label_to_tracks[lb].sort(key=lambda x: x['count'], reverse=True)
+            label_pane_html = _render_bar_rows(top_labels, label_to_tracks, label_to_url)
+
+        # ── Assemble tabbed widget ──
+        genres_first = bool(genre_pane_html)
+        genre_btn_cls = 'distrib-tab distrib-tab--active' if genres_first else 'distrib-tab'
+        label_btn_cls = 'distrib-tab' if genres_first else 'distrib-tab distrib-tab--active'
+        tabs_html = (
+            f'<div class="distrib-tabs">'
+            f'<button class="{genre_btn_cls}" data-tab="genres" onclick="switchDistribTab(\'genres\', this)">Genres</button>'
+            f'<button class="{label_btn_cls}" data-tab="labels" onclick="switchDistribTab(\'labels\', this)">Labels</button>'
+            f'</div>'
+        )
+        genre_pane = (
+            f'<div class="distrib-pane" data-tab="genres"{"" if genres_first else " hidden"}>'
+            + (genre_pane_html or '<p class="empty">No genre data available.</p>')
+            + '</div>'
+        )
+        label_pane = (
+            f'<div class="distrib-pane" data-tab="labels"{"" if not genres_first else " hidden"}>'
+            + (label_pane_html or '<p class="empty">No label data available.</p>')
+            + '</div>'
+        )
+        distrib_html = tabs_html + genre_pane + label_pane
+
+    return staple_cards_html, distrib_html
 
 
 def _render_set_timeline(set_summaries: list) -> str:
@@ -3315,7 +3754,7 @@ def _render_set_timeline(set_summaries: list) -> str:
     <div class="stl-node-mini-timeline">
       {mini_timeline_html}
     </div>
-    <button class="stl-expand-btn" onclick="toggleSetExpand({idx})">&#9660; Show Tracklist</button>
+    <button class="stl-expand-btn" onclick="toggleSetExpand({idx})">\u25b8 Show Tracklist</button>
   </div>
   <div class="stl-tracklist" id="stlTracklist{idx}" hidden>
     {tracklist_html}
@@ -3332,11 +3771,11 @@ function toggleSetExpand(idx) {
   if (!tracklist) return;
   if (tracklist.hidden) {
     tracklist.hidden = false;
-    if (btn) btn.innerHTML = '&#9650; Hide Tracklist';
+    if (btn) btn.innerHTML = '\u25be Hide Tracklist';
     drawContinuityArcs();
   } else {
     tracklist.hidden = true;
-    if (btn) btn.innerHTML = '&#9660; Show Tracklist';
+    if (btn) btn.innerHTML = '\u25b8 Show Tracklist';
     drawContinuityArcs();
   }
 }
@@ -3450,7 +3889,7 @@ def _render_set_cards(set_summaries: list) -> str:
         return '<p class="empty">No sets were successfully processed.</p>'
 
     cards = []
-    for s in set_summaries:
+    for idx, s in enumerate(set_summaries):
         title_esc = _esc(s['title'])
         title_lower = s['title'].lower()
         source_url = s.get('url', '')
@@ -3517,7 +3956,50 @@ def _render_set_cards(set_summaries: list) -> str:
             if source_url else ''
         )
 
-        cards.append(f'''<div class="set-card" data-tracks="{data_tracks}" data-rate="{data_rate}" data-duration="{data_duration}" data-search="{data_search}">
+        # Tracklist rows (same format as Set Timeline)
+        _card_conf_colors = {
+            'HIGH': '#00e676',
+            'MEDIUM': '#ffd740',
+            'LOW': '#ff9100',
+            'UNCERTAIN': '#757575',
+        }
+        card_tracks = s.get('tracks', [])
+        track_rows_html = ''
+        if card_tracks:
+            row_parts = []
+            for t in card_tracks:
+                conf = t.get('confidence', 'UNCERTAIN')
+                conf_color = _card_conf_colors.get(conf, '#757575')
+                artist_esc_t = _esc(t.get('artist', ''))
+                title_esc_t = _esc(t.get('title', ''))
+                time_esc = _esc(t.get('start_time_formatted', ''))
+                tkey_esc = _esc(t.get('track_key', ''))
+                row_parts.append(
+                    f'<div class="stl-track" data-track-key="{tkey_esc}">'
+                    f'<span class="stl-track-time">{time_esc}</span>'
+                    f'<span class="stl-track-name">'
+                    f'<span class="stl-track-artist">{artist_esc_t}</span>'
+                    f' \u2014 '
+                    f'<span class="stl-track-title">{title_esc_t}</span>'
+                    f'</span>'
+                    f'<span class="stl-track-conf" style="border-color:{conf_color};color:{conf_color};">'
+                    f'{_esc(conf)}</span>'
+                    f'</div>'
+                )
+            track_rows_html = '\n'.join(row_parts)
+
+        toggle_btn = (
+            f'<button class="sc-toggle-btn" onclick="toggleCardTracklist({idx})">'
+            f'\u25b8 Show Tracklist</button>'
+            if card_tracks else ''
+        )
+
+        tracklist_div = (
+            f'<div class="set-card-tracklist" hidden>\n{track_rows_html}\n</div>'
+            if card_tracks else ''
+        )
+
+        cards.append(f'''<div class="set-card" data-card-idx="{idx}" data-tracks="{data_tracks}" data-rate="{data_rate}" data-duration="{data_duration}" data-search="{data_search}">
   {thumb_html}
   <div class="set-card-body">
     <a class="set-card-title" href="{primary_href}" target="{primary_target}">{title_esc}</a>
@@ -3530,8 +4012,10 @@ def _render_set_cards(set_summaries: list) -> str:
     </div>
     <div class="set-card-footer">
       {source_link}
+      {toggle_btn}
     </div>
   </div>
+  {tracklist_div}
 </div>''')
 
     return '\n'.join(cards)
@@ -3892,6 +4376,19 @@ class HtmlFormatter:
 <script>{JS}</script>
 {_render_track_card_js()}
 {player_js}
+<script>
+// ── Hash-based track deep-link: scroll to and briefly highlight ──
+(function() {{
+  var hash = window.location.hash;
+  if (!hash) return;
+  var el = document.querySelector(hash);
+  if (!el) return;
+  el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+  el.style.transition = 'background 0.3s';
+  el.style.background = '#2a3a1a';
+  setTimeout(function() {{ el.style.background = ''; }}, 2000);
+}})();
+</script>
 </body>
 </html>"""
 
@@ -3910,13 +4407,9 @@ class HtmlFormatter:
         total_appearances = sum(track_counter.values())
         repeat_tracks = sum(1 for c in track_counter.values() if c > 1)
 
-        sets_html       = _render_set_cards(set_summaries)
-        played_html     = _render_most_played(track_counter, track_info)
-        failed_html     = _render_failed_section(failed)
-        heatmap_data    = _build_heatmap_data(track_counter, track_info, set_summaries)
-        heatmap_html    = _render_heatmap(heatmap_data)
-        signature_html  = _render_signature_analysis(track_counter, track_info, set_summaries)
-        timeline_html   = _render_set_timeline(set_summaries)
+        sets_html                    = _render_set_cards(set_summaries)
+        failed_html                  = _render_failed_section(failed)
+        signature_html, distrib_html  = _render_signature_analysis(track_counter, track_info, set_summaries)
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -3953,14 +4446,11 @@ class HtmlFormatter:
     </div>
   </div>
 
-  <section>
-    <h2>DJ Signature</h2>
-    {signature_html}
-  </section>
+  {f'<section><h2>Genre &amp; Label Distribution</h2>{distrib_html}</section>' if distrib_html else ''}
 
   <section>
-    <h2>Set Timeline</h2>
-    {timeline_html}
+    <h2>Most Played Tracks</h2>
+    {signature_html}
   </section>
 
   <section>
@@ -3975,20 +4465,8 @@ class HtmlFormatter:
         <button class="sort-btn" data-sort="duration">Longest</button>
       </div>
     </div>
-    <div class="sets-grid">
+    <div class="sets-grid" id="setsGrid">
       {sets_html}
-    </div>
-  </section>
-
-  <section>
-    <h2>Track Frequency Heatmap</h2>
-    {heatmap_html}
-  </section>
-
-  <section>
-    <h2>Most Played Tracks</h2>
-    <div class="tracks-list">
-      {played_html}
     </div>
   </section>
 
@@ -4001,41 +4479,294 @@ class HtmlFormatter:
 </div>
 
 <script>
-/* ── Set grid: search + sort (Feature 6) ── */
-(function () {{
-  var searchInput = document.getElementById('setSearch');
-  var setsGrid = document.querySelector('.sets-grid');
-  if (!searchInput || !setsGrid) return;
+/* ── Set card: tracklist toggle ── */
+function toggleCardTracklist(idx) {{
+  var card = document.querySelector('.set-card[data-card-idx="' + idx + '"]');
+  var tracklist = card ? card.querySelector('.set-card-tracklist') : null;
+  var btn = card ? card.querySelector('.sc-toggle-btn') : null;
+  if (!tracklist) return;
+  if (tracklist.hidden) {{
+    tracklist.hidden = false;
+    card.classList.add('set-card--expanded');
+    if (btn) btn.innerHTML = '\u25be Hide Tracklist';
+  }} else {{
+    tracklist.hidden = true;
+    card.classList.remove('set-card--expanded');
+    if (btn) btn.innerHTML = '\u25b8 Show Tracklist';
+  }}
+}}
 
-  function filterSets() {{
-    var query = searchInput.value.toLowerCase().trim();
-    setsGrid.querySelectorAll('.set-card').forEach(function (card) {{
-      var match = !query || card.dataset.search.includes(query);
-      card.style.display = match ? '' : 'none';
-    }});
+/* ── Set grid: stable explicit columns ── */
+(function () {{
+  var setsGrid = document.getElementById('setsGrid');
+  if (!setsGrid) return;
+
+  var CARD_MIN_WIDTH = 270;
+  var GAP = 12;
+
+  function getNumCols() {{
+    return Math.max(1, Math.floor((setsGrid.offsetWidth + GAP) / (CARD_MIN_WIDTH + GAP)));
   }}
 
-  searchInput.addEventListener('input', filterSets);
+  function buildColumns(cards) {{
+    var nCols = getNumCols();
+    var cols = [];
+    for (var i = 0; i < nCols; i++) {{
+      var col = document.createElement('div');
+      col.className = 'sets-col';
+      cols.push(col);
+    }}
+    cards.forEach(function (card, i) {{ cols[i % nCols].appendChild(card); }});
+    setsGrid.innerHTML = '';
+    cols.forEach(function (col) {{ setsGrid.appendChild(col); }});
+  }}
 
-  function sortSets(sortBy) {{
-    var cards = Array.from(setsGrid.querySelectorAll('.set-card'));
-    cards.sort(function (a, b) {{
-      switch (sortBy) {{
-        case 'tracks':   return parseInt(b.dataset.tracks)   - parseInt(a.dataset.tracks);
-        case 'rate':     return parseInt(b.dataset.rate)     - parseInt(a.dataset.rate);
-        case 'duration': return parseInt(b.dataset.duration) - parseInt(a.dataset.duration);
-        default: return 0;
-      }}
+  function getAllCards() {{
+    return Array.from(setsGrid.querySelectorAll('.set-card'));
+  }}
+
+  buildColumns(getAllCards());
+
+  var resizeTimer;
+  window.addEventListener('resize', function () {{
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {{ buildColumns(getAllCards()); }}, 150);
+  }});
+
+  var searchInput = document.getElementById('setSearch');
+  if (searchInput) {{
+    searchInput.addEventListener('input', function () {{
+      var query = searchInput.value.toLowerCase().trim();
+      getAllCards().forEach(function (card) {{
+        card.style.display = !query || card.dataset.search.includes(query) ? '' : 'none';
+      }});
     }});
-    cards.forEach(function (card) {{ setsGrid.appendChild(card); }});
   }}
 
   document.querySelectorAll('.sort-btn').forEach(function (btn) {{
     btn.addEventListener('click', function () {{
       document.querySelectorAll('.sort-btn').forEach(function (b) {{ b.classList.remove('active'); }});
       btn.classList.add('active');
-      sortSets(btn.dataset.sort);
+      var sortBy = btn.dataset.sort;
+      var cards = getAllCards();
+      cards.sort(function (a, b) {{
+        switch (sortBy) {{
+          case 'tracks':   return parseInt(b.dataset.tracks)   - parseInt(a.dataset.tracks);
+          case 'rate':     return parseInt(b.dataset.rate)     - parseInt(a.dataset.rate);
+          case 'duration': return parseInt(b.dataset.duration) - parseInt(a.dataset.duration);
+          default: return 0;
+        }}
+      }});
+      buildColumns(cards);
     }});
+  }});
+}})();
+
+/* ── DJ Staples: filter by minimum play count (scoped to #staplesGrid only) ── */
+function filterStaples(minCount) {{
+  var grid = document.getElementById('staplesGrid');
+  if (grid) {{
+    grid.querySelectorAll('.sig-staple-card').forEach(function(card) {{
+      var count = parseInt(card.dataset.count, 10);
+      card.style.display = count >= minCount ? '' : 'none';
+    }});
+  }}
+  document.querySelectorAll('.staple-filter-btn').forEach(function(btn) {{
+    btn.classList.toggle('staple-filter-btn--active', parseInt(btn.dataset.min, 10) === minCount);
+  }});
+}}
+
+/* ── DJ Staples: toggle "sets played in" panel ── */
+function toggleStapleSets(btn) {{
+  var card = btn.closest('.sig-staple-card');
+  var panel = card ? card.querySelector('.staple-sets-panel') : null;
+  if (!panel) return;
+  if (panel.hidden) {{
+    panel.hidden = false;
+    btn.innerHTML = '\u25be Sets';
+  }} else {{
+    panel.hidden = true;
+    btn.innerHTML = '\u25b8 Sets (' + card.dataset.count + ')';
+  }}
+}}
+
+/* ── DJ Staples: Spotify embed toggle (expands card to 2× width) ── */
+function toggleStapleSpotify(btn, trackId) {{
+  var card = btn.closest('.sig-staple-card');
+  var embed = card ? card.querySelector('.staple-spotify-embed') : null;
+  if (embed) {{
+    // Close: remove embed, restore card, clear any adjacent-col margin
+    var col = card.parentElement;
+    var siblings = col && col.parentElement ? Array.from(col.parentElement.children) : [];
+    var colIdx = siblings.indexOf(col);
+    var adjCol = siblings[colIdx === siblings.length - 1 ? colIdx - 1 : colIdx + 1];
+    if (adjCol) {{
+      adjCol.querySelectorAll('.sig-staple-card').forEach(function(c) {{
+        c.style.removeProperty('margin-top');
+      }});
+    }}
+    embed.remove();
+    btn.textContent = '\u25b6 Spotify';
+    card.classList.remove('sig-staple-card--expanded');
+    card.style.removeProperty('width');
+    card.style.removeProperty('transform');
+    return;
+  }}
+  var col = card ? card.parentElement : null;
+  var siblings = col && col.parentElement ? Array.from(col.parentElement.children) : [];
+  var colIdx = siblings.indexOf(col);
+  var isLastCol = colIdx > 0 && colIdx === siblings.length - 1;
+  var colW = col ? col.offsetWidth : 0;
+  var gap = 8;
+
+  card.classList.add('sig-staple-card--expanded');
+  if (colW > 0) {{
+    card.style.width = (colW * 2 + gap) + 'px';
+    if (isLastCol) {{
+      card.style.transform = 'translateX(-' + (colW + gap) + 'px)';
+    }}
+  }}
+
+  var div = document.createElement('div');
+  div.className = 'staple-spotify-embed';
+  div.innerHTML = '<iframe style="border-radius:8px" src="https://open.spotify.com/embed/track/' + trackId + '?utm_source=generator&theme=0" width="100%" height="80" frameBorder="0" allow="autoplay; clipboard-write; encrypted-media" loading="lazy"></iframe>';
+  card.appendChild(div);
+  btn.textContent = '\u2715 Close';
+
+  // After layout settles, push down the first overlapping card in the adjacent column
+  var adjCol = siblings[isLastCol ? colIdx - 1 : colIdx + 1];
+  if (adjCol) {{
+    setTimeout(function() {{
+      var cardRect = card.getBoundingClientRect();
+      var adjCards = Array.from(adjCol.querySelectorAll('.sig-staple-card'));
+      for (var i = 0; i < adjCards.length; i++) {{
+        var adjRect = adjCards[i].getBoundingClientRect();
+        if (adjRect.top < cardRect.bottom && adjRect.bottom > cardRect.top) {{
+          var needed = cardRect.bottom - adjRect.top + gap;
+          adjCards[i].style.marginTop = Math.max(0, needed) + 'px';
+          break;
+        }}
+      }}
+    }}, 0);
+  }}
+}}
+
+/* ── Genre / Label distribution tabs ── */
+function switchDistribTab(tabName, btn) {{
+  var section = btn.closest('section') || document;
+  section.querySelectorAll('.distrib-tab').forEach(function(t) {{
+    t.classList.toggle('distrib-tab--active', t.dataset.tab === tabName);
+  }});
+  section.querySelectorAll('.distrib-pane').forEach(function(p) {{
+    p.hidden = p.dataset.tab !== tabName;
+  }});
+}}
+
+/* ── Genre breakdown: build masonry columns (mirrors buildStapleColumns) ── */
+function buildGenreColumns(grid) {{
+  var CARD_MIN_W = 200, GAP = 8;
+  // Reset any expanded spotify cards in this grid first
+  grid.querySelectorAll('.sig-staple-card--expanded').forEach(function(card) {{
+    var embed = card.querySelector('.staple-spotify-embed');
+    if (embed) embed.remove();
+    var btn = card.querySelector('.btn-staple-spotify');
+    if (btn) btn.textContent = '\u25b6 Spotify';
+    card.classList.remove('sig-staple-card--expanded');
+    card.style.removeProperty('width');
+    card.style.removeProperty('transform');
+  }});
+  grid.querySelectorAll('.sig-staple-card').forEach(function(c) {{
+    c.style.removeProperty('margin-top');
+  }});
+  var cards = Array.from(grid.querySelectorAll('.sig-staple-card'));
+  var nCols = Math.max(1, Math.floor((grid.offsetWidth + GAP) / (CARD_MIN_W + GAP)));
+  var cols = [];
+  for (var i = 0; i < nCols; i++) {{
+    var col = document.createElement('div');
+    col.className = 'staple-col';
+    cols.push(col);
+  }}
+  cards.forEach(function(card, i) {{ cols[i % nCols].appendChild(card); }});
+  grid.innerHTML = '';
+  cols.forEach(function(col) {{ grid.appendChild(col); }});
+}}
+
+/* ── Genre breakdown: toggle track panel ── */
+function toggleGenreTracks(row) {{
+  var panel = row.nextElementSibling;
+  if (!panel || !panel.classList.contains('genre-tracks-panel')) return;
+  if (panel.hidden) {{
+    panel.hidden = false;
+    row.classList.add('genre-bar-row--open');
+    var grid = panel.querySelector('.genre-tracks-grid');
+    if (grid) buildGenreColumns(grid);
+  }} else {{
+    panel.hidden = true;
+    row.classList.remove('genre-bar-row--open');
+  }}
+}}
+
+/* Rebuild columns for all open genre panels on resize */
+(function() {{
+  var genreResizeTimer;
+  window.addEventListener('resize', function() {{
+    clearTimeout(genreResizeTimer);
+    genreResizeTimer = setTimeout(function() {{
+      document.querySelectorAll('.genre-tracks-panel:not([hidden]) .genre-tracks-grid').forEach(function(grid) {{
+        buildGenreColumns(grid);
+      }});
+    }}, 150);
+  }});
+}})();
+
+/* ── DJ Staples: column masonry layout ── */
+(function () {{
+  var CARD_MIN_W = 200;
+  var GAP = 8;
+  var staplesGrid = document.getElementById('staplesGrid');
+  if (!staplesGrid) return;
+
+  function getNumCols() {{
+    return Math.max(1, Math.floor((staplesGrid.offsetWidth + GAP) / (CARD_MIN_W + GAP)));
+  }}
+
+  function closeOpenSpotify() {{
+    staplesGrid.querySelectorAll('.sig-staple-card').forEach(function(card) {{
+      card.style.removeProperty('margin-top');
+    }});
+    staplesGrid.querySelectorAll('.sig-staple-card--expanded').forEach(function(card) {{
+      var embed = card.querySelector('.staple-spotify-embed');
+      if (embed) embed.remove();
+      var btn = card.querySelector('.btn-staple-spotify');
+      if (btn) btn.textContent = '\u25b6 Spotify';
+      card.classList.remove('sig-staple-card--expanded');
+      card.style.removeProperty('width');
+      card.style.removeProperty('transform');
+    }});
+  }}
+
+  function buildStapleColumns() {{
+    closeOpenSpotify();
+    var cards = Array.from(staplesGrid.querySelectorAll('.sig-staple-card'));
+    var nCols = getNumCols();
+    var cols = [];
+    for (var i = 0; i < nCols; i++) {{
+      var col = document.createElement('div');
+      col.className = 'staple-col';
+      cols.push(col);
+    }}
+    cards.forEach(function(card, i) {{ cols[i % nCols].appendChild(card); }});
+    staplesGrid.innerHTML = '';
+    cols.forEach(function(col) {{ staplesGrid.appendChild(col); }});
+  }}
+
+  buildStapleColumns();
+  filterStaples(3);
+
+  var resizeTimer;
+  window.addEventListener('resize', function() {{
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(buildStapleColumns, 150);
   }});
 }})();
 </script>
