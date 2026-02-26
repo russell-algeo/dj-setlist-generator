@@ -7,6 +7,7 @@ DJ sets by a given artist, returning structured URLs for processing.
 import json
 import re
 import subprocess
+from collections import defaultdict
 from dataclasses import dataclass, asdict
 from typing import Optional
 from config import Config
@@ -81,6 +82,8 @@ class DjSetDiscoverer:
         sets = _filter_and_map(all_results, self._artist_name)
         print(f"  After filtering: {len(sets)} DJ sets")
 
+        sets = _deduplicate_near_duplicates(sets, self._artist_name)
+
         if not sets:
             print("  No DJ sets found matching criteria.")
             return []
@@ -135,6 +138,162 @@ _CHANNELS = [
     "themuddshow", "Dimensions Festival", "fabric",
     "XLR8R", "Rinse FM", "Robot Heart", "MEOKO", "Desert Hearts",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Near-duplicate deduplication helpers
+# ---------------------------------------------------------------------------
+
+_DEDUP_DURATION_WINDOW_MINUTES = 5
+_DEDUP_JACCARD_THRESHOLD = 0.25
+_ORDINAL_PREFIX_WORDS = {
+    "episode", "vol", "volume", "part", "pt", "installment", "chapter",
+    "no", "nr", "number", "edition", "ed", "ep",
+}
+_DEDUP_STOPWORDS = {
+    "the", "a", "an", "and", "or", "of", "in", "at", "on", "for",
+    "to", "by", "with", "from",
+}
+
+
+def _tokenize_title(title: str, artist_name: str) -> set[str]:
+    """Tokenize title, removing artist name tokens and common stopwords."""
+    artist_tokens = set(_normalize(artist_name).split())
+    return set(_normalize(title).split()) - artist_tokens - _DEDUP_STOPWORDS
+
+
+def _jaccard(a: set, b: set) -> float:
+    """Jaccard similarity between two sets."""
+    union = len(a | b)
+    return len(a & b) / union if union else 0.0
+
+
+def _extract_title_years(title: str) -> set[int]:
+    """Extract 4-digit years (19xx or 20xx) explicitly present in a title."""
+    return {int(m.group()) for m in re.finditer(r'\b(19|20)\d{2}\b', title)}
+
+
+def _extract_episode_numbers(title: str) -> set[int]:
+    """Extract numbers immediately following ordinal-prefix words.
+
+    For example: "Episode 12" → {12}, "Vol 3" → {3}, "Radio 1" → {} (radio
+    is not an ordinal prefix).
+    """
+    tokens = _normalize(title).split()
+    nums: set[int] = set()
+    for i, tok in enumerate(tokens):
+        if tok in _ORDINAL_PREFIX_WORDS and i + 1 < len(tokens):
+            candidate = tokens[i + 1]
+            if candidate.isdigit():
+                nums.add(int(candidate))
+    return nums
+
+
+def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, artist_name: str) -> bool:
+    """Return True if a and b are near-duplicates (same set, differently titled).
+
+    Four rules, applied in order:
+      1. Duration window: both must have duration data and be within 5 minutes.
+      2. Year conflict: if both titles contain 4-digit years and those years
+         don't overlap, they are different editions → not duplicates.
+      3. Episode number conflict: if both titles have a number immediately after
+         an ordinal-prefix word (e.g. "episode 12") and those numbers differ,
+         they are different episodes → not duplicates.
+      4. Jaccard title similarity: after removing artist tokens and stopwords,
+         similarity must be >= 0.25 to be considered a duplicate.
+    """
+    # Rule 1: duration required and within window
+    if a.duration_minutes is None or b.duration_minutes is None:
+        return False
+    if abs(a.duration_minutes - b.duration_minutes) > _DEDUP_DURATION_WINDOW_MINUTES:
+        return False
+
+    # Rule 2: year conflict (e.g. Essential Mix 2019 vs Essential Mix 2020)
+    years_a = _extract_title_years(a.title)
+    years_b = _extract_title_years(b.title)
+    if years_a and years_b and not (years_a & years_b):
+        return False
+
+    # Rule 3: episode number conflict (e.g. installment 1 vs installment 12)
+    ep_a = _extract_episode_numbers(a.title)
+    ep_b = _extract_episode_numbers(b.title)
+    if ep_a and ep_b and ep_a != ep_b:
+        return False
+
+    # Rule 4: Jaccard similarity on cleaned title tokens
+    tokens_a = _tokenize_title(a.title, artist_name)
+    tokens_b = _tokenize_title(b.title, artist_name)
+    return _jaccard(tokens_a, tokens_b) >= _DEDUP_JACCARD_THRESHOLD
+
+
+def _deduplicate_near_duplicates(
+    sets: list[DiscoveredSet], artist_name: str
+) -> list[DiscoveredSet]:
+    """Remove near-duplicate sets, preferring SoundCloud over YouTube.
+
+    Uses Union-Find to cluster all sets that are pairwise near-duplicates
+    (handles transitive chains: A~B, B~C → all three merge). From each
+    cluster, keeps the SoundCloud entry if one exists, otherwise the first
+    by discovery order.
+    """
+    n = len(sets)
+    if n < 2:
+        return sets
+
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]  # path-halving compression
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        parent[find(x)] = find(y)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _are_near_duplicates(sets[i], sets[j], artist_name):
+                union(i, j)
+
+    clusters: dict[int, list[int]] = defaultdict(list)
+    for i in range(n):
+        clusters[find(i)].append(i)
+
+    winners: list[DiscoveredSet] = []
+    removed_count = 0
+    seen_roots: set[int] = set()
+
+    for i in range(n):
+        root = find(i)
+        if root in seen_roots:
+            continue
+        seen_roots.add(root)
+
+        members = clusters[root]
+        if len(members) == 1:
+            winners.append(sets[members[0]])
+            continue
+
+        # Prefer SoundCloud; otherwise keep first by original order
+        sc_members = [idx for idx in members if sets[idx].platform == "soundcloud"]
+        winner_idx = sc_members[0] if sc_members else members[0]
+        winner = sets[winner_idx]
+        winners.append(winner)
+
+        removed_count += len(members) - 1
+        for idx in members:
+            if idx != winner_idx:
+                dropped = sets[idx]
+                plat = dropped.platform.upper()[:2]
+                print(f"  [dedup] Dropped [{plat}] '{dropped.title}'")
+        w_plat = winner.platform.upper()[:2]
+        print(f"  [dedup] Kept    [{w_plat}] '{winner.title}' (cluster of {len(members)})")
+
+    if removed_count:
+        print(f"  Near-duplicate dedup removed {removed_count} set(s) → {len(winners)} unique")
+
+    return winners
 
 
 def _build_search_queries(artist_name: str) -> list[str]:
