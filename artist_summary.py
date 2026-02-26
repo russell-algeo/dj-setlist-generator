@@ -141,21 +141,25 @@ class ArtistSummarizer:
             })
 
             set_title = mix_info.get("title", "Unknown")
-            for track in tracks:
+            for pos, track in enumerate(tracks, 1):
                 if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
                     start_fmt = track.get("start_time_formatted", "")
                     end_fmt   = track.get("end_time_formatted") or ""
                     time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
                     all_tracks.append({
-                        "artist":          track["artist"],
-                        "title":           track["title"],
-                        "spotify_url":     track.get("spotify_url"),
-                        "from_set":        set_title,
-                        "time_range":      time_range,
-                        "source_deep_link": track.get("source_deep_link"),
-                        "set_html_rel":    set_html_rel,
-                        "confidence":      track.get("confidence", "UNCERTAIN"),
-                        "genres":          (track.get("discogs_styles") or []) + (track.get("discogs_genres") or []) + (track.get("spotify_genres") or []),
+                        "artist":            track["artist"],
+                        "title":             track["title"],
+                        "spotify_url":       track.get("spotify_url"),
+                        "spotify_album_art": track.get("spotify_album_art"),
+                        "from_set":          set_title,
+                        "time_range":        time_range,
+                        "source_deep_link":  track.get("source_deep_link"),
+                        "set_html_rel":      set_html_rel,
+                        "confidence":        track.get("confidence", "UNCERTAIN"),
+                        "genres":            ((track.get("discogs_styles") or []) + (track.get("spotify_genres") or [])) or (track.get("discogs_genres") or []),
+                        "track_position":    pos,
+                        "discogs_label":     track.get("discogs_label"),
+                        "discogs_label_url": track.get("discogs_label_url"),
                     })
 
         # Include manually-migrated sets that weren't part of this discovery run.
@@ -253,21 +257,25 @@ class ArtistSummarizer:
             })
 
             set_title = mix_info.get("title", set_dir.name)
-            for track in tracks:
+            for pos, track in enumerate(tracks, 1):
                 if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
                     start_fmt = track.get("start_time_formatted", "")
                     end_fmt   = track.get("end_time_formatted") or ""
                     time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
                     all_tracks.append({
-                        "artist":          track["artist"],
-                        "title":           track["title"],
-                        "spotify_url":     track.get("spotify_url"),
-                        "from_set":        set_title,
-                        "time_range":      time_range,
-                        "source_deep_link": track.get("source_deep_link"),
-                        "set_html_rel":    set_html_rel,
-                        "confidence":      track.get("confidence", "UNCERTAIN"),
-                        "genres":          (track.get("discogs_styles") or []) + (track.get("discogs_genres") or []) + (track.get("spotify_genres") or []),
+                        "artist":            track["artist"],
+                        "title":             track["title"],
+                        "spotify_url":       track.get("spotify_url"),
+                        "spotify_album_art": track.get("spotify_album_art"),
+                        "from_set":          set_title,
+                        "time_range":        time_range,
+                        "source_deep_link":  track.get("source_deep_link"),
+                        "set_html_rel":      set_html_rel,
+                        "confidence":        track.get("confidence", "UNCERTAIN"),
+                        "genres":            ((track.get("discogs_styles") or []) + (track.get("spotify_genres") or [])) or (track.get("discogs_genres") or []),
+                        "track_position":    pos,
+                        "discogs_label":     track.get("discogs_label"),
+                        "discogs_label_url": track.get("discogs_label_url"),
                     })
 
         track_counter = Counter()
@@ -278,22 +286,35 @@ class ArtistSummarizer:
             track_counter[key] += 1
             if key not in track_info:
                 track_info[key] = {
-                    "artist":      t["artist"],
-                    "title":       t["title"],
-                    "spotify_url": t.get("spotify_url"),
-                    "appearances": [],
-                    "genres":      [],
+                    "artist":            t["artist"],
+                    "title":             t["title"],
+                    "spotify_url":       t.get("spotify_url"),
+                    "spotify_album_art": t.get("spotify_album_art"),
+                    "appearances":       [],
+                    "genres":            [],
+                    "discogs_label":     None,
+                    "discogs_label_url": None,
                 }
                 _genre_counters[key] = Counter()
+            # Take first non-None label/art values encountered
+            if not track_info[key]["discogs_label"] and t.get("discogs_label"):
+                track_info[key]["discogs_label"]     = t["discogs_label"]
+                track_info[key]["discogs_label_url"] = t.get("discogs_label_url")
+            if not track_info[key]["spotify_album_art"] and t.get("spotify_album_art"):
+                track_info[key]["spotify_album_art"] = t["spotify_album_art"]
             track_info[key]["appearances"].append({
-                "set_title":       t["from_set"],
-                "time_range":      t.get("time_range", ""),
+                "set_title":        t["from_set"],
+                "time_range":       t.get("time_range", ""),
                 "source_deep_link": t.get("source_deep_link"),
-                "set_html_rel":    t.get("set_html_rel"),
-                "confidence":      t.get("confidence", "UNCERTAIN"),
+                "set_html_rel":     t.get("set_html_rel"),
+                "confidence":       t.get("confidence", "UNCERTAIN"),
+                "track_position":   t.get("track_position"),
             })
             for genre in t.get("genres", []):
-                _genre_counters[key][genre] += 1
+                normalized = genre.title()
+                if normalized == "House":
+                    continue
+                _genre_counters[key][normalized] += 1
 
         # Materialise genre lists (most-common first) from per-track counters
         for key in track_info:

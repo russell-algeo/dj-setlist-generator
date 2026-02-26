@@ -50,6 +50,10 @@ def _needs_enrichment(track: dict) -> bool:
     if has_artist_title and not track.get("discogs_genres"):
         return True
 
+    # Check for missing Discogs label URL (added after initial enrichment)
+    if has_artist_title and track.get("discogs_label") and not track.get("discogs_label_url"):
+        return True
+
     return False
 
 
@@ -226,8 +230,12 @@ def _enrich_json(json_path: Path, enricher: MetadataEnricher, dry_run: bool) -> 
                 t["danceability"] = round(float(feat["danceability"]), 3)
                 changed = True
 
-        # Discogs genres, styles, label, URL
-        if discogs_enabled and not t.get("discogs_genres"):
+        # Discogs genres, styles, label, URL, label URL
+        needs_discogs = discogs_enabled and (
+            not t.get("discogs_genres")
+            or (t.get("discogs_label") and not t.get("discogs_label_url"))
+        )
+        if needs_discogs:
             artist = t.get("artist", "")
             title = t.get("title", "")
             if artist and title != "Unknown Track":
@@ -244,6 +252,9 @@ def _enrich_json(json_path: Path, enricher: MetadataEnricher, dry_run: bool) -> 
                         changed = True
                     if discogs_data.get("label") and not t.get("discogs_label"):
                         t["discogs_label"] = discogs_data["label"]
+                        changed = True
+                    if discogs_data.get("label_url") and not t.get("discogs_label_url"):
+                        t["discogs_label_url"] = discogs_data["label_url"]
                         changed = True
 
         # Migrate legacy field names (spotify_bpm/spotify_key → bpm/key)

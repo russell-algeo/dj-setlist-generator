@@ -111,6 +111,7 @@ class MetadataEnricher:
             'discogs_genres': [],
             'discogs_styles': [],
             'discogs_label': None,
+            'discogs_label_url': None,
         }
 
         # Skip unknown tracks
@@ -139,6 +140,7 @@ class MetadataEnricher:
                 enriched['discogs_genres'] = discogs_data.get('genres', [])
                 enriched['discogs_styles'] = discogs_data.get('styles', [])
                 enriched['discogs_label'] = discogs_data.get('label')
+                enriched['discogs_label_url'] = discogs_data.get('label_url')
 
         return enriched
 
@@ -421,11 +423,47 @@ class MetadataEnricher:
             labels = result.get('label', [])
             label = labels[0] if labels else None
 
+            # Fetch label ID for a direct Discogs label profile URL.
+            # Strategy 1: fetch the full release via resource_url — labels array contains IDs.
+            # Strategy 2 (fallback): search by label name when the release endpoint fails or
+            #   returns no labels (e.g. some compilations omit the labels array).
+            label_url = None
+            resource_url = result.get('resource_url', '')
+            if resource_url and label:
+                try:
+                    rel_resp = _discogs_session.get(resource_url, headers=headers)
+                    rel_resp.raise_for_status()
+                    rel_data = rel_resp.json()
+                    rel_labels = rel_data.get('labels', [])
+                    if rel_labels:
+                        label_id = rel_labels[0].get('id')
+                        if label_id:
+                            label_url = f"https://www.discogs.com/label/{label_id}"
+                except Exception as e:
+                    print(f"    [Discogs] Release fetch error (label URL): {e}")
+
+            # Fallback: search for the label by name to get its ID
+            if label and not label_url:
+                try:
+                    lb_resp = _discogs_session.get(
+                        url, headers=headers,
+                        params={'q': label, 'type': 'label', 'per_page': 1},
+                    )
+                    lb_resp.raise_for_status()
+                    lb_results = lb_resp.json().get('results', [])
+                    if lb_results:
+                        label_id = lb_results[0].get('id')
+                        if label_id:
+                            label_url = f"https://www.discogs.com/label/{label_id}"
+                except Exception as e:
+                    print(f"    [Discogs] Label search error: {e}")
+
             return {
                 'url': discogs_url,
                 'genres': genres[:3],
                 'styles': styles[:5],
                 'label': label,
+                'label_url': label_url,
             }
         except Exception as e:
             print(f"    [Discogs] Search error: {e}")

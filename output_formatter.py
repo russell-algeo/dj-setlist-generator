@@ -113,6 +113,7 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
         'discogs_genres': meta.get('discogs_genres', []),
         'discogs_styles': meta.get('discogs_styles', []),
         'discogs_label': meta.get('discogs_label'),
+        'discogs_label_url': meta.get('discogs_label_url'),
     }
 
 

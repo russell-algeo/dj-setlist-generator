@@ -68,6 +68,7 @@ def _json_to_enriched_tracks(tracks_data: list[dict]) -> list[dict]:
                 "discogs_genres": t.get("discogs_genres", []),
                 "discogs_styles": t.get("discogs_styles", []),
                 "discogs_label": t.get("discogs_label"),
+                "discogs_label_url": t.get("discogs_label_url"),
             },
         })
     return enriched
