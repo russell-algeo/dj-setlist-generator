@@ -272,7 +272,7 @@ function skipToPrevTrack() {
 {track_times_js}
 
 var tag = document.createElement('script');
-tag.src = "https://www.youtube.com/iframe_api";
+tag.src = "https://www.youtube-nocookie.com/iframe_api";
 var firstScriptTag = document.getElementsByTagName('script')[0];
 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
@@ -280,6 +280,7 @@ var player;
 var ytEmbedFailed = false;
 var ytPlayerReady = false;
 var ytHasPlayed = false;
+var ytOrigin = (window.location.protocol === 'file:') ? undefined : window.location.origin;
 
 function showYtFallback() {{
   ytEmbedFailed = true;
@@ -287,6 +288,7 @@ function showYtFallback() {{
   var wrap = document.getElementById('playerWrap');
   wrap.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px;color:#aaa;text-align:center;">'
     + '<div style="font-size:18px;margin-bottom:12px;">Video cannot be embedded</div>'
+    + '<div style="font-size:13px;margin-bottom:14px;color:#666;">The uploader may have disabled embedding for this video.</div>'
     + '<a href="https://www.youtube.com/watch?v={embed_id}" target="_blank" rel="noopener" '
     + 'style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:#ff0000;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">'
     + '\u25B6 Watch on YouTube</a>'
@@ -300,8 +302,9 @@ function rebuildYtPlayer() {{
   var wrap = document.getElementById('playerWrap');
   wrap.innerHTML = '<div id="ytPlayer"></div>';
   player = new YT.Player('ytPlayer', {{
+    host: 'https://www.youtube-nocookie.com',
     videoId: '{embed_id}',
-    playerVars: {{ autoplay: 1, modestbranding: 1, rel: 0, start: Math.floor(window._ytPendingSeek || 0) }},
+    playerVars: {{ autoplay: 1, modestbranding: 1, rel: 0, origin: ytOrigin, start: Math.floor(window._ytPendingSeek || 0) }},
     events: {{
       onReady: function() {{
         ytPlayerReady = true;
@@ -338,8 +341,9 @@ function onYtError(e) {{
 
 function onYouTubeIframeAPIReady() {{
   player = new YT.Player('ytPlayer', {{
+    host: 'https://www.youtube-nocookie.com',
     videoId: '{embed_id}',
-    playerVars: {{ autoplay: 0, modestbranding: 1, rel: 0 }},
+    playerVars: {{ autoplay: 0, modestbranding: 1, rel: 0, origin: ytOrigin }},
     events: {{
       onReady: function() {{
         ytPlayerReady = true;
