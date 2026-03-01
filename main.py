@@ -22,7 +22,7 @@ class SetlistGenerator:
         self.enricher = MetadataEnricher()
 
     async def generate(self, url: str, output_name: str = None, resume: bool = True,
-                       artist_name: str = None):
+                       artist_name: str = None, artist_playlist_id: str = None):
         """
         Generate setlist from URL.
 
@@ -159,7 +159,10 @@ class SetlistGenerator:
             # Spotify Playlist Creation
             if Config.ENABLE_SPOTIFY_PLAYLISTS:
                 from spotify_playlist_creator import SpotifyPlaylistCreator
-                SpotifyPlaylistCreator.create_with_confirmation(enriched_tracks, mix_info, final_output_name)
+                SpotifyPlaylistCreator.create_with_confirmation(
+                    enriched_tracks, mix_info, final_output_name,
+                    artist_playlist_id=artist_playlist_id
+                )
 
             # Mark as fully completed (including playlist creation)
             checkpoint_manager.save_recognition_checkpoint(recognitions, stage='completed')
@@ -188,13 +191,15 @@ def _is_url(arg: str) -> bool:
     return arg.startswith('http://') or arg.startswith('https://')
 
 
-async def process_urls(urls: list[str], resume: bool, artist_name: str = None):
+async def process_urls(urls: list[str], resume: bool, artist_name: str = None,
+                       artist_playlist_id: str = None):
     """Process a list of URLs through the setlist generation pipeline.
 
     Args:
         urls: List of YouTube/SoundCloud URLs.
         resume: Whether to resume from checkpoints.
         artist_name: Optional artist name (artist discovery mode).
+        artist_playlist_id: Optional Spotify playlist ID for the artist-level playlist.
 
     Returns:
         List of result dicts with keys: url, status, mix_name, output_dir
@@ -211,7 +216,8 @@ async def process_urls(urls: list[str], resume: bool, artist_name: str = None):
 
         try:
             mix_name, output_dir, skipped = await generator.generate(
-                url, output_name=None, resume=resume, artist_name=artist_name
+                url, output_name=None, resume=resume, artist_name=artist_name,
+                artist_playlist_id=artist_playlist_id
             )
             results.append({"url": url, "status": "SUCCESS", "mix_name": mix_name, "output_dir": output_dir})
             if not skipped:
@@ -256,11 +262,22 @@ async def process_artist(artist_name: str, resume: bool):
         artist_mgr.cleanup_discovery_cache()
         return
 
-    # Step 2: Process each discovered set
-    urls = [s.url for s in sets]
-    results = await process_urls(urls, resume=resume, artist_name=artist_name)
+    # Step 2: Find or create artist-level Spotify playlist
+    artist_playlist_id = None
+    if Config.ENABLE_SPOTIFY_PLAYLISTS:
+        try:
+            from spotify_playlist_creator import SpotifyPlaylistCreator
+            creator = SpotifyPlaylistCreator()
+            artist_playlist_id = creator.find_or_create_artist_playlist(artist_name)
+        except Exception as e:
+            print(f"  (artist playlist setup skipped: {e})")
 
-    # Step 3: Generate artist summary
+    # Step 3: Process each discovered set
+    urls = [s.url for s in sets]
+    results = await process_urls(urls, resume=resume, artist_name=artist_name,
+                                 artist_playlist_id=artist_playlist_id)
+
+    # Step 4: Generate artist summary
     print("\n" + "█" * 70)
     print(f"█ GENERATING ARTIST SUMMARY")
     print("█" * 70 + "\n")
@@ -270,7 +287,6 @@ async def process_artist(artist_name: str, resume: bool):
     # Regenerate master summary (output/index.html) after each artist run
     try:
         from master_summary import generate_master_summary
-        from config import Config
         generate_master_summary(Config.OUTPUT_DIR)
     except Exception as e:
         print(f"  (master summary skipped: {e})")
@@ -308,12 +324,94 @@ async def process_artist(artist_name: str, resume: bool):
     Notifier.notify_artist_complete(artist_name, success_count, len(results))
 
 
+async def process_curated_artist(artist_name: str, urls: list[str], resume: bool):
+    """Process hand-picked URLs filed under an artist.
+
+    Like process_artist() but skips discovery — uses the provided URLs directly.
+    Outputs are nested under the artist directory, and the artist summary is
+    regenerated to include all sets (old + new).
+
+    Args:
+        artist_name: Name of the DJ/artist.
+        urls: List of YouTube/SoundCloud URLs to process.
+        resume: Whether to resume from checkpoints.
+    """
+    from artist_summary import ArtistSummarizer
+
+    print("█" * 70)
+    print(f"█ CURATED ARTIST MODE")
+    print("█" * 70)
+    print(f"█ Artist: {artist_name}")
+    print(f"█ URLs:   {len(urls)} hand-picked set(s)")
+    print("█" * 70 + "\n")
+
+    artist_mgr = ArtistManager(artist_name)
+    summarizer = ArtistSummarizer(artist_manager=artist_mgr)
+
+    # Find or create artist-level Spotify playlist
+    artist_playlist_id = None
+    if Config.ENABLE_SPOTIFY_PLAYLISTS:
+        try:
+            from spotify_playlist_creator import SpotifyPlaylistCreator
+            creator = SpotifyPlaylistCreator()
+            artist_playlist_id = creator.find_or_create_artist_playlist(artist_name)
+        except Exception as e:
+            print(f"  (artist playlist setup skipped: {e})")
+
+    # Process the curated URLs
+    results = await process_urls(urls, resume=resume, artist_name=artist_name,
+                                 artist_playlist_id=artist_playlist_id)
+
+    # Regenerate artist summary (includes all sets — old + new)
+    print("\n" + "█" * 70)
+    print(f"█ GENERATING ARTIST SUMMARY")
+    print("█" * 70 + "\n")
+
+    summarizer.generate(results)
+
+    # Regenerate master summary
+    try:
+        from master_summary import generate_master_summary
+        generate_master_summary(Config.OUTPUT_DIR)
+    except Exception as e:
+        print(f"  (master summary skipped: {e})")
+
+    # Print final summary
+    print("\n" + "=" * 70)
+    print(f"COMPLETE: {artist_name.upper()}")
+    print("=" * 70)
+
+    success_count = sum(1 for r in results if r["status"] == "SUCCESS")
+    fail_count = len(results) - success_count
+
+    for r in results:
+        icon = "✅" if r["status"] == "SUCCESS" else "❌"
+        name = r["mix_name"] or r["url"][:60]
+        print(f"  {icon} {name}")
+        if r["status"] == "SUCCESS" and r.get("output_dir"):
+            html_files = list(Path(r["output_dir"]).glob("*.html"))
+            if html_files:
+                print(f"     file://{html_files[0].resolve()}")
+        if r["status"] != "SUCCESS":
+            print(f"     {r['status']}")
+
+    print(f"\nResults: {success_count} successful, {fail_count} failed out of {len(results)} sets")
+    print(f"Output directory: {artist_mgr.output_dir}")
+    print(f"Artist summary: {artist_mgr.output_dir / 'artist_summary.md'}")
+    artist_html = artist_mgr.output_dir / 'artist_summary.html'
+    if artist_html.exists():
+        print(f"Artist summary HTML: file://{artist_html.resolve()}")
+
+    Notifier.notify_artist_complete(artist_name, success_count, len(results))
+
+
 async def main():
     """CLI entry point."""
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python main.py \"DJ Name\" [\"DJ Name 2\"] ...  # Discover & process all sets")
-        print("  python main.py \"URL\" [URL2] ...             # Process specific URLs")
+        print("  python main.py \"DJ Name\" [\"DJ Name 2\"] ...            # Discover & process all sets")
+        print("  python main.py \"URL\" [URL2] ...                        # Process specific URLs")
+        print("  python main.py --artist \"Name\" --sets \"URL\" [URL2] ... # Hand-picked URLs for an artist")
         print("")
         print("Options:")
         print("  --no-resume       Ignore checkpoints, start fresh")
@@ -324,12 +422,15 @@ async def main():
         print("  python main.py \"Adam Rose\" \"Spirit Catcher\"")
         print("  python main.py https://www.youtube.com/watch?v=xxxxx")
         print("  python main.py url1 url2 url3 --no-resume")
+        print("  python main.py --artist \"Dyed Soundorom\" --sets url1 url2")
         sys.exit(1)
 
     # Parse arguments
     urls = []
     artists = []
     resume = True
+    curated_artist = None
+    curated_urls = []
 
     args = sys.argv[1:]
     i = 0
@@ -337,21 +438,44 @@ async def main():
         arg = args[i]
         if arg == '--no-resume':
             resume = False
+        elif arg == '--artist':
+            i += 1
+            if i >= len(args):
+                print("Error: --artist requires an artist name argument.")
+                sys.exit(1)
+            curated_artist = args[i]
+        elif arg == '--sets':
+            # Collect all remaining non-flag args as URLs
+            i += 1
+            while i < len(args) and args[i] != '--no-resume':
+                curated_urls.append(args[i])
+                i += 1
+            continue  # skip the i += 1 at the bottom
         elif _is_url(arg):
             urls.append(arg)
         else:
             artists.append(arg)
         i += 1
 
+    # Validate curated mode flags
+    if curated_artist and not curated_urls:
+        print("Error: --artist requires --sets with at least one URL.")
+        sys.exit(1)
+    if curated_urls and not curated_artist:
+        print("Error: --sets requires --artist to specify the artist name.")
+        sys.exit(1)
+    if (curated_artist or curated_urls) and (urls or artists):
+        print("Error: Cannot mix --artist/--sets with positional arguments.")
+        sys.exit(1)
+
     # Ensure base directories exist
     Config.ensure_directories()
 
-    # Determine mode: artist discovery vs direct URL processing
-    if urls and artists:
-        print("Error: Cannot mix URLs and artist names. Use one or the other.")
-        sys.exit(1)
+    if curated_artist:
+        # Curated artist mode: hand-picked URLs filed under an artist
+        await process_curated_artist(curated_artist, curated_urls, resume=resume)
 
-    if urls:
+    elif urls:
         # URL mode: existing behavior
         results = await process_urls(urls, resume=resume)
 
