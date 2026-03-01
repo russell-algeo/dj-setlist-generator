@@ -267,6 +267,14 @@ async def process_artist(artist_name: str, resume: bool):
 
     summarizer.generate(results)
 
+    # Regenerate master summary (output/index.html) after each artist run
+    try:
+        from master_summary import generate_master_summary
+        from config import Config
+        generate_master_summary(Config.OUTPUT_DIR)
+    except Exception as e:
+        print(f"  (master summary skipped: {e})")
+
     # Clean up discovery cache
     artist_mgr.cleanup_discovery_cache()
 

@@ -4,6 +4,7 @@ Usage:
     python backfill_html.py                   # regenerate ALL outputs
     python backfill_html.py "Jay Tripwire"    # regenerate one dir by name
     python backfill_html.py --dry-run         # show what would run, no writes
+    python backfill_html.py --master          # regenerate only output/index.html
 """
 
 import json
@@ -270,13 +271,39 @@ def main() -> None:
         default="output",
         help="Root output directory to scan (default: output/)",
     )
+    parser.add_argument(
+        "--master",
+        action="store_true",
+        help="Regenerate only the master summary (output/index.html)",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
+
+    if args.master:
+        if args.dry_run:
+            print(f"[dry-run] Would regenerate {output_dir}/index.html")
+        else:
+            from master_summary import generate_master_summary
+            result = generate_master_summary(output_dir)
+            if result:
+                print(f"\nMaster summary: file://{result.resolve()}")
+            else:
+                print("No artist data found — nothing written.")
+        print("\nDone.")
+        return
+
     if args.dry_run:
         print("DRY RUN — no files will be written\n")
 
     scan_and_regenerate(output_dir, target=args.target, dry_run=args.dry_run)
+
+    # After regenerating set/artist HTML, also update the master summary
+    if not args.dry_run:
+        print("\nRegenerating master summary...")
+        from master_summary import generate_master_summary
+        generate_master_summary(output_dir)
+
     print("\nDone.")
 
 
