@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DJ Set Setlist Generator - automatically generates setlists from DJ mixes on YouTube/SoundCloud using Shazam for track recognition. Outputs JSON and Markdown with Spotify/YouTube/Discogs links, and can create a Spotify playlist from the recognized tracks.
 
-Supports two modes:
+Supports three modes:
 - **URL mode**: Pass YouTube/SoundCloud URLs directly for processing
 - **Artist discovery mode**: Pass a DJ name and the tool uses yt-dlp to search YouTube and SoundCloud directly for all their recorded sets, then processes each one
+- **Curated artist mode**: Pass hand-picked URLs for a named artist using `--artist` + `--sets` flags. Useful for adding sets that discovery missed, or for obscure artists where search isn't effective. Outputs nest under the artist directory and the artist summary is regenerated.
 
 ## Commands
 
@@ -30,6 +31,12 @@ python main.py "https://www.youtube.com/watch?v=xxxxx" --no-resume
 
 # Multiple URLs without resume
 python main.py "url1" "url2" "url3" --no-resume
+
+# Curated artist mode - hand-picked URLs filed under an artist
+python main.py --artist "Dyed Soundorom" --sets "url1" "url2"
+
+# Curated artist mode without resume
+python main.py --artist "Dyed Soundorom" --sets "url1" "url2" --no-resume
 ```
 
 **Prerequisites**:
@@ -54,8 +61,15 @@ python main.py "url1" "url2" "url3" --no-resume
 6. **Spotify Playlist** (optional) - `spotify_playlist_creator.py` creates a Spotify playlist from tracks with Spotify URLs (prompts for confirmation unless `AUTO_CREATE_SPOTIFY_PLAYLIST=true`)
 7. **Notify** (optional) - `notifier.py` sends a push notification via ntfy.sh when a set completes (if `NTFY_TOPIC` is configured)
 
+**Curated Artist Mode** (when given `--artist` + `--sets`):
+1. **Skip discovery** - Uses the hand-picked URLs directly
+2. **Process** - Each URL goes through the standard pipeline, nested under the artist directory
+3. **Summarize** - `artist_summary.py` regenerates the aggregate analysis (includes old + new sets)
+
 **Utility scripts:**
 - `backfill_html.py` - Regenerate HTML files from existing JSON outputs (e.g. after HTML changes or for sets processed before HTML output was added). Accepts an optional artist name argument or `--dry-run`.
+- `backfill_enrichment.py` - Re-enrich existing JSON outputs with metadata from Spotify, ReccoBeats, and Discogs. Accepts an optional artist name argument or `--dry-run`.
+- `master_summary.py` - Generate `output/index.html`, a master summary page across all artists. Called automatically after each artist run.
 
 ### DJ Set Discovery (dj_set_discovery.py)
 Uses yt-dlp to search YouTube (`ytsearch`) and SoundCloud (`scsearch`) directly with multiple query strategies (generic searches, known DJ set channels like Boiler Room, HOR Berlin, Cercle, etc.). Results are filtered by duration (>= `MIN_SET_DURATION_MINUTES`) and title keywords to exclude non-sets. Results are cached to `checkpoints/<artist>/discovery.json` during processing and cleaned up after completion (controlled by `CLEANUP_CHECKPOINTS`).
@@ -97,11 +111,14 @@ All settings in `.env` file (see `config.py` for defaults):
 - `checkpoints/<mix_name>/` - Crash recovery state
 - `output/<mix_name>/` - Final JSON, Markdown, and HTML output
 
-**Artist mode** (`python main.py "DJ Name"`) - everything nested under artist:
+**Artist mode** (`python main.py "DJ Name"`) and **curated mode** (`--artist` + `--sets`) - everything nested under artist:
 - `assets/<artist_name>/<mix_name>/` - Downloaded audio (segment files are transient)
-- `checkpoints/<artist_name>/discovery.json` - Cached discovery results (cleaned up after processing)
+- `checkpoints/<artist_name>/discovery.json` - Cached discovery results (cleaned up after processing; discovery mode only)
 - `checkpoints/<artist_name>/<mix_name>/` - Per-set crash recovery state
 - `output/<artist_name>/artist_summary.md` - Aggregate analysis across all sets
 - `output/<artist_name>/artist_summary.json` - Machine-readable aggregate data
 - `output/<artist_name>/artist_summary.html` - Interactive HTML artist summary page
 - `output/<artist_name>/<mix_name>/` - Per-set JSON, Markdown, and HTML output
+
+**Master summary:**
+- `output/index.html` - Overview page across all artists (auto-generated after each artist/curated run)

@@ -7,6 +7,7 @@ Automatically generate setlists from DJ mixes on YouTube or SoundCloud, complete
 - Download audio from YouTube and SoundCloud
 - Automatic track recognition using Shazam
 - DJ artist discovery mode — pass a DJ name and auto-discover all their recorded sets
+- Curated artist mode — hand-pick URLs for a named artist (for sets discovery missed or obscure artists)
 - Multiple confidence levels (HIGH/MEDIUM/LOW) based on detection count and density
 - Handles unknown/unrecognized tracks
 - Spotify/YouTube/Discogs link enrichment (toggleable)
@@ -70,6 +71,13 @@ python main.py "Dyed Soundorom"
 ```bash
 python main.py "Artist One" "Artist Two"
 ```
+
+### Curated artist mode — hand-picked URLs for a named artist
+```bash
+python main.py --artist "Dyed Soundorom" --sets "url1" "url2"
+```
+
+Outputs nest under the artist directory (same as discovery mode). If the artist already has sets from a previous discovery run, the new sets are added and the artist summary is regenerated to include everything.
 
 ### Force restart (ignore checkpoints)
 ```bash
@@ -237,6 +245,22 @@ python backfill_html.py "Jay Tripwire"  # Regenerate one artist by name
 python backfill_html.py --dry-run       # Preview without writing
 ```
 
+### backfill_enrichment.py
+Re-enrich existing JSON outputs with metadata from Spotify, ReccoBeats, and Discogs (useful after adding new API credentials or when enrichment sources have been updated):
+
+```bash
+python backfill_enrichment.py                   # Re-enrich all outputs
+python backfill_enrichment.py "Jay Tripwire"    # Re-enrich one artist
+python backfill_enrichment.py --dry-run          # Preview without writing
+```
+
+### master_summary.py
+Generate a master summary page (`output/index.html`) across all artists. Called automatically after each artist/curated run, but can also be run manually:
+
+```bash
+python master_summary.py                # Generate output/index.html
+```
+
 ## File Structure
 
     setlist-generator/
@@ -257,8 +281,15 @@ python backfill_html.py --dry-run       # Preview without writing
     ├── spotify_playlist_creator.py # Create Spotify playlist from setlist
     ├── dj_set_discovery.py       # Discover DJ sets via yt-dlp search
     ├── artist_summary.py         # Generate artist-level summary across all sets
+    ├── master_summary.py         # Generate master index page across all artists
     ├── notifier.py               # Push notifications via ntfy.sh
     ├── backfill_html.py          # Regenerate HTML from existing JSON outputs
-    ├── assets/<mix_name>/        # Downloaded audio (segment files are transient)
-    ├── checkpoints/<mix_name>/   # Crash recovery checkpoints
-    └── output/<mix_name>/        # Generated setlists (JSON, Markdown, HTML)
+    ├── backfill_enrichment.py    # Re-enrich JSON outputs with metadata
+    ├── assets/                   # Downloaded audio (segment files are transient)
+    ├── checkpoints/              # Crash recovery checkpoints
+    └── output/                   # Generated setlists and summaries
+        ├── index.html            # Master summary across all artists
+        ├── <artist_name>/        # Artist-level directory (discovery/curated modes)
+        │   ├── artist_summary.*  # Aggregate analysis (md, json, html)
+        │   └── <mix_name>/       # Per-set output (json, md, html)
+        └── <mix_name>/           # Per-set output (URL mode, no artist)
