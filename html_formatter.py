@@ -6435,7 +6435,7 @@ def _render_master_artist_cards(artists: list) -> str:
         cards.append(
             f'<div class="master-artist-card" data-name="{name_esc}" onclick="artistCardClick(event,this)">'
             f'<span class="master-select-badge">\u2713</span>'
-            f'<a class="master-artist-name" href="{html_rel}">{name_esc}</a>'
+            f'<div><a class="master-artist-name" href="{html_rel}">{name_esc}</a></div>'
             f'<div class="master-artist-stats">'
             f'<span class="master-artist-stat"><strong>{sets}</strong> sets</span>'
             f'<span class="master-artist-stat"><strong>{unique:,}</strong> tracks</span>'

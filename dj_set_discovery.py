@@ -154,12 +154,80 @@ _DEDUP_STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "in", "at", "on", "for",
     "to", "by", "with", "from",
 }
+# Words too generic to distinguish between different events of the same type
+# (e.g. two different Boiler Room sets, two different promo mixes).
+_FORMAT_NOISE = {
+    "dj", "set", "live", "b2b", "mix", "boiler", "room",
+    "promo", "guest", "podcast", "recorded", "|", "@", "#", "&",
+}
+# Maps every month name variant to its integer (1–12) for normalised comparison.
+_MONTH_NAMES_TO_NUM: dict[str, int] = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
 
 
 def _tokenize_title(title: str, artist_name: str) -> set[str]:
     """Tokenize title, removing artist name tokens and common stopwords."""
     artist_tokens = set(_normalize(artist_name).split())
     return set(_normalize(title).split()) - artist_tokens - _DEDUP_STOPWORDS
+
+
+def _content_tokens(title: str, artist_name: str) -> set[str]:
+    """Tokenize title, also stripping format-noise words.
+
+    Used for the content-disjointness check: if both titles have non-empty,
+    fully disjoint content token sets they describe different events.
+    """
+    return _tokenize_title(title, artist_name) - _FORMAT_NOISE
+
+
+def _extract_title_months(title: str) -> set[int]:
+    """Extract months (1–12) from a title via name or numeric date pattern.
+
+    Handles named months ("January", "jan") and numeric date triplets produced
+    after normalisation ("29 03 2024", "09 20 2024", "01 01 2020"):
+      - A > 12 and 1 ≤ B ≤ 12  →  DD MM YYYY, month = B
+      - 1 ≤ A ≤ 12 and B > 12  →  MM DD YYYY, month = A
+      - both ≤ 12               →  ambiguous; add both as candidates
+    """
+    tokens = _normalize(title).split()
+    months: set[int] = set()
+
+    for tok in tokens:
+        if tok in _MONTH_NAMES_TO_NUM:
+            months.add(_MONTH_NAMES_TO_NUM[tok])
+
+    years = _extract_title_years(title)
+    for i in range(len(tokens) - 2):
+        a_s, b_s, c_s = tokens[i], tokens[i + 1], tokens[i + 2]
+        if not (a_s.isdigit() and b_s.isdigit() and c_s.isdigit()):
+            continue
+        if not re.match(r'(19|20)\d{2}$', c_s):
+            continue
+        a, b = int(a_s), int(b_s)
+        if a > 12 and 1 <= b <= 12:
+            months.add(b)
+        elif b > 12 and 1 <= a <= 12:
+            months.add(a)
+        else:
+            # Both ≤ 12: ambiguous format — add both candidates conservatively
+            if 1 <= a <= 12:
+                months.add(a)
+            if 1 <= b <= 12:
+                months.add(b)
+
+    return months
 
 
 def _jaccard(a: set, b: set) -> float:
@@ -192,15 +260,25 @@ def _extract_episode_numbers(title: str) -> set[int]:
 def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, artist_name: str) -> bool:
     """Return True if a and b are near-duplicates (same set, differently titled).
 
-    Four rules, applied in order:
+    Rules applied in order:
       1. Duration window: both must have duration data and be within 5 minutes.
       2. Year conflict: if both titles contain 4-digit years and those years
          don't overlap, they are different editions → not duplicates.
-      3. Episode number conflict: if both titles have a number immediately after
+      2.5. Month conflict: if both titles contain month names or numeric date
+         patterns (e.g. "29.03.2024") and the detected months don't overlap,
+         they are different sessions → not duplicates.
+      3. Episode number conflict: if either title has a number immediately after
          an ordinal-prefix word (e.g. "episode 12") and those numbers differ,
          they are different episodes → not duplicates.
+      3.5. Bare numeric series conflict: if the only tokens that differ between
+         the two titles are non-year integers that don't match (e.g. "CruiseCast
+         001" vs "CruiseCast 002"), they are different episodes → not duplicates.
+         Zero-padded and plain numbers compare equal (001 == 1).
       4. Jaccard title similarity: after removing artist tokens and stopwords,
          similarity must be >= 0.25 to be considered a duplicate.
+      5. Content token disjointness: after also stripping format-noise words
+         (including "podcast"), if both titles have non-empty, fully disjoint
+         token sets they describe different events → not duplicates.
     """
     # Rule 1: duration required and within window
     if a.duration_minutes is None or b.duration_minutes is None:
@@ -214,16 +292,51 @@ def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, artist_name: str) -
     if years_a and years_b and not (years_a & years_b):
         return False
 
-    # Rule 3: episode number conflict (e.g. installment 1 vs installment 12)
-    ep_a = _extract_episode_numbers(a.title)
-    ep_b = _extract_episode_numbers(b.title)
-    if ep_a and ep_b and ep_a != ep_b:
+    # Rule 2.5: month conflict (e.g. HÖR January session vs HÖR November session)
+    months_a = _extract_title_months(a.title)
+    months_b = _extract_title_months(b.title)
+    if months_a and months_b and not (months_a & months_b):
         return False
 
-    # Rule 4: Jaccard similarity on cleaned title tokens
+    # Rule 3: episode number conflict — fires when either side has an episode
+    # number and they differ (e.g. "Tribute Mix" vs "Tribute Mix Pt 2")
+    ep_a = _extract_episode_numbers(a.title)
+    ep_b = _extract_episode_numbers(b.title)
+    if (ep_a or ep_b) and ep_a != ep_b:
+        return False
+
+    # Rule 3.5: bare numeric series conflict — fires when the ONLY tokens that
+    # differ between two titles are non-year integers that don't match, e.g.
+    # "CruiseCast 001" vs "CruiseCast 002" or "DIM 324" vs "DIM 325".
+    # Zero-padded and plain numbers compare equal after int() conversion.
     tokens_a = _tokenize_title(a.title, artist_name)
     tokens_b = _tokenize_title(b.title, artist_name)
-    return _jaccard(tokens_a, tokens_b) >= _DEDUP_JACCARD_THRESHOLD
+    diff_a = tokens_a - tokens_b
+    diff_b = tokens_b - tokens_a
+    if diff_a and diff_b:
+        all_years = _extract_title_years(a.title) | _extract_title_years(b.title)
+        if all(tok.isdigit() and int(tok) not in all_years for tok in diff_a | diff_b):
+            if {int(t) for t in diff_a} != {int(t) for t in diff_b}:
+                return False
+
+    # Rule 4: Jaccard similarity on cleaned title tokens
+    if _jaccard(tokens_a, tokens_b) < _DEDUP_JACCARD_THRESHOLD:
+        return False
+
+    # Rule 5: content token disjointness — if both titles still have non-empty,
+    # fully disjoint tokens after stripping format noise, they describe different
+    # events that merely share a common format (e.g. two different Boiler Room
+    # sets, two different promo mixes).
+    # If either side is empty, there's not enough meaningful signal to confirm
+    # a duplicate — default to keeping both.
+    content_a = _content_tokens(a.title, artist_name)
+    content_b = _content_tokens(b.title, artist_name)
+    if not content_a or not content_b:
+        return False
+    if not (content_a & content_b):
+        return False
+
+    return True
 
 
 def _deduplicate_near_duplicates(
@@ -231,10 +344,10 @@ def _deduplicate_near_duplicates(
 ) -> list[DiscoveredSet]:
     """Remove near-duplicate sets, preferring SoundCloud over YouTube.
 
-    Uses Union-Find to cluster all sets that are pairwise near-duplicates
-    (handles transitive chains: A~B, B~C → all three merge). From each
-    cluster, keeps the SoundCloud entry if one exists, otherwise the first
-    by discovery order.
+    Uses Union-Find to find candidate clusters, then applies a clique check:
+    each non-winner member must directly match the winner to be dropped.
+    Members that only match transitively (A~B, B~C but not A~C) are evicted
+    back to singleton status, preventing false positives from transitive chains.
     """
     n = len(sets)
     if n < 2:
@@ -280,15 +393,26 @@ def _deduplicate_near_duplicates(
         winner_idx = sc_members[0] if sc_members else members[0]
         winner = sets[winner_idx]
         winners.append(winner)
-
-        removed_count += len(members) - 1
-        for idx in members:
-            if idx != winner_idx:
-                dropped = sets[idx]
-                plat = dropped.platform.upper()[:2]
-                print(f"  [dedup] Dropped [{plat}] '{dropped.title}'")
         w_plat = winner.platform.upper()[:2]
-        print(f"  [dedup] Kept    [{w_plat}] '{winner.title}' (cluster of {len(members)})")
+
+        # Clique check: only drop members that directly match the winner.
+        # Members that reached this cluster only transitively are evicted back
+        # to singleton status to prevent false-positive removals.
+        dropped_count = 0
+        for idx in members:
+            if idx == winner_idx:
+                continue
+            candidate = sets[idx]
+            plat = candidate.platform.upper()[:2]
+            if _are_near_duplicates(candidate, winner, artist_name):
+                removed_count += 1
+                dropped_count += 1
+                print(f"  [dedup] Dropped [{plat}] '{candidate.title}'")
+            else:
+                winners.append(candidate)
+                print(f"  [dedup] Evicted [{plat}] '{candidate.title}' (transitive-only match)")
+
+        print(f"  [dedup] Kept    [{w_plat}] '{winner.title}' (dropped {dropped_count} duplicate(s))")
 
     if removed_count:
         print(f"  Near-duplicate dedup removed {removed_count} set(s) → {len(winners)} unique")
