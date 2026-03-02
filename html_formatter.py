@@ -120,7 +120,7 @@ function updatePillIcon() {
     const card = document.querySelector('.track-card[data-track-idx="' + activeIdx + '"]');
     if (card) {
       const playBtn = card.querySelector('.btn-play');
-      if (playBtn) playBtn.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
+      if (playBtn && !ytEmbedFailed) playBtn.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
     }
   }
 }
@@ -272,7 +272,7 @@ function skipToPrevTrack() {
 {track_times_js}
 
 var tag = document.createElement('script');
-tag.src = "https://www.youtube-nocookie.com/iframe_api";
+tag.src = "https://www.youtube.com/iframe_api";
 var firstScriptTag = document.getElementsByTagName('script')[0];
 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
@@ -296,6 +296,10 @@ function showYtFallback() {{
     + '</div>';
   var pill = document.getElementById('playerPill');
   if (pill) pill.style.display = 'none';
+  document.body.classList.add('yt-embed-failed');
+  document.querySelectorAll('.btn-play').forEach(function(btn) {{
+    btn.title = 'Open on YouTube at this timestamp';
+  }});
 }}
 
 function rebuildYtPlayer() {{
@@ -1242,6 +1246,8 @@ a.track-label:hover {
 .player-wrap.sc iframe { height: 166px; aspect-ratio: auto; }
 
 .btn-play { color: #00e676; border-color: #00e676; font-size: 11px; padding: 3px 8px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+.yt-embed-failed .btn-play { color: #ff4444; border-color: #ff4444; }
+.yt-embed-failed .btn-play::after { content: ' YT'; font-size: 9px; opacity: 0.75; }
 
 .track-card--now-playing {
   border-left: 3px solid #00e676;

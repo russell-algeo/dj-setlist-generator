@@ -29,6 +29,7 @@ class Config:
     ENABLE_DISCOGS = os.getenv('ENABLE_DISCOGS', 'false').lower() == 'true'
     ENABLE_SPOTIFY_PLAYLISTS = os.getenv('ENABLE_SPOTIFY_PLAYLISTS', 'true').lower() == 'true'
     AUTO_CREATE_SPOTIFY_PLAYLIST = os.getenv('AUTO_CREATE_SPOTIFY_PLAYLIST', 'false').lower() == 'true'
+    CREATE_SET_PLAYLISTS = os.getenv('CREATE_SET_PLAYLISTS', 'true').lower() == 'true'
     ENABLE_HTML_OUTPUT = os.getenv('ENABLE_HTML_OUTPUT', 'true').lower() == 'true'
 
     # Notifications (ntfy.sh)

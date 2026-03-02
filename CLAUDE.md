@@ -89,7 +89,7 @@ Saves progress during long recognition runs. Checkpoints stored in `checkpoints/
 All settings in `.env` file (see `config.py` for defaults):
 - **API credentials**: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN` (or OAuth: `DISCOGS_CONSUMER_KEY` + `DISCOGS_CONSUMER_SECRET`)
 - **Discovery**: `DISCOVERY_RESULTS_PER_QUERY` (default: `20`), `MIN_SET_DURATION_MINUTES` (default: `20`), `MAX_SETS_PER_ARTIST` (limit sets per artist; replaces the old `--max-sets` CLI flag)
-- **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`, `AUTO_CREATE_SPOTIFY_PLAYLIST`, `ENABLE_HTML_OUTPUT`
+- **Feature toggles**: `ENABLE_SPOTIFY`, `ENABLE_YOUTUBE`, `ENABLE_DISCOGS`, `ENABLE_SPOTIFY_PLAYLISTS`, `AUTO_CREATE_SPOTIFY_PLAYLIST`, `CREATE_SET_PLAYLISTS` (set to `false` to skip per-set playlists while still populating the artist playlist), `ENABLE_HTML_OUTPUT`
 - **Notifications**: `NTFY_TOPIC` (ntfy.sh topic; leave empty to disable)
 - **Recognition**: `SEGMENT_DURATION`, `SEGMENT_OVERLAP`, `RECOGNITION_TIMEOUT`, `BASE_DELAY`
 - **Retry (JitterRetry)**: `MAX_RETRIES`, `MAX_BACKOFF_DELAY`, `JITTER_INTERVAL_SIZE`

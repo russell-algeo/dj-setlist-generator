@@ -116,6 +116,7 @@ ENABLE_YOUTUBE=true                   # YouTube link enrichment (no API key need
 ENABLE_DISCOGS=false                  # Discogs link enrichment (requires token)
 ENABLE_SPOTIFY_PLAYLISTS=true         # Enable Spotify playlist creation
 AUTO_CREATE_SPOTIFY_PLAYLIST=false    # Skip prompt, auto-create playlist
+CREATE_SET_PLAYLISTS=true             # Set to false to skip per-set playlists; artist playlist still gets populated
 ENABLE_HTML_OUTPUT=true               # Generate interactive HTML setlist
 ```
 

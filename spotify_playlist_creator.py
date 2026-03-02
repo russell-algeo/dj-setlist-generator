@@ -171,6 +171,27 @@ class SpotifyPlaylistCreator:
         track_id = spotify_url.split('/')[-1].split('?')[0]
         return f"spotify:track:{track_id}"
 
+    def add_tracks_to_artist_playlist(self, enriched_tracks: List[dict], artist_playlist_id: str):
+        """Add tracks directly to an artist playlist without creating a set-level playlist."""
+        if not self.spotify:
+            return
+
+        valid_tracks = self._filter_tracks_with_spotify_urls(enriched_tracks)
+        if not valid_tracks:
+            print("  No tracks with Spotify URLs to add to artist playlist")
+            return
+
+        track_uris = [self._url_to_uri(t['metadata']['spotify_url']) for t in valid_tracks]
+        added = 0
+        for i in range(0, len(track_uris), 100):
+            batch = track_uris[i:i+100]
+            try:
+                self.spotify.playlist_add_items(artist_playlist_id, batch)
+                added += len(batch)
+            except Exception as e:
+                print(f"  Failed to add batch to artist playlist: {e}")
+        print(f"  Added {added}/{len(track_uris)} tracks to artist playlist")
+
     @staticmethod
     def create_with_confirmation(enriched_tracks: list, mix_info: dict, playlist_name: str,
                                  artist_playlist_id: str = None):
@@ -178,6 +199,16 @@ class SpotifyPlaylistCreator:
         print("\n" + "=" * 70)
         print("SPOTIFY PLAYLIST")
         print("=" * 70)
+
+        # Artist-playlist-only mode: skip set playlist, add directly to artist playlist
+        if not Config.CREATE_SET_PLAYLISTS:
+            if artist_playlist_id:
+                print("Set playlists disabled — adding tracks to artist playlist only...")
+                creator = SpotifyPlaylistCreator()
+                creator.add_tracks_to_artist_playlist(enriched_tracks, artist_playlist_id)
+            else:
+                print("Set playlists disabled and no artist playlist — skipping")
+            return
 
         if Config.AUTO_CREATE_SPOTIFY_PLAYLIST:
             print("Auto-creating Spotify playlist...")
