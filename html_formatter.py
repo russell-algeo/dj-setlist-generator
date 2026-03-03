@@ -3497,7 +3497,7 @@ def _render_signature_analysis(track_counter, track_info: dict, set_summaries: l
                 anchor = f'#track-{pos}' if pos else ''
                 if set_html_rel:
                     href = quote(set_html_rel, safe='/') + anchor
-                    target = '_self'
+                    target = '_blank'
                 elif app.get('source_deep_link'):
                     href = _esc(app['source_deep_link'])
                     target = '_blank'
@@ -3599,7 +3599,7 @@ def _render_signature_analysis(track_counter, track_info: dict, set_summaries: l
                 anchor = f'#track-{pos}' if pos else ''
                 if set_html_rel:
                     href = quote(set_html_rel, safe='/') + anchor
-                    target = '_self'
+                    target = '_blank'
                 elif app.get('source_deep_link'):
                     href = _esc(app['source_deep_link'])
                     target = '_blank'
@@ -3813,7 +3813,7 @@ def _render_set_timeline(set_summaries: list) -> str:
         source_url = s.get('url', '')
         if set_html_rel:
             href = _esc(quote(set_html_rel, safe='/'))
-            title_html = f'<a class="stl-node-title" href="{href}">{title_esc}</a>'
+            title_html = f'<a class="stl-node-title" href="{href}" target="_blank" rel="noopener">{title_esc}</a>'
         elif source_url:
             title_html = f'<a class="stl-node-title" href="{_esc(source_url)}" target="_blank" rel="noopener">{title_esc}</a>'
         else:
@@ -4008,7 +4008,7 @@ def _render_set_cards(set_summaries: list) -> str:
 
         if s.get('set_html_rel'):
             primary_href = _esc(quote(s['set_html_rel'], safe='/'))
-            primary_target = '_self'
+            primary_target = '_blank'
         elif source_url:
             primary_href = _esc(source_url)
             primary_target = '_blank'
@@ -4167,6 +4167,7 @@ def _render_most_played(track_counter, track_info: dict) -> str:
                     title_html = (
                         f'<a class="app-chip-title"'
                         f' href="{_esc(quote(set_html_rel, safe="/"))}"'
+                        f' target="_blank" rel="noopener"'
                         f' title="Open setlist">'
                         f'{_esc(app["set_title"])}</a>'
                     )
@@ -5466,7 +5467,7 @@ function buildConnTrackCard(t, artistA, artistB) {{
     var title = typeof s === 'string' ? s : s.title;
     var href  = typeof s === 'string' ? '' : (s.href || '');
     var setLink = href
-      ? '<a class="staple-sets-link" href="' + esc(href) + '">' + esc(title) + '</a>'
+      ? '<a class="staple-sets-link" href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(title) + '</a>'
       : '<span class="staple-sets-link">' + esc(title) + '</span>';
     return '<div class="staple-sets-row">'
       + setLink
@@ -5777,7 +5778,7 @@ function _buildMasterSigCardJS(entry) {{
     var nSets = (app.sets || []).length;
     var trackQ = encodeURIComponent((entry.display_artist || '') + ' ' + (entry.display_title || ''));
     var djHtml = app.dir_name
-      ? '<a class="staple-sets-link" href="' + esc(app.dir_name) + '/artist_summary.html?q=' + trackQ + '#sets-section">' + esc(app.dj) + '</a>'
+      ? '<a class="staple-sets-link" href="' + esc(app.dir_name) + '/artist_summary.html?q=' + trackQ + '#sets-section" target="_blank" rel="noopener">' + esc(app.dj) + '</a>'
       : '<span class="staple-sets-link">' + esc(app.dj) + '</span>';
     return '<div class="staple-sets-row">'
       + djHtml
@@ -6441,7 +6442,7 @@ def _render_master_artist_cards(artists: list) -> str:
         cards.append(
             f'<div class="master-artist-card" data-name="{name_esc}" onclick="artistCardClick(event,this)">'
             f'<span class="master-select-badge">\u2713</span>'
-            f'<div><a class="master-artist-name" href="{html_rel}">{name_esc}</a></div>'
+            f'<div><a class="master-artist-name" href="{html_rel}" target="_blank" rel="noopener">{name_esc}</a></div>'
             f'<div class="master-artist-stats">'
             f'<span class="master-artist-stat"><strong>{sets}</strong> sets</span>'
             f'<span class="master-artist-stat"><strong>{unique:,}</strong> tracks</span>'
@@ -6486,7 +6487,7 @@ def _render_master_sig_card(t: dict) -> str:
         n_sets = len(dj_app.get("sets", []))
         if dir_name:
             artist_href = _esc(f'{dir_name}/artist_summary.html?q={track_q}#sets-section')
-            dj_html = f'<a class="staple-sets-link" href="{artist_href}">{_esc(dj_name)}</a>'
+            dj_html = f'<a class="staple-sets-link" href="{artist_href}" target="_blank" rel="noopener">{_esc(dj_name)}</a>'
         else:
             dj_html = f'<span class="staple-sets-link">{_esc(dj_name)}</span>'
         sets_rows.append(
@@ -6817,7 +6818,7 @@ def _render_master_all_sets(all_sets: list) -> str:
 
         search_text = _esc(s.get("track_search_text", "") + " " + title + " " + artist_name)
         artist_label = (
-            f'<a class="master-set-artist-label" href="{_esc(artist_html_rel)}">{_esc(artist_name)}</a>'
+            f'<a class="master-set-artist-label" href="{_esc(artist_html_rel)}" target="_blank" rel="noopener">{_esc(artist_name)}</a>'
             if artist_name
             else ""
         )
