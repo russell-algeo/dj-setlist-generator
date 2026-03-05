@@ -46,6 +46,8 @@ class SetlistGenerator:
         temp_downloader = AudioDownloader()
         mix_info = temp_downloader.get_video_info(url)
         mix_info['url'] = url  # Store original URL for playlist description
+        if artist_name:
+            mix_info['artist_name'] = artist_name
         mix_name = mix_info['title']
 
         print(f"  Title: {mix_name}")
@@ -141,6 +143,35 @@ class SetlistGenerator:
             # Step 5: Enrich and save
             print("\n[5/5] Enriching metadata and saving...")
             enriched_tracks = self.enricher.enrich_all_tracks(tracks)
+
+            if artist_name:
+                try:
+                    expected_genres = MetadataEnricher.infer_genre_profile(
+                        [item.get('metadata', {}) for item in enriched_tracks]
+                    )
+                    artist_profile = self.enricher.enrich_set_artist_profile(
+                        artist_name,
+                        expected_genres=expected_genres,
+                    )
+                    mix_info['artist_profile_name'] = artist_profile.get('artist_profile_name')
+                    mix_info['artist_profile_image'] = artist_profile.get('artist_profile_image')
+                    mix_info['artist_profile_url'] = artist_profile.get('artist_profile_url')
+                    mix_info['artist_profile_source'] = artist_profile.get('artist_profile_source')
+                    mix_info['artist_profile_confidence'] = artist_profile.get('artist_profile_confidence')
+                    mix_info['artist_profile_genre_overlap'] = artist_profile.get('artist_profile_genre_overlap')
+                    mix_info['artist_profile_expected_genres'] = artist_profile.get('artist_profile_expected_genres')
+                    mix_info['artist_profile_provider_genres'] = artist_profile.get('artist_profile_provider_genres')
+                    mix_info['artist_profile_rejected_reason'] = artist_profile.get('artist_profile_rejected_reason')
+                    mix_info['spotify_artist_profile_name'] = artist_profile.get('spotify_artist_profile_name')
+                    mix_info['spotify_artist_profile_image'] = artist_profile.get('spotify_artist_profile_image')
+                    mix_info['spotify_artist_profile_url'] = artist_profile.get('spotify_artist_profile_url')
+                    mix_info['spotify_artist_profile_genres'] = artist_profile.get('spotify_artist_profile_genres')
+                    mix_info['discogs_artist_profile_name'] = artist_profile.get('discogs_artist_profile_name')
+                    mix_info['discogs_artist_profile_image'] = artist_profile.get('discogs_artist_profile_image')
+                    mix_info['discogs_artist_profile_url'] = artist_profile.get('discogs_artist_profile_url')
+                    mix_info['discogs_artist_profile_genres'] = artist_profile.get('discogs_artist_profile_genres')
+                except Exception as e:
+                    print(f"  [Artist Profile] Set-level profile enrichment skipped: {e}")
 
             # Save outputs (use custom name or mix name)
             final_output_name = output_name or sanitize_filename(mix_name)

@@ -621,6 +621,7 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
         genre_tags = ''.join(
             f'<span class="genre-tag">{_esc(g)}</span>' for g in combined_genres
         )
+        genre_blob = '|'.join(g.lower() for g in combined_genres)
 
         # Label
         label = t.get('discogs_label') or ''
@@ -672,8 +673,11 @@ def _render_track_cards(tracks: list, platform: str = 'unknown') -> str:
   </div>
 </div>'''
 
+        label_blob = label.lower().strip() if label else ''
+        bpm_data = f'{int(round(float(bpm)))}' if bpm else ''
+
         cards.append(f'''
-<div class="track-card" id="track-{t["position"]}" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}">
+<div class="track-card" id="track-{t["position"]}" data-conf="{_esc(conf)}" data-track-idx="{t["position"]}" data-search="{artist_esc.lower()} {title_esc.lower()}" data-artist="{artist_esc.lower()}" data-title="{title_esc.lower()}" data-genres="{_esc(genre_blob)}" data-label="{_esc(label_blob)}" data-bpm="{_esc(bpm_data)}" data-start="{t["start_time"]:.3f}">
   <div class="track-num">{t["position"]}</div>
   {art_cell}
   {time_cell}
@@ -1477,10 +1481,62 @@ a.track-label:hover {
 
 JS = """
 let activeIdx = null;
+const tracklistEl = document.getElementById('tracklist');
+const searchInput = document.getElementById('searchInput');
+const sortSelect = document.getElementById('trackSortSelect');
+const densityBtn = document.getElementById('trackDensityBtn');
+const resetBtn = document.getElementById('trackResetBtn');
+const facetBtns = document.querySelectorAll('.track-facet-btn');
+const confRank = { HIGH: 4, MEDIUM: 3, LOW: 2, UNCERTAIN: 1 };
+let activeFacet = null;
+let compactTrackCards = false;
 
 // ── Search ──
-const searchInput = document.getElementById('searchInput');
-searchInput.addEventListener('input', applyFilters);
+if (searchInput) searchInput.addEventListener('input', applyFilters);
+if (sortSelect) sortSelect.addEventListener('change', applyFilters);
+if (densityBtn) {
+  densityBtn.addEventListener('click', function() {
+    compactTrackCards = !compactTrackCards;
+    if (tracklistEl) tracklistEl.classList.toggle('tracklist--compact', compactTrackCards);
+    densityBtn.classList.toggle('active', compactTrackCards);
+  });
+}
+if (resetBtn) {
+  resetBtn.addEventListener('click', function() {
+    if (searchInput) searchInput.value = '';
+    document.querySelectorAll('.filter-btn').forEach(function(b, i) {
+      b.classList.toggle('active', i === 0);
+    });
+    activeFacet = null;
+    facetBtns.forEach(function(btn) { btn.classList.remove('track-facet-btn--active'); });
+    if (sortSelect) sortSelect.value = 'timeline';
+    compactTrackCards = false;
+    if (tracklistEl) tracklistEl.classList.remove('tracklist--compact');
+    if (densityBtn) densityBtn.classList.remove('active');
+    applyFilters();
+  });
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === '/' && document.activeElement !== searchInput) {
+    e.preventDefault();
+    if (searchInput) searchInput.focus();
+  }
+});
+facetBtns.forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var nextKind = btn.dataset.kind || '';
+    var nextValue = btn.dataset.value || '';
+    var same = activeFacet && activeFacet.kind === nextKind && activeFacet.value === nextValue;
+    activeFacet = same ? null : { kind: nextKind, value: nextValue };
+    facetBtns.forEach(function(other) {
+      var selected = !!activeFacet
+        && other.dataset.kind === activeFacet.kind
+        && other.dataset.value === activeFacet.value;
+      other.classList.toggle('track-facet-btn--active', selected);
+    });
+    applyFilters();
+  });
+});
 
 // ── Filter buttons ──
 const filterBtns = document.querySelectorAll('.filter-btn');
@@ -1492,28 +1548,71 @@ filterBtns.forEach(btn => {
   });
 });
 
+function _cardMatchesFacet(card) {
+  if (!activeFacet) return true;
+  if (activeFacet.kind === 'genre') {
+    return (card.dataset.genres || '').split('|').includes(activeFacet.value);
+  }
+  if (activeFacet.kind === 'label') {
+    return (card.dataset.label || '').includes(activeFacet.value);
+  }
+  return true;
+}
+
+function _sortCards(cards) {
+  var mode = sortSelect ? sortSelect.value : 'timeline';
+  var sorted = cards.slice();
+  sorted.sort(function(a, b) {
+    if (mode === 'confidence') {
+      var diff = (confRank[b.dataset.conf] || 0) - (confRank[a.dataset.conf] || 0);
+      if (diff) return diff;
+    } else if (mode === 'artist') {
+      var ad = (a.dataset.artist || '').localeCompare(b.dataset.artist || '');
+      if (ad) return ad;
+    } else if (mode === 'title') {
+      var td = (a.dataset.title || '').localeCompare(b.dataset.title || '');
+      if (td) return td;
+    } else if (mode === 'bpm') {
+      var bpmDiff = (parseInt(b.dataset.bpm || '0', 10) || 0) - (parseInt(a.dataset.bpm || '0', 10) || 0);
+      if (bpmDiff) return bpmDiff;
+    }
+    return (parseFloat(a.dataset.start || '0') || 0) - (parseFloat(b.dataset.start || '0') || 0);
+  });
+  return sorted;
+}
+
 function applyFilters() {
-  const query  = searchInput.value.toLowerCase().trim();
+  const query  = (searchInput ? searchInput.value : '').toLowerCase().trim();
   const active = document.querySelector('.filter-btn.active');
   const conf   = active ? active.dataset.conf : 'all';
 
   const cards   = document.querySelectorAll('.track-card');
   let   visible = 0;
+  const visibleCards = [];
 
   cards.forEach(card => {
     const matchConf   = conf === 'all' || card.dataset.conf === conf;
-    const matchSearch = !query || card.dataset.search.includes(query);
-    const show = matchConf && matchSearch;
+    const matchSearch = !query || (card.dataset.search || '').includes(query);
+    const matchFacet  = _cardMatchesFacet(card);
+    const show = matchConf && matchSearch && matchFacet;
     card.hidden = !show;
-    if (show) visible++;
+    if (show) {
+      visible++;
+      visibleCards.push(card);
+    }
   });
+
+  if (tracklistEl) {
+    _sortCards(visibleCards).forEach(function(card) { tracklistEl.appendChild(card); });
+  }
 
   document.getElementById('noResults').style.display = visible === 0 ? 'block' : 'none';
 
-  // Dim timeline segments that don't match conf filter
+  // Dim timeline segments that are filtered out
   document.querySelectorAll('.tl-segment').forEach(seg => {
-    const match = conf === 'all' || seg.dataset.conf === conf;
-    seg.style.opacity = match ? '0.85' : '0.15';
+    const linkedCard = document.querySelector('.track-card[data-track-idx="' + seg.dataset.trackIdx + '"]');
+    const show = linkedCard ? !linkedCard.hidden : true;
+    seg.style.opacity = show ? '0.85' : '0.12';
   });
 
   // Re-assert opacity on active segment (it should not be dimmed)
@@ -1522,6 +1621,8 @@ function applyFilters() {
       ?.style.setProperty('opacity', '1');
   }
 }
+
+applyFilters();
 
 
 // ── Timeline Interactivity ──
@@ -4076,6 +4177,7 @@ def _render_set_cards(set_summaries: list) -> str:
             'UNCERTAIN': '#757575',
         }
         card_tracks = s.get('tracks', [])
+        track_keys_for_compare = []
         track_rows_html = ''
         if card_tracks:
             row_parts = []
@@ -4086,6 +4188,9 @@ def _render_set_cards(set_summaries: list) -> str:
                 title_esc_t = _esc(t.get('title', ''))
                 time_esc = _esc(t.get('start_time_formatted', ''))
                 tkey_esc = _esc(t.get('track_key', ''))
+                tkey_norm = str(t.get('track_key', '')).strip().lower()
+                if tkey_norm:
+                    track_keys_for_compare.append(tkey_norm)
                 row_parts.append(
                     f'<div class="stl-track" data-track-key="{tkey_esc}">'
                     f'<span class="stl-track-time">{time_esc}</span>'
@@ -4100,10 +4205,20 @@ def _render_set_cards(set_summaries: list) -> str:
                 )
             track_rows_html = '\n'.join(row_parts)
 
+        data_track_keys = _esc('|'.join(track_keys_for_compare))
+        rec_width = max(0.0, min(100.0, float(recognition_rate)))
+        meter_html = (
+            f'<div class="set-card-meter"><span class="set-card-meter-fill" style="width:{rec_width:.1f}%"></span></div>'
+            if total else ''
+        )
         toggle_btn = (
             f'<button class="sc-toggle-btn" onclick="toggleCardTracklist({idx})">'
             f'\u25b8 Show Tracklist</button>'
             if card_tracks else ''
+        )
+        compare_btn = (
+            f'<button class="sc-compare-btn" onclick="toggleArtistSetCompare(event,{idx})">'
+            f'+ Compare</button>'
         )
 
         tracklist_div = (
@@ -4111,11 +4226,12 @@ def _render_set_cards(set_summaries: list) -> str:
             if card_tracks else ''
         )
 
-        cards.append(f'''<div class="set-card" data-card-idx="{idx}" data-tracks="{data_tracks}" data-rate="{data_rate}" data-duration="{data_duration}" data-search="{data_search}">
+        cards.append(f'''<div class="set-card" data-card-idx="{idx}" data-tracks="{data_tracks}" data-rate="{data_rate}" data-duration="{data_duration}" data-high="{int(high_conf)}" data-search="{data_search}" data-track-keys="{data_track_keys}" data-title="{_esc(title_lower)}">
   {thumb_html}
   <div class="set-card-body">
     <a class="set-card-title" href="{primary_href}" target="{primary_target}">{title_esc}</a>
     {mini_tl_html}
+    {meter_html}
     <div class="set-card-stats">
       <span class="set-card-pill">{_esc(total)} tracks</span>
       {high_pill}
@@ -4123,8 +4239,8 @@ def _render_set_cards(set_summaries: list) -> str:
       {duration_pill}
     </div>
     <div class="set-card-footer">
-      {source_link}
-      {toggle_btn}
+      <div class="set-card-actions-left">{source_link}</div>
+      <div class="set-card-actions-right">{compare_btn}{toggle_btn}</div>
     </div>
   </div>
   {tracklist_div}
@@ -4299,6 +4415,44 @@ class HtmlFormatter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def save_setlist_html(self, enriched_tracks: list, mix_info: dict, filename: str = None) -> Path:
+        """Save set-level detail view HTML (explorer by default, legacy via toggle)."""
+        if Config.DETAIL_VIEWS_USE_EXPLORER:
+            from set_explorer_formatter import save_set_explorer_html
+
+            return save_set_explorer_html(
+                self,
+                enriched_tracks,
+                mix_info,
+                filename=filename,
+            )
+        return self._save_setlist_html_legacy(enriched_tracks, mix_info, filename=filename)
+
+    def save_artist_summary_html(
+        self, artist_name, set_summaries, track_counter, track_info, successful, failed
+    ) -> Path:
+        """Save artist-level detail view HTML (explorer by default, legacy via toggle)."""
+        if Config.DETAIL_VIEWS_USE_EXPLORER:
+            from artist_explorer_formatter import save_artist_explorer_html
+
+            return save_artist_explorer_html(
+                self,
+                artist_name,
+                set_summaries,
+                track_counter,
+                track_info,
+                successful,
+                failed,
+            )
+        return self._save_artist_summary_html_legacy(
+            artist_name,
+            set_summaries,
+            track_counter,
+            track_info,
+            successful,
+            failed,
+        )
+
+    def _save_setlist_html_legacy(self, enriched_tracks: list, mix_info: dict, filename: str = None) -> Path:
         """
         Save setlist as a self-contained interactive HTML page.
 
@@ -4398,6 +4552,76 @@ class HtmlFormatter:
                     f'{level} ({counts[level]})</button>'
                 )
 
+        # Set-level quick insights for faster exploration
+        genre_counter: Counter = Counter()
+        label_counter: Counter = Counter()
+        for t in tracks:
+            for g in (t.get('discogs_styles') or []) + (t.get('discogs_genres') or []) + (t.get('spotify_genres') or []):
+                gn = str(g or '').strip()
+                if gn:
+                    genre_counter[gn] += 1
+            label = str(t.get('label') or '').strip()
+            if label:
+                label_counter[label] += 1
+
+        recognized_rate = (recognized / total * 100.0) if total else 0.0
+        confidence_rate = (((counts.get('HIGH', 0) + counts.get('MEDIUM', 0)) / total) * 100.0) if total else 0.0
+        known_artists = len({t.get('artist') for t in tracks if t.get('artist') and t.get('artist') != 'Unknown'})
+        bpm_vals = [float(t['bpm']) for t in tracks if t.get('bpm') is not None]
+        tempo_span = (
+            f'{min(bpm_vals):.0f} - {max(bpm_vals):.0f} BPM'
+            if bpm_vals else
+            'Tempo unavailable'
+        )
+        top_genres_html = ''.join(
+            f'<span class="xp-tag">{_esc(g)}</span>'
+            for g, _ in genre_counter.most_common(8)
+        ) or '<span class="xp-tag xp-tag--muted">No genre metadata</span>'
+        top_labels_html = ''.join(
+            f'<span class="xp-tag">{_esc(label)}</span>'
+            for label, _ in label_counter.most_common(6)
+        ) or '<span class="xp-tag xp-tag--muted">No label metadata</span>'
+        genre_facet_buttons = ''.join(
+            f'<button class="track-facet-btn" data-kind="genre" data-value="{_esc(g.lower())}">{_esc(g)}</button>'
+            for g, _ in genre_counter.most_common(8)
+        ) or '<span class="xp-tag xp-tag--muted">No genre facets</span>'
+        label_facet_buttons = ''.join(
+            f'<button class="track-facet-btn" data-kind="label" data-value="{_esc(label.lower())}">{_esc(label)}</button>'
+            for label, _ in label_counter.most_common(6)
+        ) or '<span class="xp-tag xp-tag--muted">No label facets</span>'
+
+        set_insights_html = f'''
+  <section class="insight-panel">
+    <h2 class="explorer-heading">Set Compass</h2>
+    <p class="explorer-subline">Fast read on confidence, identity, and sonic profile.</p>
+    <div class="insight-grid">
+      <div class="insight-metric">
+        <span class="insight-value">{recognized_rate:.0f}%</span>
+        <span class="insight-label">Identification</span>
+      </div>
+      <div class="insight-metric">
+        <span class="insight-value">{confidence_rate:.0f}%</span>
+        <span class="insight-label">High / Medium Confidence</span>
+      </div>
+      <div class="insight-metric">
+        <span class="insight-value">{known_artists}</span>
+        <span class="insight-label">Distinct Artists</span>
+      </div>
+      <div class="insight-metric insight-metric--wide">
+        <span class="insight-value">{_esc(tempo_span)}</span>
+        <span class="insight-label">Tempo Span</span>
+      </div>
+    </div>
+    <div class="insight-block">
+      <div class="insight-block-title">Top Genres</div>
+      <div class="xp-tags">{top_genres_html}</div>
+    </div>
+    <div class="insight-block">
+      <div class="insight-block-title">Common Labels</div>
+      <div class="xp-tags">{top_labels_html}</div>
+    </div>
+  </section>'''
+
 
         # Algorithm parameter footer
         footer_items = [
@@ -4415,14 +4639,13 @@ class HtmlFormatter:
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Setlist: {title_esc}</title>
-  <style>{CSS}</style>
+  <style>{CSS}{_LIQUID_GLASS_CSS}</style>
 </head>
 <body>
 
-<div class="container">
+<div class="container xp-shell">
 
-  <!-- Header -->
-  <header class="header">
+  <header class="header explorer-hero">
     <h1>{title_esc}</h1>
     <div class="header-meta">
       <span>By <strong>{uploader_esc}</strong></span>
@@ -4432,43 +4655,68 @@ class HtmlFormatter:
     </div>
   </header>
 
-  <!-- Embedded Player -->
-  {player_html}
+  <div class="set-cockpit">
+    <main class="set-cockpit-main">
+      {player_html}
+      {stats_html}
+      {journey_chart_html}
+      <section class="insight-panel">
+        <h2 class="explorer-heading">Set Timeline</h2>
+        <p class="explorer-subline">Map transitions and confidence progression through the full mix.</p>
+        <div class="timeline-wrap">
+          <div class="timeline-label">Mix Timeline</div>
+          <div class="timeline-bar">
+            {timeline_html}
+          </div>
+          <div class="timeline-ticks">{ticks_html}</div>
+        </div>
+      </section>
+      <footer class="footer">
+        {footer_spans}
+      </footer>
+    </main>
 
-  <!-- Stats -->
-  {stats_html}
-
-  <!-- Timeline -->
-  <div class="timeline-wrap">
-    <div class="timeline-label">Mix Timeline</div>
-    <div class="timeline-bar">
-      {timeline_html}
-    </div>
-    <div class="timeline-ticks">{ticks_html}</div>
-  </div>
-
-  <!-- Journey Chart -->
-  {journey_chart_html}
-
-  <!-- Controls -->
-  <div class="controls">
-    <input id="searchInput" class="search-input" type="search"
-           placeholder="Search by artist or title&hellip;" autocomplete="off">
-    <div class="filter-buttons">
-      {filter_buttons}
-    </div>
-  </div>
-
-  <!-- Tracklist -->
-  <div class="tracklist" id="tracklist">
-    {cards_html}
+    <aside class="set-cockpit-sidebar">
+      {set_insights_html}
+      <section class="insight-panel">
+        <h2 class="explorer-heading">Track Explorer</h2>
+        <p class="explorer-subline">Search and filter to inspect patterns inside this set.</p>
+        <div class="controls">
+          <input id="searchInput" class="search-input" type="search"
+                 placeholder="Search by artist or title&hellip;" autocomplete="off">
+          <div class="filter-buttons">
+            {filter_buttons}
+          </div>
+          <div class="control-row">
+            <label class="control-label" for="trackSortSelect">Sort</label>
+            <select id="trackSortSelect" class="track-sort-select">
+              <option value="timeline">Timeline</option>
+              <option value="confidence">Confidence</option>
+              <option value="artist">Artist</option>
+              <option value="title">Title</option>
+              <option value="bpm">BPM</option>
+            </select>
+            <button class="sort-btn set-tool-btn" id="trackDensityBtn" type="button">Compact</button>
+            <button class="sort-btn set-tool-btn" id="trackResetBtn" type="button">Reset</button>
+          </div>
+          <div class="track-facets">
+            <div class="track-facet-row">
+              <span class="track-facet-label">Genre Lens</span>
+              <div class="track-facet-chips">{genre_facet_buttons}</div>
+            </div>
+            <div class="track-facet-row">
+              <span class="track-facet-label">Label Lens</span>
+              <div class="track-facet-chips">{label_facet_buttons}</div>
+            </div>
+          </div>
+        </div>
+        <div class="tracklist" id="tracklist">
+          {cards_html}
+        </div>
+      </section>
+    </aside>
   </div>
   <div class="no-results" id="noResults">No tracks match your filter.</div>
-
-  <!-- Footer -->
-  <footer class="footer">
-    {footer_spans}
-  </footer>
 
 </div><!-- /.container -->
 
@@ -4498,7 +4746,7 @@ class HtmlFormatter:
   if (!el) return;
   el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
   el.style.transition = 'background 0.3s';
-  el.style.background = '#2a3a1a';
+  el.style.background = 'rgba(90, 242, 255, 0.18)';
   setTimeout(function() {{ el.style.background = ''; }}, 2000);
 }})();
 </script>
@@ -4511,7 +4759,7 @@ class HtmlFormatter:
         print(f"Saved HTML:     {output_path}")
         return output_path
 
-    def save_artist_summary_html(
+    def _save_artist_summary_html_legacy(
         self, artist_name, set_summaries, track_counter, track_info, successful, failed
     ) -> Path:
         """Save artist-level aggregate summary as a self-contained HTML page."""
@@ -4523,6 +4771,35 @@ class HtmlFormatter:
         sets_html                    = _render_set_cards(set_summaries)
         failed_html                  = _render_failed_section(failed)
         signature_html, distrib_html  = _render_signature_analysis(track_counter, track_info, set_summaries)
+        genre_focus: Counter = Counter()
+        label_focus: Counter = Counter()
+        track_artist_focus: Counter = Counter()
+        for info in track_info.values():
+            for g in info.get('genres', []):
+                gn = str(g or '').strip()
+                if gn:
+                    genre_focus[gn] += 1
+            label = str(info.get('discogs_label') or '').strip()
+            if label:
+                label_focus[label] += 1
+            ta = str(info.get('artist') or '').strip()
+            if ta and ta.lower() != 'unknown':
+                track_artist_focus[ta] += 1
+
+        focus_genres_html = ''.join(
+            f'<span class="xp-tag">{_esc(name)}</span>'
+            for name, _ in genre_focus.most_common(8)
+        ) or '<span class="xp-tag xp-tag--muted">No genre metadata</span>'
+        focus_labels_html = ''.join(
+            f'<span class="xp-tag">{_esc(name)}</span>'
+            for name, _ in label_focus.most_common(8)
+        ) or '<span class="xp-tag xp-tag--muted">No label metadata</span>'
+        focus_artists_html = ''.join(
+            f'<span class="xp-tag">{_esc(name)}</span>'
+            for name, _ in track_artist_focus.most_common(8)
+        ) or '<span class="xp-tag xp-tag--muted">No artist metadata</span>'
+        quality_html = failed_html or '<section><h2>Collection Status</h2><p class="empty">No failed sets were recorded for this artist.</p></section>'
+        distribution_section = f'<section><h2>Track Distribution</h2>{distrib_html}</section>' if distrib_html else ''
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -4530,14 +4807,14 @@ class HtmlFormatter:
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{_esc(artist_name)} — DJ Set Analysis</title>
-  <style>{_SUMMARY_CSS}</style>
+  <style>{_SUMMARY_CSS}{_LIQUID_GLASS_CSS}</style>
 </head>
 <body>
 
-<div class="container">
+<div class="container xp-shell">
 
   <div class="artist-name">{_esc(artist_name)}</div>
-  <div class="page-subtitle">DJ Set Analysis</div>
+  <div class="page-subtitle">Artist Intelligence Deck</div>
   <div class="header-meta">Generated {_esc(generated)}</div>
 
   <div class="stats-strip">
@@ -4559,37 +4836,104 @@ class HtmlFormatter:
     </div>
   </div>
 
-  {f'<section><h2>Track Distribution</h2>{distrib_html}</section>' if distrib_html else ''}
+  <div class="explorer-tabs artist-tabs">
+    <button class="explorer-tab is-active" data-pane="artist-pane-dna" onclick="switchExplorerPane('artist-pane-dna', this)">Artist DNA</button>
+    <button class="explorer-tab" data-pane="artist-pane-sets" onclick="switchExplorerPane('artist-pane-sets', this)">Set Explorer</button>
+    <button class="explorer-tab" data-pane="artist-pane-quality" onclick="switchExplorerPane('artist-pane-quality', this)">Collection Status</button>
+  </div>
 
-  <section>
-    <h2>Most Played Tracks</h2>
-    {signature_html}
-  </section>
-
-  <section id="sets-section">
-    <h2>Sets Analyzed ({len(set_summaries)})</h2>
-    <div class="sets-controls">
-      <input id="setSearch" class="search-input" type="search"
-             placeholder="Search sets or find a track across sets…" autocomplete="off">
-      <div class="sort-buttons">
-        <button class="sort-btn active" data-sort="default">Default</button>
-        <button class="sort-btn" data-sort="tracks">Most Tracks</button>
-        <button class="sort-btn" data-sort="rate">Best Recognition</button>
-        <button class="sort-btn" data-sort="duration">Longest</button>
+  <div id="artist-pane-dna" class="explorer-pane explorer-pane--active">
+    <section>
+      <h2>Artist DNA</h2>
+      <div class="artist-focus-grid">
+        <article class="focus-card">
+          <h3>Dominant Genres</h3>
+          <div class="xp-tags">{focus_genres_html}</div>
+        </article>
+        <article class="focus-card">
+          <h3>Frequent Labels</h3>
+          <div class="xp-tags">{focus_labels_html}</div>
+        </article>
+        <article class="focus-card">
+          <h3>Recurring Track Artists</h3>
+          <div class="xp-tags">{focus_artists_html}</div>
+        </article>
       </div>
-    </div>
-    <div class="sets-grid" id="setsGrid">
-      {sets_html}
-    </div>
-  </section>
+    </section>
 
-  {failed_html}
+    {distribution_section}
+
+    <section>
+      <h2>Most Played Tracks</h2>
+      {signature_html}
+    </section>
+  </div>
+
+  <div id="artist-pane-sets" class="explorer-pane">
+    <section id="sets-section">
+      <h2>Sets Analyzed ({len(set_summaries)})</h2>
+      <div class="sets-controls">
+        <input id="setSearch" class="search-input" type="search"
+               placeholder="Search sets or find a track across sets…" autocomplete="off">
+        <div class="sort-buttons">
+          <button class="sort-btn active" data-sort="default">Default</button>
+          <button class="sort-btn" data-sort="tracks">Most Tracks</button>
+          <button class="sort-btn" data-sort="rate">Best Recognition</button>
+          <button class="sort-btn" data-sort="duration">Longest</button>
+        </div>
+        <div class="sort-buttons set-quick-filters" id="artistSetQuickFilters">
+          <button class="sort-btn active" data-quick="all">All Sets</button>
+          <button class="sort-btn" data-quick="high-id">High ID</button>
+          <button class="sort-btn" data-quick="long">Long Form</button>
+          <button class="sort-btn" data-quick="dense">Dense Tracklist</button>
+        </div>
+      </div>
+      <div class="set-compare-panel" id="artistSetComparePanel" hidden>
+        <div class="set-compare-head">
+          <div class="set-compare-title">Set Connection View</div>
+          <button class="distrib-clear-btn" onclick="clearArtistSetCompare()">&times; Clear</button>
+        </div>
+        <div class="set-compare-copy">Select two set cards to inspect overlap and unique material.</div>
+        <div class="set-compare-body" id="artistSetCompareBody"></div>
+      </div>
+      <div class="sets-grid" id="setsGrid">
+        {sets_html}
+      </div>
+    </section>
+  </div>
+
+  <div id="artist-pane-quality" class="explorer-pane">
+    {quality_html}
+  </div>
 
   <div class="footer">
     Generated {_esc(generated)} &middot; DJ Set Setlist Generator
   </div>
 
 </div>
+
+<script>
+function switchExplorerPane(paneId, btn) {{
+  document.querySelectorAll('.explorer-pane').forEach(function(pane) {{
+    pane.classList.toggle('explorer-pane--active', pane.id === paneId);
+  }});
+  document.querySelectorAll('.artist-tabs .explorer-tab').forEach(function(tab) {{
+    tab.classList.toggle('is-active', tab.dataset.pane === paneId);
+  }});
+  if (btn) btn.classList.add('is-active');
+  if (paneId === 'artist-pane-sets' && typeof window.reflowArtistSets === 'function') {{
+    setTimeout(function() {{ window.reflowArtistSets(); }}, 30);
+  }}
+}}
+
+(function () {{
+  var wantsSets = window.location.hash === '#sets-section'
+    || !!new URLSearchParams(window.location.search).get('q');
+  if (!wantsSets) return;
+  var btn = document.querySelector('.artist-tabs .explorer-tab[data-pane="artist-pane-sets"]');
+  if (btn) switchExplorerPane('artist-pane-sets', btn);
+}})();
+</script>
 
 <script>
 /* ── Set card: tracklist toggle ── */
@@ -4609,6 +4953,128 @@ function toggleCardTracklist(idx) {{
   }}
 }}
 
+var _artistCompareSetIdx = [];
+
+function _artistSetCardByIdx(idx) {{
+  return document.querySelector('.set-card[data-card-idx="' + idx + '"]');
+}}
+
+function _artistTrackSet(card) {{
+  var parts = (card.dataset.trackKeys || '').split('|').filter(Boolean);
+  return new Set(parts);
+}}
+
+function _artistEsc(s) {{
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+
+function _syncArtistSetSharedHighlights() {{
+  document.querySelectorAll('.set-card .stl-track').forEach(function(row) {{
+    row.classList.remove('stl-track--shared');
+  }});
+  if (_artistCompareSetIdx.length !== 2) return;
+  var cardA = _artistSetCardByIdx(_artistCompareSetIdx[0]);
+  var cardB = _artistSetCardByIdx(_artistCompareSetIdx[1]);
+  if (!cardA || !cardB) return;
+  var setA = _artistTrackSet(cardA);
+  var setB = _artistTrackSet(cardB);
+  if (!setA.size || !setB.size) return;
+  var shared = new Set();
+  setA.forEach(function(k) {{ if (setB.has(k)) shared.add(k); }});
+  if (!shared.size) return;
+  [cardA, cardB].forEach(function(card) {{
+    card.querySelectorAll('.stl-track').forEach(function(row) {{
+      var key = (row.dataset.trackKey || '').trim().toLowerCase();
+      if (shared.has(key)) row.classList.add('stl-track--shared');
+    }});
+  }});
+}}
+
+function _renderArtistSetCompare() {{
+  var panel = document.getElementById('artistSetComparePanel');
+  var body = document.getElementById('artistSetCompareBody');
+  if (!panel || !body) return;
+  if (!_artistCompareSetIdx.length) {{
+    panel.hidden = true;
+    body.innerHTML = '';
+    return;
+  }}
+  panel.hidden = false;
+  if (_artistCompareSetIdx.length < 2) {{
+    body.innerHTML = '<div class="set-compare-empty">1 set selected. Choose one more to compare.</div>';
+    return;
+  }}
+  var cardA = _artistSetCardByIdx(_artistCompareSetIdx[0]);
+  var cardB = _artistSetCardByIdx(_artistCompareSetIdx[1]);
+  if (!cardA || !cardB) {{
+    body.innerHTML = '<div class="set-compare-empty">Comparison unavailable.</div>';
+    return;
+  }}
+  var titleA = cardA.querySelector('.set-card-title') ? cardA.querySelector('.set-card-title').textContent.trim() : 'Set A';
+  var titleB = cardB.querySelector('.set-card-title') ? cardB.querySelector('.set-card-title').textContent.trim() : 'Set B';
+  var setA = _artistTrackSet(cardA);
+  var setB = _artistTrackSet(cardB);
+  var shared = [];
+  setA.forEach(function(k) {{ if (setB.has(k)) shared.push(k); }});
+  var unionCount = new Set([].concat(Array.from(setA), Array.from(setB))).size || 1;
+  var overlapPct = Math.round((shared.length / unionCount) * 100);
+  var onlyA = setA.size - shared.length;
+  var onlyB = setB.size - shared.length;
+  var rateA = parseInt(cardA.dataset.rate || '0', 10);
+  var rateB = parseInt(cardB.dataset.rate || '0', 10);
+  var durA = parseInt(cardA.dataset.duration || '0', 10);
+  var durB = parseInt(cardB.dataset.duration || '0', 10);
+  var sharedChips = shared.slice(0, 10).map(function(k) {{
+    return '<span class="xp-tag">' + _artistEsc(k) + '</span>';
+  }}).join('');
+  body.innerHTML = ''
+    + '<div class="set-compare-grid">'
+    + '<div class="set-compare-col"><div class="set-compare-label">Set A</div><div class="set-compare-name">' + _artistEsc(titleA) + '</div></div>'
+    + '<div class="set-compare-col"><div class="set-compare-label">Set B</div><div class="set-compare-name">' + _artistEsc(titleB) + '</div></div>'
+    + '</div>'
+    + '<div class="set-compare-metrics">'
+    + '<div class="set-compare-metric"><span>' + shared.length + '</span><small>Shared Tracks</small></div>'
+    + '<div class="set-compare-metric"><span>' + overlapPct + '%</span><small>Catalog Overlap</small></div>'
+    + '<div class="set-compare-metric"><span>' + Math.abs(rateA - rateB) + '%</span><small>ID Rate Delta</small></div>'
+    + '<div class="set-compare-metric"><span>' + Math.abs(Math.round((durA - durB) / 60)) + 'm</span><small>Duration Delta</small></div>'
+    + '<div class="set-compare-metric"><span>' + onlyA + '</span><small>Only In A</small></div>'
+    + '<div class="set-compare-metric"><span>' + onlyB + '</span><small>Only In B</small></div>'
+    + '</div>'
+    + (sharedChips ? '<div class="set-compare-shared"><div class="set-compare-label">Shared Track Keys</div><div class="xp-tags">' + sharedChips + '</div></div>' : '<div class="set-compare-empty">No shared tracks between selected sets.</div>');
+}}
+
+function toggleArtistSetCompare(event, idx) {{
+  if (event) event.stopPropagation();
+  var id = String(idx);
+  var pos = _artistCompareSetIdx.indexOf(id);
+  if (pos >= 0) {{
+    _artistCompareSetIdx.splice(pos, 1);
+  }} else {{
+    if (_artistCompareSetIdx.length >= 2) _artistCompareSetIdx.shift();
+    _artistCompareSetIdx.push(id);
+  }}
+  document.querySelectorAll('.set-card').forEach(function(card) {{
+    var selected = _artistCompareSetIdx.indexOf(String(card.dataset.cardIdx)) >= 0;
+    card.classList.toggle('set-card--selected', selected);
+    var btn = card.querySelector('.sc-compare-btn');
+    if (btn) btn.textContent = selected ? 'Comparing' : '+ Compare';
+  }});
+  _renderArtistSetCompare();
+  _syncArtistSetSharedHighlights();
+}}
+
+function clearArtistSetCompare() {{
+  _artistCompareSetIdx = [];
+  document.querySelectorAll('.set-card').forEach(function(card) {{
+    card.classList.remove('set-card--selected');
+    card.querySelectorAll('.stl-track').forEach(function(row) {{ row.classList.remove('stl-track--shared'); }});
+    var btn = card.querySelector('.sc-compare-btn');
+    if (btn) btn.textContent = '+ Compare';
+  }});
+  _renderArtistSetCompare();
+}}
+
 /* ── Set grid: stable explicit columns ── */
 (function () {{
   var setsGrid = document.getElementById('setsGrid');
@@ -4616,6 +5082,8 @@ function toggleCardTracklist(idx) {{
 
   var CARD_MIN_WIDTH = 270;
   var GAP = 12;
+  var activeSort = 'default';
+  var activeQuick = 'all';
 
   function getNumCols() {{
     return Math.max(1, Math.floor((setsGrid.offsetWidth + GAP) / (CARD_MIN_WIDTH + GAP)));
@@ -4629,30 +5097,64 @@ function toggleCardTracklist(idx) {{
       col.className = 'sets-col';
       cols.push(col);
     }}
-    cards.forEach(function (card, i) {{ cols[i % nCols].appendChild(card); }});
+    var visible = cards.filter(function(card) {{ return card.style.display !== 'none'; }});
+    var hidden = cards.filter(function(card) {{ return card.style.display === 'none'; }});
+    visible.forEach(function (card, i) {{ cols[i % nCols].appendChild(card); }});
     setsGrid.innerHTML = '';
     cols.forEach(function (col) {{ setsGrid.appendChild(col); }});
+    hidden.forEach(function(card) {{ setsGrid.appendChild(card); }});
   }}
 
   function getAllCards() {{
     return Array.from(setsGrid.querySelectorAll('.set-card'));
   }}
 
-  buildColumns(getAllCards());
+  function passesQuick(card) {{
+    var rate = parseInt(card.dataset.rate || '0', 10);
+    var duration = parseInt(card.dataset.duration || '0', 10);
+    var tracks = parseInt(card.dataset.tracks || '0', 10);
+    if (activeQuick === 'high-id') return rate >= 80;
+    if (activeQuick === 'long') return duration >= 5400;
+    if (activeQuick === 'dense') return tracks >= 28;
+    return true;
+  }}
+
+  function cardSort(a, b) {{
+    switch (activeSort) {{
+      case 'tracks':   return parseInt(b.dataset.tracks) - parseInt(a.dataset.tracks);
+      case 'rate':     return parseInt(b.dataset.rate) - parseInt(a.dataset.rate);
+      case 'duration': return parseInt(b.dataset.duration) - parseInt(a.dataset.duration);
+      default:         return parseInt(a.dataset.cardIdx) - parseInt(b.dataset.cardIdx);
+    }}
+  }}
+
+  function refreshSetExplorer() {{
+    var searchInput = document.getElementById('setSearch');
+    var query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    var cards = getAllCards();
+    cards.forEach(function(card) {{
+      var matchSearch = !query || (card.dataset.search || '').includes(query);
+      card.style.display = (matchSearch && passesQuick(card)) ? '' : 'none';
+    }});
+    cards.sort(cardSort);
+    buildColumns(cards);
+    _renderArtistSetCompare();
+    _syncArtistSetSharedHighlights();
+  }}
+
+  refreshSetExplorer();
+  window.reflowArtistSets = function() {{ refreshSetExplorer(); }};
 
   var resizeTimer;
   window.addEventListener('resize', function () {{
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () {{ buildColumns(getAllCards()); }}, 150);
+    resizeTimer = setTimeout(function () {{ refreshSetExplorer(); }}, 150);
   }});
 
   var searchInput = document.getElementById('setSearch');
   if (searchInput) {{
     searchInput.addEventListener('input', function () {{
-      var query = searchInput.value.toLowerCase().trim();
-      getAllCards().forEach(function (card) {{
-        card.style.display = !query || card.dataset.search.includes(query) ? '' : 'none';
-      }});
+      refreshSetExplorer();
     }});
   }}
 
@@ -4662,7 +5164,7 @@ function toggleCardTracklist(idx) {{
     var q = params.get('q');
     if (q && searchInput) {{
       searchInput.value = q;
-      searchInput.dispatchEvent(new Event('input'));
+      refreshSetExplorer();
       var section = document.getElementById('sets-section');
       if (section) {{
         setTimeout(function() {{ section.scrollIntoView({{behavior: 'smooth', block: 'start'}}); }}, 120);
@@ -4670,21 +5172,21 @@ function toggleCardTracklist(idx) {{
     }}
   }})();
 
-  document.querySelectorAll('.sort-btn').forEach(function (btn) {{
+  document.querySelectorAll('.sort-btn[data-sort]').forEach(function (btn) {{
     btn.addEventListener('click', function () {{
-      document.querySelectorAll('.sort-btn').forEach(function (b) {{ b.classList.remove('active'); }});
+      document.querySelectorAll('.sort-btn[data-sort]').forEach(function (b) {{ b.classList.remove('active'); }});
       btn.classList.add('active');
-      var sortBy = btn.dataset.sort;
-      var cards = getAllCards();
-      cards.sort(function (a, b) {{
-        switch (sortBy) {{
-          case 'tracks':   return parseInt(b.dataset.tracks)   - parseInt(a.dataset.tracks);
-          case 'rate':     return parseInt(b.dataset.rate)     - parseInt(a.dataset.rate);
-          case 'duration': return parseInt(b.dataset.duration) - parseInt(a.dataset.duration);
-          default: return 0;
-        }}
-      }});
-      buildColumns(cards);
+      activeSort = btn.dataset.sort || 'default';
+      refreshSetExplorer();
+    }});
+  }});
+
+  document.querySelectorAll('#artistSetQuickFilters .sort-btn[data-quick]').forEach(function(btn) {{
+    btn.addEventListener('click', function() {{
+      document.querySelectorAll('#artistSetQuickFilters .sort-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+      btn.classList.add('active');
+      activeQuick = btn.dataset.quick || 'all';
+      refreshSetExplorer();
     }});
   }});
 }})();
@@ -5063,10 +5565,10 @@ document.querySelectorAll('.distrib-pane[data-page]').forEach(function(pane) {{
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>All Artists — Master Overview</title>
-  <style>{_SUMMARY_CSS}{_MASTER_CSS}</style>
+  <style>{_SUMMARY_CSS}{_MASTER_CSS}{_LIQUID_GLASS_CSS}</style>
 </head>
 <body>
-<div class="container">
+<div class="container xp-shell">
 
   <div class="artist-name">All Artists</div>
   <div class="page-subtitle">Master Overview</div>
@@ -5091,58 +5593,87 @@ document.querySelectorAll('.distrib-pane[data-page]').forEach(function(pane) {{
     </div>
   </div>
 
-  <section>
-    <h2>Artists ({n_artists})</h2>
-    <input id="artistSearch" class="search-input" type="search"
-           placeholder="Filter artists…" autocomplete="off"
-           style="margin-bottom:16px"
-           oninput="filterArtistCards(this.value)">
-    <div class="master-artist-grid" id="artistCardsGrid">
-      {artist_cards_html}
-    </div>
-  </section>
-
-  {f'''<section id="trackDistribSection">
-  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-    <h2 style="margin:0">Track Distribution</h2>
-    <span id="distribHint" class="distrib-section-hint"></span>
+  <div class="explorer-tabs master-tabs">
+    <button class="explorer-tab is-active" data-pane="master-pane-network" onclick="activateMasterPane('master-pane-network', this)">Connection Lab</button>
+    <button class="explorer-tab" data-pane="master-pane-library" onclick="activateMasterPane('master-pane-library', this)">Set Library</button>
   </div>
-  <div class="sort-buttons" id="distribArtistBtns" style="margin-bottom:12px">
-    {distrib_artist_btns}
-  </div>
-  <div id="distribFilterBar" hidden>
-    <div class="distrib-mode-group">
-      <button id="distribUnionBtn" class="distrib-mode-btn distrib-mode-btn--active" onclick="setDistribMode('union')">Union</button>
-      <button id="distribIntersectBtn" class="distrib-mode-btn" onclick="setDistribMode('intersection')">Intersection</button>
-    </div>
-    <button class="distrib-clear-btn" onclick="clearDistribSelection()">\u00d7 Clear All</button>
-  </div>
-  {genre_label_html}
-</section>''' if genre_label_html else ''}
 
-  <section id="connectionsSection">
-    <h2>Artist Connections</h2>
-    <p class="master-hint">Click a cell in the matrix to explore what two artists share.</p>
-    {matrix_html}
-    <div id="connectionCards" class="master-connection-area">
-      <p class="empty">Select a cell above to see shared tracks, labels, and artists.</p>
-    </div>
-  </section>
-
-  <section>
-    <h2>All Sets ({n_all_sets})</h2>
-    <div class="sets-controls">
-      <input id="allSetsSearch" class="search-input" type="search"
-             placeholder="Search sets or tracks…" autocomplete="off">
-      <div class="sort-buttons" id="artistFilterBtns">
-        <button class="sort-btn active" data-artist="" onclick="filterAllSets('',this)">All Artists</button>
-        {artist_filter_btns}
+  <div id="master-pane-network" class="master-pane explorer-pane explorer-pane--active">
+    <section>
+      <h2>Artist Atlas ({n_artists})</h2>
+      <input id="artistSearch" class="search-input" type="search"
+             placeholder="Filter artists…" autocomplete="off"
+             style="margin-bottom:16px"
+             oninput="filterArtistCards(this.value)">
+      <div class="master-artist-grid" id="artistCardsGrid">
+        {artist_cards_html}
       </div>
+    </section>
+
+    {f'''<section id="trackDistribSection">
+    <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+      <h2 style="margin:0">Shared Track Distribution</h2>
+      <span id="distribHint" class="distrib-section-hint"></span>
     </div>
-    <div class="sets-grid" id="allSetsGrid">
-      {all_sets_html}
+    <div class="sort-buttons" id="distribArtistBtns" style="margin-bottom:12px">
+      {distrib_artist_btns}
     </div>
-  </section>
+    <div id="distribFilterBar" hidden>
+      <div class="distrib-mode-group">
+        <button id="distribUnionBtn" class="distrib-mode-btn distrib-mode-btn--active" onclick="setDistribMode('union')">Union</button>
+        <button id="distribIntersectBtn" class="distrib-mode-btn" onclick="setDistribMode('intersection')">Intersection</button>
+      </div>
+      <button class="distrib-clear-btn" onclick="clearDistribSelection()">\u00d7 Clear All</button>
+    </div>
+    {genre_label_html}
+  </section>''' if genre_label_html else ''}
+
+    <section id="connectionsSection">
+      <h2>Artist Connections</h2>
+      <p class="master-hint">Click a matrix cell to open a side-by-side breakdown of what two artists share.</p>
+      {matrix_html}
+      <div id="connectionCards" class="master-connection-area">
+        <p class="empty">Select a cell above to see shared tracks, labels, and artists.</p>
+      </div>
+    </section>
+  </div>
+
+  <div id="master-pane-library" class="master-pane explorer-pane">
+    <section>
+      <h2>All Sets ({n_all_sets})</h2>
+      <div class="sets-controls">
+        <input id="allSetsSearch" class="search-input" type="search"
+               placeholder="Search sets or tracks…" autocomplete="off">
+        <div class="sort-buttons" id="artistFilterBtns">
+          <button class="sort-btn active" data-artist="" onclick="filterAllSets('',this)">All Artists</button>
+          {artist_filter_btns}
+        </div>
+        <div class="sort-buttons" id="allSetsSortBtns">
+          <button class="sort-btn active" data-sort="default" onclick="setAllSetsSort('default', this)">Default</button>
+          <button class="sort-btn" data-sort="tracks" onclick="setAllSetsSort('tracks', this)">Most Tracks</button>
+          <button class="sort-btn" data-sort="rate" onclick="setAllSetsSort('rate', this)">Best Recognition</button>
+          <button class="sort-btn" data-sort="duration" onclick="setAllSetsSort('duration', this)">Longest</button>
+        </div>
+        <div class="sort-buttons" id="allSetsQuickBtns">
+          <button class="sort-btn active" data-quick="all" onclick="setAllSetsQuick('all', this)">All Sets</button>
+          <button class="sort-btn" data-quick="high-id" onclick="setAllSetsQuick('high-id', this)">High ID</button>
+          <button class="sort-btn" data-quick="long" onclick="setAllSetsQuick('long', this)">Long Form</button>
+          <button class="sort-btn" data-quick="dense" onclick="setAllSetsQuick('dense', this)">Dense Tracklist</button>
+        </div>
+      </div>
+      <div class="set-compare-panel" id="masterSetComparePanel" hidden>
+        <div class="set-compare-head">
+          <div class="set-compare-title">Set Connection View</div>
+          <button class="distrib-clear-btn" onclick="clearMasterSetCompare()">&times; Clear</button>
+        </div>
+        <div class="set-compare-copy">Select two set cards to compare overlap across artists and sessions.</div>
+        <div class="set-compare-body" id="masterSetCompareBody"></div>
+      </div>
+      <div class="sets-grid" id="allSetsGrid">
+        {all_sets_html}
+      </div>
+    </section>
+  </div>
 
   <div class="footer">
     Generated {_esc(generated)} &middot; DJ Set Setlist Generator &middot;
@@ -5154,6 +5685,22 @@ document.querySelectorAll('.distrib-pane[data-page]').forEach(function(pane) {{
 var SIMILARITY = {sim_json};
 var TRACK_REGISTRY = {track_reg_json};
 var _activePair = null;
+
+function activateMasterPane(paneId, btn) {{
+  document.querySelectorAll('.master-pane').forEach(function(pane) {{
+    pane.classList.toggle('explorer-pane--active', pane.id === paneId);
+  }});
+  document.querySelectorAll('.master-tabs .explorer-tab').forEach(function(tab) {{
+    tab.classList.toggle('is-active', tab.dataset.pane === paneId);
+  }});
+  if (!btn) {{
+    btn = document.querySelector('.master-tabs .explorer-tab[data-pane="' + paneId + '"]');
+  }}
+  if (btn) btn.classList.add('is-active');
+  if (paneId === 'master-pane-library' && typeof _rebuildSetsGrid === 'function') {{
+    setTimeout(function() {{ _rebuildSetsGrid(); }}, 40);
+  }}
+}}
 
 /* ── Artist filter state ── */
 var _distribSelectedArtists = new Set();
@@ -5340,6 +5887,7 @@ function toggleStapleSpotify(btn, trackId) {{
 
 /* ── Matrix cell click ── */
 function matrixClick(artistA, artistB) {{
+  activateMasterPane('master-pane-network');
   var same = _activePair && _activePair[0] === artistA && _activePair[1] === artistB;
   document.querySelectorAll('.matrix-cell--clickable').forEach(function(c) {{
     c.classList.remove('matrix-cell--active');
@@ -5974,28 +6522,191 @@ function toggleCardTracklist(idx) {{
 
 /* ── All Sets: search + artist filter ── */
 var _allSetsArtist = '';
-document.getElementById('allSetsSearch').addEventListener('input', function() {{
-  _applySetsFilter(this.value, _allSetsArtist);
-}});
+var _allSetsSort = 'default';
+var _allSetsQuick = 'all';
+var _masterCompareSetIdx = [];
+
+function _masterSetCardByIdx(idx) {{
+  return document.querySelector('#allSetsGrid .set-card[data-card-idx="' + idx + '"]');
+}}
+
+function _masterTrackSet(card) {{
+  var parts = (card.dataset.trackKeys || '').split('|').filter(Boolean);
+  return new Set(parts);
+}}
+
+function _syncMasterSetSharedHighlights() {{
+  document.querySelectorAll('#allSetsGrid .stl-track').forEach(function(row) {{
+    row.classList.remove('stl-track--shared');
+  }});
+  if (_masterCompareSetIdx.length !== 2) return;
+  var cardA = _masterSetCardByIdx(_masterCompareSetIdx[0]);
+  var cardB = _masterSetCardByIdx(_masterCompareSetIdx[1]);
+  if (!cardA || !cardB) return;
+  var setA = _masterTrackSet(cardA);
+  var setB = _masterTrackSet(cardB);
+  if (!setA.size || !setB.size) return;
+  var shared = new Set();
+  setA.forEach(function(k) {{ if (setB.has(k)) shared.add(k); }});
+  if (!shared.size) return;
+  [cardA, cardB].forEach(function(card) {{
+    card.querySelectorAll('.stl-track').forEach(function(row) {{
+      var key = (row.dataset.trackKey || '').trim().toLowerCase();
+      if (shared.has(key)) row.classList.add('stl-track--shared');
+    }});
+  }});
+}}
+
+function _renderMasterSetCompare() {{
+  var panel = document.getElementById('masterSetComparePanel');
+  var body = document.getElementById('masterSetCompareBody');
+  if (!panel || !body) return;
+  if (!_masterCompareSetIdx.length) {{
+    panel.hidden = true;
+    body.innerHTML = '';
+    return;
+  }}
+  panel.hidden = false;
+  if (_masterCompareSetIdx.length < 2) {{
+    body.innerHTML = '<div class="set-compare-empty">1 set selected. Choose one more to compare.</div>';
+    return;
+  }}
+  var cardA = _masterSetCardByIdx(_masterCompareSetIdx[0]);
+  var cardB = _masterSetCardByIdx(_masterCompareSetIdx[1]);
+  if (!cardA || !cardB) {{
+    body.innerHTML = '<div class="set-compare-empty">Comparison unavailable.</div>';
+    return;
+  }}
+  var titleA = cardA.querySelector('.set-card-title') ? cardA.querySelector('.set-card-title').textContent.trim() : 'Set A';
+  var titleB = cardB.querySelector('.set-card-title') ? cardB.querySelector('.set-card-title').textContent.trim() : 'Set B';
+  var artistA = cardA.dataset.artistName || 'Unknown';
+  var artistB = cardB.dataset.artistName || 'Unknown';
+  var setA = _masterTrackSet(cardA);
+  var setB = _masterTrackSet(cardB);
+  var shared = [];
+  setA.forEach(function(k) {{ if (setB.has(k)) shared.push(k); }});
+  var unionCount = new Set([].concat(Array.from(setA), Array.from(setB))).size || 1;
+  var overlapPct = Math.round((shared.length / unionCount) * 100);
+  var onlyA = setA.size - shared.length;
+  var onlyB = setB.size - shared.length;
+  var rateA = parseInt(cardA.dataset.rate || '0', 10);
+  var rateB = parseInt(cardB.dataset.rate || '0', 10);
+  var sharedChips = shared.slice(0, 10).map(function(k) {{
+    return '<span class="xp-tag">' + esc(k) + '</span>';
+  }}).join('');
+  body.innerHTML = ''
+    + '<div class="set-compare-grid">'
+    + '<div class="set-compare-col"><div class="set-compare-label">' + esc(artistA) + '</div><div class="set-compare-name">' + esc(titleA) + '</div></div>'
+    + '<div class="set-compare-col"><div class="set-compare-label">' + esc(artistB) + '</div><div class="set-compare-name">' + esc(titleB) + '</div></div>'
+    + '</div>'
+    + '<div class="set-compare-metrics">'
+    + '<div class="set-compare-metric"><span>' + shared.length + '</span><small>Shared Tracks</small></div>'
+    + '<div class="set-compare-metric"><span>' + overlapPct + '%</span><small>Catalog Overlap</small></div>'
+    + '<div class="set-compare-metric"><span>' + Math.abs(rateA - rateB) + '%</span><small>ID Rate Delta</small></div>'
+    + '<div class="set-compare-metric"><span>' + onlyA + '</span><small>Only In First</small></div>'
+    + '<div class="set-compare-metric"><span>' + onlyB + '</span><small>Only In Second</small></div>'
+    + '<div class="set-compare-metric"><span>' + Math.abs(setA.size - setB.size) + '</span><small>Track Count Delta</small></div>'
+    + '</div>'
+    + (sharedChips ? '<div class="set-compare-shared"><div class="set-compare-label">Shared Track Keys</div><div class="xp-tags">' + sharedChips + '</div></div>' : '<div class="set-compare-empty">No shared tracks between selected sets.</div>');
+}}
+
+function toggleMasterSetCompare(event, idx) {{
+  if (event) event.stopPropagation();
+  var id = String(idx);
+  var pos = _masterCompareSetIdx.indexOf(id);
+  if (pos >= 0) {{
+    _masterCompareSetIdx.splice(pos, 1);
+  }} else {{
+    if (_masterCompareSetIdx.length >= 2) _masterCompareSetIdx.shift();
+    _masterCompareSetIdx.push(id);
+  }}
+  document.querySelectorAll('#allSetsGrid .set-card').forEach(function(card) {{
+    var selected = _masterCompareSetIdx.indexOf(String(card.dataset.cardIdx)) >= 0;
+    card.classList.toggle('set-card--selected', selected);
+    var btn = card.querySelector('.sc-compare-btn');
+    if (btn) btn.textContent = selected ? 'Comparing' : '+ Compare';
+  }});
+  _renderMasterSetCompare();
+  _syncMasterSetSharedHighlights();
+}}
+
+function clearMasterSetCompare() {{
+  _masterCompareSetIdx = [];
+  document.querySelectorAll('#allSetsGrid .set-card').forEach(function(card) {{
+    card.classList.remove('set-card--selected');
+    card.querySelectorAll('.stl-track').forEach(function(row) {{ row.classList.remove('stl-track--shared'); }});
+    var btn = card.querySelector('.sc-compare-btn');
+    if (btn) btn.textContent = '+ Compare';
+  }});
+  _renderMasterSetCompare();
+}}
+
+var allSetsSearch = document.getElementById('allSetsSearch');
+if (allSetsSearch) {{
+  allSetsSearch.addEventListener('input', function() {{
+    _applySetsFilter(this.value, _allSetsArtist);
+  }});
+}}
+
+function setAllSetsSort(sort, btn) {{
+  _allSetsSort = sort || 'default';
+  document.querySelectorAll('#allSetsSortBtns .sort-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+  if (btn) btn.classList.add('active');
+  _applySetsFilter(allSetsSearch ? allSetsSearch.value : '', _allSetsArtist);
+}}
+
+function setAllSetsQuick(quick, btn) {{
+  _allSetsQuick = quick || 'all';
+  document.querySelectorAll('#allSetsQuickBtns .sort-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+  if (btn) btn.classList.add('active');
+  _applySetsFilter(allSetsSearch ? allSetsSearch.value : '', _allSetsArtist);
+}}
+
 function filterAllSets(artist, btn) {{
+  activateMasterPane('master-pane-library');
   _allSetsArtist = artist;
   document.querySelectorAll('#artistFilterBtns .sort-btn').forEach(function(b) {{ b.classList.remove('active'); }});
-  btn.classList.add('active');
-  _applySetsFilter(document.getElementById('allSetsSearch').value, artist);
+  if (btn) btn.classList.add('active');
+  _applySetsFilter(allSetsSearch ? allSetsSearch.value : '', artist);
 }}
+
+function _passesAllSetsQuick(card) {{
+  var rate = parseInt(card.dataset.rate || '0', 10);
+  var duration = parseInt(card.dataset.duration || '0', 10);
+  var tracks = parseInt(card.dataset.tracks || '0', 10);
+  if (_allSetsQuick === 'high-id') return rate >= 80;
+  if (_allSetsQuick === 'long') return duration >= 5400;
+  if (_allSetsQuick === 'dense') return tracks >= 28;
+  return true;
+}}
+
+function _allSetsSorter(a, b) {{
+  switch (_allSetsSort) {{
+    case 'tracks':   return parseInt(b.dataset.tracks || '0', 10) - parseInt(a.dataset.tracks || '0', 10);
+    case 'rate':     return parseInt(b.dataset.rate || '0', 10) - parseInt(a.dataset.rate || '0', 10);
+    case 'duration': return parseInt(b.dataset.duration || '0', 10) - parseInt(a.dataset.duration || '0', 10);
+    default:         return parseInt(a.dataset.cardIdx || '0', 10) - parseInt(b.dataset.cardIdx || '0', 10);
+  }}
+}}
+
 function _applySetsFilter(query, artist) {{
-  var q = query.toLowerCase();
-  document.querySelectorAll('.set-card').forEach(function(card) {{
+  var q = (query || '').toLowerCase();
+  var cards = Array.from(document.querySelectorAll('#allSetsGrid .set-card'));
+  cards.forEach(function(card) {{
     var matchQ = !q || (card.dataset.searchText||'').toLowerCase().indexOf(q) !== -1;
     var matchA = !artist || card.dataset.artistName === artist;
-    card.style.display = (matchQ && matchA) ? '' : 'none';
+    var matchQuick = _passesAllSetsQuick(card);
+    card.style.display = (matchQ && matchA && matchQuick) ? '' : 'none';
   }});
-  _rebuildSetsGrid();
+  cards.sort(_allSetsSorter);
+  _rebuildSetsGrid(cards);
+  _renderMasterSetCompare();
+  _syncMasterSetSharedHighlights();
 }}
 
 /* ── All Sets masonry layout ── */
 var _setsTimer;
-function _rebuildSetsGrid() {{
+function _rebuildSetsGrid(cards) {{
   var grid = document.getElementById('allSetsGrid');
   if (!grid) return;
   var GAP = 12, MIN_W = 260;
@@ -6006,7 +6717,7 @@ function _rebuildSetsGrid() {{
     col.className = 'sets-col';
     cols.push(col);
   }}
-  var allCards = Array.from(grid.querySelectorAll('.set-card'));
+  var allCards = cards || Array.from(grid.querySelectorAll('.set-card'));
   var visibleCards = allCards.filter(function(c) {{ return c.style.display !== 'none'; }});
   var hiddenCards = allCards.filter(function(c) {{ return c.style.display === 'none'; }});
   visibleCards.forEach(function(card, i) {{ cols[i % nCols].appendChild(card); }});
@@ -6016,9 +6727,11 @@ function _rebuildSetsGrid() {{
 }}
 window.addEventListener('resize', function() {{
   clearTimeout(_setsTimer);
-  _setsTimer = setTimeout(_rebuildSetsGrid, 150);
+  _setsTimer = setTimeout(function() {{
+    _applySetsFilter(allSetsSearch ? allSetsSearch.value : '', _allSetsArtist);
+  }}, 150);
 }});
-_rebuildSetsGrid();
+_applySetsFilter(allSetsSearch ? allSetsSearch.value : '', _allSetsArtist);
 
 /* ── Genre/Label distribution: search + pagination ── */
 var DISTRIB_PER_PAGE = 20;
@@ -6403,6 +7116,784 @@ _MASTER_CSS = """
 """
 
 
+_LIQUID_GLASS_CSS = """
+:root {
+  --bg-0: #080b12;
+  --bg-1: #0d1321;
+  --bg-2: #121c2f;
+  --surface: rgba(16, 24, 38, 0.78);
+  --surface-soft: rgba(12, 18, 30, 0.55);
+  --border: rgba(123, 172, 255, 0.24);
+  --text: #e8efff;
+  --muted: #8fa2c8;
+  --accent: #5af2ff;
+  --accent-2: #ffbf69;
+  --danger: #ff6b6b;
+  --shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+  --radius: 16px;
+}
+
+body {
+  color-scheme: dark;
+  background:
+    radial-gradient(65rem 46rem at -10% -8%, rgba(90, 242, 255, 0.14) 0%, transparent 65%),
+    radial-gradient(62rem 40rem at 108% -6%, rgba(255, 191, 105, 0.14) 0%, transparent 64%),
+    radial-gradient(70rem 42rem at 50% 112%, rgba(94, 123, 255, 0.16) 0%, transparent 70%),
+    linear-gradient(155deg, var(--bg-0) 0%, var(--bg-1) 54%, var(--bg-2) 100%);
+  color: var(--text);
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  min-height: 100vh;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  filter: blur(48px);
+}
+body::before {
+  width: 24rem;
+  height: 24rem;
+  top: 7vh;
+  left: 2vw;
+  border-radius: 42% 58% 66% 34%;
+  background: rgba(90, 242, 255, 0.16);
+  animation: lg-float-a 14s ease-in-out infinite;
+}
+body::after {
+  width: 21rem;
+  height: 21rem;
+  right: 4vw;
+  bottom: 9vh;
+  border-radius: 57% 43% 40% 60%;
+  background: rgba(255, 191, 105, 0.14);
+  animation: lg-float-b 16s ease-in-out infinite;
+}
+
+.xp-shell {
+  max-width: 1460px;
+  padding-top: 26px;
+}
+
+.container > * {
+  animation: lg-rise 0.6s ease both;
+}
+.container > *:nth-child(2) { animation-delay: 0.05s; }
+.container > *:nth-child(3) { animation-delay: 0.1s; }
+.container > *:nth-child(4) { animation-delay: 0.14s; }
+.container > *:nth-child(5) { animation-delay: 0.18s; }
+.container > *:nth-child(6) { animation-delay: 0.22s; }
+
+h1, h2, h3, .artist-name, .page-subtitle {
+  font-family: "Sora", "Space Grotesk", "Avenir Next", sans-serif;
+}
+
+.header-meta,
+.page-subtitle,
+.track-stats,
+.track-time,
+.source-link,
+.sig-score-desc,
+.master-hint,
+.conn-row-meta,
+.footer,
+.empty,
+.genre-bar-count,
+.master-artist-stats,
+.master-played-artist-name {
+  color: var(--muted) !important;
+}
+
+.header-meta a,
+.track-time-link,
+.source-link:hover,
+.staple-sets-link,
+.master-artist-name,
+.master-pair-name,
+.stat-value,
+.sig-score-value,
+.pill-high,
+.set-card-title:hover,
+.track-artist,
+.btn-spotify,
+.btn-play,
+.master-set-artist-label {
+  color: var(--accent) !important;
+}
+
+.header,
+.stats-bar,
+.stats-strip,
+.timeline-wrap,
+.journey-section,
+.controls,
+.sets-controls,
+section,
+.player-wrap,
+.track-card,
+.set-card,
+.track-row,
+.sig-score,
+.sig-staple-card,
+.sig-trend-row,
+.failed-item,
+.master-artist-card,
+.master-played-card,
+.master-matrix-scroll,
+.master-connection-area,
+#distribFilterBar,
+.genre-tracks-panel,
+.hm-tooltip,
+#tl-tooltip,
+#journey-tooltip,
+.player-pill {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+.header,
+.timeline-wrap,
+.journey-section,
+.controls,
+.sets-controls,
+section,
+.master-matrix-scroll,
+#distribFilterBar {
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.explorer-hero {
+  margin-bottom: 18px;
+}
+
+.explorer-heading {
+  margin: 0 0 6px;
+  border: none;
+  font-size: 12px;
+  color: #b7c5e6;
+  letter-spacing: 1.3px;
+}
+
+.explorer-subline {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.explorer-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+
+.explorer-tab {
+  border-radius: 999px;
+  border: 1px solid rgba(123, 172, 255, 0.28);
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.25px;
+  cursor: pointer;
+}
+.explorer-tab.is-active {
+  border-color: rgba(90, 242, 255, 0.7);
+  color: var(--accent);
+  background: rgba(90, 242, 255, 0.1);
+}
+.explorer-pane { display: none; }
+.explorer-pane.explorer-pane--active { display: block; }
+
+.set-cockpit {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.1fr);
+  gap: 14px;
+  align-items: start;
+}
+.set-cockpit-main,
+.set-cockpit-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.set-cockpit-sidebar {
+  position: sticky;
+  top: 16px;
+}
+
+.insight-panel {
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  padding: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.insight-metric {
+  padding: 10px 10px;
+  background: rgba(15, 25, 40, 0.75);
+  border: 1px solid rgba(123, 172, 255, 0.16);
+  border-radius: 10px;
+}
+.insight-metric--wide {
+  grid-column: 1 / -1;
+}
+.insight-value {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.insight-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--muted);
+}
+.insight-block {
+  margin-top: 10px;
+}
+.insight-block-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #b7c5e6;
+  margin-bottom: 6px;
+}
+
+.artist-focus-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.focus-card {
+  background: var(--surface-soft);
+  border: 1px solid rgba(123, 172, 255, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+}
+.focus-card h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  color: #dbe8ff;
+}
+
+.xp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.xp-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.55px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(90, 242, 255, 0.11);
+  border: 1px solid rgba(90, 242, 255, 0.34);
+  color: #ccf8ff;
+}
+.xp-tag--muted {
+  color: #a5b3d6;
+  background: rgba(123, 172, 255, 0.08);
+  border-color: rgba(123, 172, 255, 0.2);
+}
+
+.header h1 {
+  line-height: 1.08;
+  color: #eff4ff;
+}
+.artist-name {
+  color: #eef4ff !important;
+  text-shadow: none;
+}
+
+.stats-strip,
+.stats-bar {
+  gap: 10px 12px;
+}
+
+section h2 {
+  border-bottom-color: rgba(123, 172, 255, 0.24);
+  color: #d9e5ff;
+}
+
+.stat-block {
+  background: rgba(14, 22, 36, 0.84) !important;
+  border-color: rgba(123, 172, 255, 0.3) !important;
+  border-radius: 12px;
+}
+
+.timeline-bar,
+.set-mini-timeline,
+.stl-node-mini-timeline,
+.genre-bar-track,
+.detail-density-bar,
+.hm-cell--empty {
+  background: rgba(6, 12, 20, 0.7) !important;
+}
+
+.track-card,
+.set-card,
+.track-row,
+.sig-staple-card,
+.sig-trend-row,
+.failed-item,
+.master-artist-card,
+.master-played-card {
+  border-radius: 14px;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  background: rgba(12, 20, 32, 0.85) !important;
+}
+
+.track-card:hover,
+.set-card:hover,
+.track-row:hover,
+.sig-staple-card:hover,
+.master-artist-card:hover,
+.master-played-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(90, 242, 255, 0.44) !important;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
+}
+
+.track-artist,
+.track-title,
+.set-card-title,
+.sig-staple-artist,
+.conn-track-name,
+.sig-trend-artist,
+.track-title-row,
+.master-played-title,
+.genre-bar-label {
+  color: var(--text) !important;
+}
+
+.track-sep,
+.sig-trend-sep {
+  color: rgba(143, 162, 200, 0.5) !important;
+}
+
+.track-label,
+.genre-tag,
+.master-genre-tag,
+.master-dj-chip,
+.count-badge,
+.set-card-pill,
+.stat-pill,
+.app-chip {
+  background: rgba(90, 242, 255, 0.08) !important;
+  border-color: rgba(90, 242, 255, 0.24) !important;
+  color: var(--muted) !important;
+}
+
+.btn,
+.sort-btn,
+.filter-btn,
+.journey-filter,
+.distrib-tab,
+.distrib-pg-btn,
+.staple-filter-btn,
+.btn-staple-sets,
+.btn-staple-spotify,
+.distrib-mode-btn,
+.distrib-clear-btn {
+  border-radius: 999px !important;
+  border-color: rgba(123, 172, 255, 0.28) !important;
+  background: rgba(12, 20, 32, 0.86) !important;
+  color: var(--muted) !important;
+}
+
+.filter-btn.active,
+.sort-btn.active,
+.journey-filter.active,
+.distrib-tab--active,
+.staple-filter-btn--active,
+.distrib-mode-btn--active,
+.master-artist-card--selected {
+  background: rgba(90, 242, 255, 0.12) !important;
+  border-color: rgba(90, 242, 255, 0.56) !important;
+  color: var(--accent) !important;
+}
+
+.search-input,
+.distrib-search-input {
+  border-radius: 999px !important;
+  border: 1px solid rgba(123, 172, 255, 0.24) !important;
+  background: rgba(8, 14, 24, 0.88) !important;
+  color: var(--text) !important;
+}
+.search-input::placeholder,
+.distrib-search-input::placeholder {
+  color: rgba(143, 162, 200, 0.65) !important;
+}
+.search-input:focus,
+.distrib-search-input:focus {
+  border-color: rgba(90, 242, 255, 0.68) !important;
+  box-shadow: 0 0 0 3px rgba(90, 242, 255, 0.2);
+}
+
+.track-details,
+.staple-sets-panel,
+.set-card-tracklist,
+.stl-tracklist {
+  border-top-color: rgba(123, 172, 255, 0.2) !important;
+  background: rgba(6, 12, 20, 0.65) !important;
+}
+
+.matrix-cell,
+.matrix-header-cell,
+.matrix-row-label {
+  border-color: rgba(123, 172, 255, 0.18) !important;
+}
+
+.matrix-cell--diag {
+  background: rgba(8, 14, 24, 0.75) !important;
+  color: rgba(143, 162, 200, 0.45) !important;
+}
+
+.player-wrap iframe,
+.player-wrap #ytPlayer,
+.set-card-thumb,
+.sig-staple-art,
+.track-art img {
+  border-radius: 12px;
+}
+
+.footer {
+  border-top-color: rgba(123, 172, 255, 0.28) !important;
+}
+
+.master-hint {
+  margin-top: -4px;
+}
+
+.master-matrix-scroll {
+  overflow-x: auto;
+}
+
+.matrix-cell--clickable:hover {
+  transform: scale(1.03);
+  filter: brightness(1.18);
+}
+
+.master-connection-area {
+  position: relative;
+}
+.master-connection-area::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(130deg, rgba(90, 242, 255, 0.08) 0%, transparent 45%, rgba(255, 191, 105, 0.08) 100%);
+}
+
+#allSetsGrid .set-card {
+  border-left: 3px solid rgba(90, 242, 255, 0.45);
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.control-label {
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #b7c5e6;
+}
+.track-sort-select {
+  border-radius: 999px;
+  border: 1px solid rgba(123, 172, 255, 0.28);
+  background: rgba(8, 14, 24, 0.88);
+  color: var(--text);
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.set-tool-btn {
+  padding-inline: 14px;
+}
+.track-facets {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.track-facet-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.track-facet-label {
+  font-size: 11px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: #a6b8de;
+  min-width: 78px;
+}
+.track-facet-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.track-facet-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(123, 172, 255, 0.28);
+  background: rgba(8, 14, 24, 0.82);
+  color: var(--muted);
+  padding: 5px 10px;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+}
+.track-facet-btn--active {
+  border-color: rgba(90, 242, 255, 0.58);
+  color: var(--accent);
+  background: rgba(90, 242, 255, 0.14);
+}
+
+.track-card {
+  position: relative;
+  overflow: hidden;
+}
+.track-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 99px;
+  opacity: 0.8;
+  background: rgba(123, 172, 255, 0.45);
+}
+.track-card[data-conf="HIGH"]::before { background: rgba(90, 242, 255, 0.95); }
+.track-card[data-conf="MEDIUM"]::before { background: rgba(255, 191, 105, 0.92); }
+.track-card[data-conf="LOW"]::before { background: rgba(255, 122, 122, 0.92); }
+.track-card[data-conf="UNCERTAIN"]::before { background: rgba(150, 167, 204, 0.55); }
+.tracklist--compact .track-card {
+  padding-block: 6px;
+  gap: 8px;
+}
+.tracklist--compact .track-meta {
+  gap: 5px;
+}
+.tracklist--compact .genre-tag,
+.tracklist--compact .track-label,
+.tracklist--compact .track-stats {
+  display: none;
+}
+.tracklist--compact .track-title-row {
+  margin-bottom: 1px;
+}
+
+.set-card-meter {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(8, 14, 24, 0.85);
+  overflow: hidden;
+}
+.set-card-meter-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(255, 191, 105, 0.9) 0%, rgba(90, 242, 255, 0.95) 100%);
+}
+.set-card-footer {
+  gap: 8px;
+}
+.set-card-actions-left,
+.set-card-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sc-compare-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(123, 172, 255, 0.28);
+  background: rgba(8, 14, 24, 0.88);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.sc-compare-btn:hover {
+  border-color: rgba(90, 242, 255, 0.58);
+  color: var(--accent);
+}
+.set-card--selected {
+  border-color: rgba(90, 242, 255, 0.74) !important;
+  box-shadow: 0 0 0 1px rgba(90, 242, 255, 0.4), 0 16px 30px rgba(0, 0, 0, 0.5);
+}
+.set-card--selected .sc-compare-btn {
+  border-color: rgba(90, 242, 255, 0.62);
+  color: var(--accent);
+  background: rgba(90, 242, 255, 0.14);
+}
+
+.set-compare-panel {
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+.set-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.set-compare-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #dbe8ff;
+}
+.set-compare-copy {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.set-compare-body {
+  display: grid;
+  gap: 10px;
+}
+.set-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.set-compare-col {
+  border: 1px solid rgba(123, 172, 255, 0.24);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(10, 16, 28, 0.75);
+}
+.set-compare-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #9bb0db;
+}
+.set-compare-name {
+  font-size: 13px;
+  color: #edf4ff;
+  margin-top: 3px;
+  line-height: 1.25;
+}
+.set-compare-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.set-compare-metric {
+  border-radius: 10px;
+  border: 1px solid rgba(123, 172, 255, 0.2);
+  background: rgba(8, 14, 24, 0.75);
+  padding: 8px 9px;
+}
+.set-compare-metric span {
+  display: block;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 14px;
+}
+.set-compare-metric small {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.set-compare-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.stl-track--shared {
+  background: rgba(90, 242, 255, 0.14) !important;
+  border-radius: 8px;
+}
+
+@media (max-width: 920px) {
+  .xp-shell { max-width: 98vw; }
+  .header,
+  .timeline-wrap,
+  .journey-section,
+  .controls,
+  .sets-controls,
+  section,
+  .master-matrix-scroll,
+  #distribFilterBar {
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .set-cockpit {
+    grid-template-columns: 1fr;
+  }
+  .set-cockpit-sidebar {
+    position: static;
+  }
+  .artist-focus-grid {
+    grid-template-columns: 1fr;
+  }
+  .set-compare-grid {
+    grid-template-columns: 1fr;
+  }
+  .set-compare-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .container > * {
+    animation: none !important;
+  }
+  body::before,
+  body::after {
+    animation: none !important;
+  }
+}
+
+@keyframes lg-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes lg-float-a {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-14px) translateX(8px); }
+}
+
+@keyframes lg-float-b {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(12px) translateX(-8px); }
+}
+"""
+
+
 def _render_master_artist_cards(artists: list) -> str:
     import json as _j
     if not artists:
@@ -6780,6 +8271,12 @@ def _render_master_all_sets(all_sets: list) -> str:
             "HIGH": "#00e676", "MEDIUM": "#ffd740",
             "LOW": "#ff9100", "UNCERTAIN": "#757575",
         }
+        track_objs = s.get("tracks", [])[:40]
+        track_keys_for_compare = [
+            str(t.get("track_key", "")).strip().lower()
+            for t in track_objs
+            if str(t.get("track_key", "")).strip()
+        ]
         track_rows = "".join(
             '<div class="stl-track" data-track-key="{tkey}">'
             '<span class="stl-track-time">{time}</span>'
@@ -6797,7 +8294,7 @@ def _render_master_all_sets(all_sets: list) -> str:
                 conf=_esc(t.get("confidence", "UNCERTAIN")),
                 cc=_card_conf_colors.get(t.get("confidence", "UNCERTAIN"), "#757575"),
             )
-            for t in s.get("tracks", [])[:40]
+            for t in track_objs
         )
         tracklist_html = (
             f'<div class="set-card-tracklist" hidden>{track_rows}</div>'
@@ -6825,9 +8322,23 @@ def _render_master_all_sets(all_sets: list) -> str:
         high_pill = (
             f'<span class="set-card-pill pill-high">{high} high</span>' if high else ""
         )
+        data_track_keys = _esc('|'.join(track_keys_for_compare))
+        rec_width = max(0.0, min(100.0, float(rate)))
+        meter_html = (
+            f'<div class="set-card-meter"><span class="set-card-meter-fill" style="width:{rec_width:.1f}%"></span></div>'
+            if total else ''
+        )
+        compare_btn = (
+            f'<button class="sc-compare-btn" onclick="toggleMasterSetCompare(event,{idx})">+ Compare</button>'
+        )
 
         rows.append(
             f'<div class="set-card" data-card-idx="{idx}" '
+            f'data-tracks="{int(total)}" '
+            f'data-rate="{int(rate)}" '
+            f'data-duration="{int(dur_s)}" '
+            f'data-high="{int(high)}" '
+            f'data-track-keys="{data_track_keys}" '
             f'data-search-text="{search_text}" '
             f'data-artist-name="{_esc(artist_name)}">'
             + thumb_html
@@ -6837,13 +8348,14 @@ def _render_master_all_sets(all_sets: list) -> str:
             + (f'target="_blank" rel="noopener"' if html_link != "#" else "")
             + f">{_esc(title)}</a>"
             + mini_tl
+            + meter_html
             + f'<div class="set-card-stats">'
             + f'<span class="set-card-pill">{total} tracks</span>'
             + high_pill
             + f'<span class="set-card-pill">{rate:.0f}% id</span>'
             + f'<span class="set-card-pill">{dur_str}</span>'
             + "</div>"
-            + f'<div class="set-card-footer">{source_link}{toggle_btn}</div>'
+            + f'<div class="set-card-footer"><div class="set-card-actions-left">{source_link}</div><div class="set-card-actions-right">{compare_btn}{toggle_btn}</div></div>'
             + "</div>"
             + tracklist_html
             + "</div>"

@@ -59,6 +59,15 @@ def _json_to_enriched_tracks(tracks_data: list[dict]) -> list[dict]:
                 "spotify_url": t.get("spotify_url"),
                 "spotify_album_art": t.get("spotify_album_art"),
                 "spotify_preview_url": t.get("spotify_preview_url"),
+                "spotify_artist_id": t.get("spotify_artist_id"),
+                "spotify_artist_name": t.get("spotify_artist_name"),
+                "spotify_artist_url": t.get("spotify_artist_url"),
+                "spotify_artist_profile_image": (
+                    t.get("spotify_artist_profile_image") or t.get("spotify_artist_image")
+                ),
+                "spotify_artist_image": (
+                    t.get("spotify_artist_image") or t.get("spotify_artist_profile_image")
+                ),
                 "spotify_genres": t.get("spotify_genres", []),
                 "bpm": t.get("bpm"),
                 "key": t.get("key"),

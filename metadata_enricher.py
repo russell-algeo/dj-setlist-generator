@@ -1,6 +1,7 @@
 """Enrich tracks with metadata from Spotify, YouTube, Discogs, and ReccoBeats."""
 
 import functools
+import re
 import time
 import requests
 from requests.adapters import HTTPAdapter
@@ -37,6 +38,144 @@ _discogs_session = _make_discogs_session()
 
 # Spotify pitch class → note name (used by ReccoBeats key/mode mapping)
 _KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+
+def _normalize_name(value: str) -> str:
+    """Lowercase alphanumeric normalization for loose artist-name matching."""
+    if not value:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _tokenize_name(value: str) -> set[str]:
+    """Tokenize an artist name into comparable lowercase tokens."""
+    return set(re.findall(r"[a-z0-9]+", (value or "").lower()))
+
+
+def _is_exact_artist_name_match(expected: str, candidate: str) -> bool:
+    """Strict artist-name equality for profile matching across providers."""
+    expected_norm = _normalize_name(expected)
+    candidate_norm = _normalize_name(candidate)
+    if not expected_norm or not candidate_norm:
+        return False
+    if expected_norm != candidate_norm:
+        return False
+    expected_tokens = _tokenize_name(expected)
+    candidate_tokens = _tokenize_name(candidate)
+    if expected_tokens and candidate_tokens and expected_tokens != candidate_tokens:
+        return False
+    return True
+
+
+def _is_valid_artist_image_url(url: str | None) -> bool:
+    """Return True when image URL appears usable for artist-card artwork."""
+    if not url:
+        return False
+    lower = str(url).strip().lower()
+    if not lower.startswith("http"):
+        return False
+    if "spacer.gif" in lower:
+        return False
+    return True
+
+
+def _pick_discogs_artist_image(images: list[dict], fallback_url: str | None = None) -> str | None:
+    """Pick the best Discogs artist image URL, preferring full-size images."""
+    ranked = sorted(
+        images or [],
+        key=lambda img: (
+            1 if str(img.get("type", "")).lower() == "primary" else 0,
+            int(img.get("width") or 0) * int(img.get("height") or 0),
+        ),
+        reverse=True,
+    )
+
+    # Prefer full-size URI first.
+    for img in ranked:
+        url = img.get("uri")
+        if _is_valid_artist_image_url(url):
+            return url
+
+    # Fall back to small URI only if no full-size URI exists.
+    for img in ranked:
+        url = img.get("uri150")
+        if _is_valid_artist_image_url(url):
+            return url
+
+    return fallback_url if _is_valid_artist_image_url(fallback_url) else None
+
+
+_GENRE_ALIAS_MAP = {
+    "lo fi house": "lo-fi house",
+    "italodance": "italo dance",
+}
+_GENRE_TOKEN_STOPWORDS = {"and", "the", "music", "style", "styles"}
+
+
+def _normalize_genre_label(value: str) -> str:
+    """Normalize a genre/style label for overlap matching."""
+    if not value:
+        return ""
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    if not normalized:
+        return ""
+    return _GENRE_ALIAS_MAP.get(normalized, normalized)
+
+
+def _genre_label_set(genres: list[str] | None) -> set[str]:
+    """Build a normalized set of genre/style labels."""
+    return {
+        _normalize_genre_label(g)
+        for g in (genres or [])
+        if _normalize_genre_label(g)
+    }
+
+
+def _genre_token_set(genres: list[str] | None) -> set[str]:
+    """Build a normalized token set from genre/style labels."""
+    tokens: set[str] = set()
+    for label in _genre_label_set(genres):
+        for token in label.split():
+            if len(token) >= 3 and token not in _GENRE_TOKEN_STOPWORDS:
+                tokens.add(token)
+    return tokens
+
+
+def _genre_overlap(expected_genres: list[str], provider_genres: list[str]) -> tuple[float, int, int]:
+    """Compute overlap score and shared counts between expected and provider genres."""
+    expected_labels = _genre_label_set(expected_genres)
+    provider_labels = _genre_label_set(provider_genres)
+    expected_tokens = _genre_token_set(expected_genres)
+    provider_tokens = _genre_token_set(provider_genres)
+
+    if not expected_labels or not provider_labels:
+        return 0.0, 0, 0
+
+    shared_labels = expected_labels & provider_labels
+    shared_tokens = expected_tokens & provider_tokens
+    label_overlap = len(shared_labels) / max(1, min(len(expected_labels), len(provider_labels)))
+    token_overlap = 0.0
+    if expected_tokens and provider_tokens:
+        token_overlap = len(shared_tokens) / max(1, min(len(expected_tokens), len(provider_tokens)))
+
+    return round(max(label_overlap, token_overlap), 3), len(shared_labels), len(shared_tokens)
+
+
+def _is_genre_confident_match(
+    expected_genres: list[str],
+    provider_genres: list[str],
+    min_overlap: float,
+) -> tuple[bool, float, str, int, int]:
+    """Return confidence decision for a provider profile using genre overlap."""
+    if not expected_genres:
+        return False, 0.0, "no_expected_genres", 0, 0
+    if not provider_genres:
+        return False, 0.0, "no_provider_genres", 0, 0
+
+    overlap, shared_labels, shared_tokens = _genre_overlap(expected_genres, provider_genres)
+    if overlap >= min_overlap and (shared_labels > 0 or shared_tokens > 0):
+        return True, overlap, "genre_overlap_ok", shared_labels, shared_tokens
+    return False, overlap, "genre_overlap_too_low", shared_labels, shared_tokens
 
 
 def _platform_search(platform_name: str):
@@ -85,7 +224,29 @@ class MetadataEnricher:
         if not any([self.spotify_enabled, self.youtube_enabled, self.discogs_enabled]):
             print("⚠ No enrichment services enabled")
 
-        self._genre_cache = {}  # artist_id -> list of genres
+        # artist_id -> {'genres': [...], 'image_url': str|None, 'url': str|None, 'name': str|None}
+        self._artist_cache = {}
+        # normalized artist name -> set-level profile metadata
+        self._set_artist_profile_cache = {}
+
+    @staticmethod
+    def infer_genre_profile(track_metadata: list[dict], limit: int = 20) -> list[str]:
+        """Infer an artist's genre profile from enriched track metadata."""
+        counts: dict[str, int] = {}
+        for meta in track_metadata or []:
+            genre_values = (
+                (meta.get("discogs_styles") or [])
+                + (meta.get("discogs_genres") or [])
+                + (meta.get("spotify_genres") or [])
+            )
+            for raw in genre_values:
+                label = _normalize_genre_label(raw)
+                if not label:
+                    continue
+                counts[label] = counts.get(label, 0) + 1
+
+        ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        return [name for name, _ in ranked[:limit]]
 
     def enrich_track(self, track) -> dict:
         """
@@ -101,6 +262,11 @@ class MetadataEnricher:
             'spotify_url': None,
             'spotify_album_art': None,
             'spotify_preview_url': None,
+            'spotify_artist_id': None,
+            'spotify_artist_name': None,
+            'spotify_artist_url': None,
+            'spotify_artist_profile_image': None,
+            'spotify_artist_image': None,
             'spotify_genres': [],
             'bpm': None,
             'key': None,
@@ -126,7 +292,15 @@ class MetadataEnricher:
                 enriched['spotify_album_art'] = spotify_data.get('album_art_url')
                 enriched['spotify_preview_url'] = spotify_data.get('preview_url')
                 artist_id = spotify_data.get('artist_id')
-                enriched['spotify_genres'] = self._get_artist_genres(artist_id)
+                enriched['spotify_artist_id'] = artist_id
+                enriched['spotify_artist_name'] = spotify_data.get('artist_name')
+                enriched['spotify_artist_url'] = spotify_data.get('artist_url')
+                profile = self._get_artist_profile(artist_id)
+                enriched['spotify_genres'] = profile.get('genres', [])
+                profile_image_url = profile.get('image_url')
+                enriched['spotify_artist_profile_image'] = profile_image_url
+                # Backward-compatible alias used by older summaries/renderers.
+                enriched['spotify_artist_image'] = profile_image_url
 
         # YouTube
         if self.youtube_enabled:
@@ -173,6 +347,144 @@ class MetadataEnricher:
 
         print("Enrichment complete")
         return enriched_tracks
+
+    def enrich_set_artist_profile(
+        self,
+        artist_name: str,
+        expected_genres: list[str] | None = None,
+    ) -> dict:
+        """Fetch DJ/set artist profile metadata for persistent set-level storage.
+
+        Prefers Spotify artist profile matches, then falls back to Discogs.
+        """
+        normalized = _normalize_name(artist_name)
+        expected_genres = expected_genres or []
+        min_overlap = Config.ARTIST_IMAGE_MIN_GENRE_OVERLAP
+        if not normalized:
+            return {
+                "artist_name": artist_name,
+                "artist_profile_name": None,
+                "artist_profile_image": None,
+                "artist_profile_url": None,
+                "artist_profile_source": None,
+                "artist_profile_confidence": None,
+                "artist_profile_genre_overlap": None,
+                "artist_profile_expected_genres": expected_genres,
+                "artist_profile_provider_genres": [],
+                "artist_profile_rejected_reason": "invalid_artist_name",
+                "spotify_artist_profile_name": None,
+                "spotify_artist_profile_image": None,
+                "spotify_artist_profile_url": None,
+                "spotify_artist_profile_genres": [],
+                "discogs_artist_profile_name": None,
+                "discogs_artist_profile_image": None,
+                "discogs_artist_profile_url": None,
+                "discogs_artist_profile_genres": [],
+            }
+
+        profile = {
+            "artist_name": artist_name,
+            "artist_profile_name": None,
+            "artist_profile_image": None,
+            "artist_profile_url": None,
+            "artist_profile_source": None,
+            "artist_profile_confidence": None,
+            "artist_profile_genre_overlap": None,
+            "artist_profile_expected_genres": expected_genres,
+            "artist_profile_provider_genres": [],
+            "artist_profile_rejected_reason": None,
+            "spotify_artist_profile_name": None,
+            "spotify_artist_profile_image": None,
+            "spotify_artist_profile_url": None,
+            "spotify_artist_profile_genres": [],
+            "discogs_artist_profile_name": None,
+            "discogs_artist_profile_image": None,
+            "discogs_artist_profile_url": None,
+            "discogs_artist_profile_genres": [],
+        }
+
+        if normalized in self._set_artist_profile_cache:
+            cached = dict(self._set_artist_profile_cache[normalized])
+            cached["artist_profile_expected_genres"] = expected_genres
+            if not cached.get("artist_profile_image") or not cached.get("artist_profile_source"):
+                return cached
+            if cached.get("artist_profile_provider_genres"):
+                confident, overlap, reason, _, _ = _is_genre_confident_match(
+                    expected_genres,
+                    cached["artist_profile_provider_genres"],
+                    min_overlap=min_overlap,
+                )
+                if confident and cached.get("artist_profile_image"):
+                    cached["artist_profile_confidence"] = overlap
+                    cached["artist_profile_genre_overlap"] = overlap
+                    cached["artist_profile_rejected_reason"] = None
+                    return cached
+            cached["artist_profile_name"] = None
+            cached["artist_profile_image"] = None
+            cached["artist_profile_url"] = None
+            cached["artist_profile_source"] = None
+            cached["artist_profile_confidence"] = 0.0
+            cached["artist_profile_genre_overlap"] = 0.0
+            cached["artist_profile_rejected_reason"] = "cache_genre_validation_failed"
+            return cached
+
+        spotify_profile = self._search_spotify_artist_profile(artist_name)
+        if spotify_profile:
+            profile["spotify_artist_profile_name"] = spotify_profile.get("name")
+            profile["spotify_artist_profile_url"] = spotify_profile.get("url")
+            profile["spotify_artist_profile_genres"] = spotify_profile.get("genres", [])
+            spotify_image_url = spotify_profile.get("image_url")
+            if spotify_image_url:
+                confident, overlap, reason, _, _ = _is_genre_confident_match(
+                    expected_genres,
+                    profile["spotify_artist_profile_genres"],
+                    min_overlap=min_overlap,
+                )
+                if confident:
+                    profile["spotify_artist_profile_image"] = spotify_image_url
+                    profile["artist_profile_confidence"] = overlap
+                    profile["artist_profile_genre_overlap"] = overlap
+                    profile["artist_profile_provider_genres"] = profile["spotify_artist_profile_genres"]
+                    profile["artist_profile_rejected_reason"] = None
+                    profile["artist_profile_name"] = spotify_profile.get("name")
+                    profile["artist_profile_image"] = spotify_image_url
+                    profile["artist_profile_url"] = spotify_profile.get("url")
+                    profile["artist_profile_source"] = "spotify"
+                else:
+                    profile["spotify_artist_profile_image"] = None
+                    profile["artist_profile_rejected_reason"] = f"spotify_{reason}"
+
+        if not profile["artist_profile_image"]:
+            discogs_profile = self._search_discogs_artist_profile(artist_name)
+            if discogs_profile:
+                profile["discogs_artist_profile_name"] = discogs_profile.get("name")
+                profile["discogs_artist_profile_url"] = discogs_profile.get("url")
+                profile["discogs_artist_profile_genres"] = discogs_profile.get("genres", [])
+                discogs_image_url = discogs_profile.get("image_url")
+                if discogs_image_url:
+                    confident, overlap, reason, _, _ = _is_genre_confident_match(
+                        expected_genres,
+                        profile["discogs_artist_profile_genres"],
+                        min_overlap=min_overlap,
+                    )
+                    if confident:
+                        profile["discogs_artist_profile_image"] = discogs_image_url
+                        profile["artist_profile_confidence"] = overlap
+                        profile["artist_profile_genre_overlap"] = overlap
+                        profile["artist_profile_provider_genres"] = profile["discogs_artist_profile_genres"]
+                        profile["artist_profile_rejected_reason"] = None
+                        profile["artist_profile_name"] = discogs_profile.get("name")
+                        profile["artist_profile_image"] = discogs_image_url
+                        profile["artist_profile_url"] = discogs_profile.get("url")
+                        profile["artist_profile_source"] = "discogs"
+                    else:
+                        profile["discogs_artist_profile_image"] = None
+                        profile["artist_profile_rejected_reason"] = (
+                            profile.get("artist_profile_rejected_reason") or f"discogs_{reason}"
+                        )
+
+        self._set_artist_profile_cache[normalized] = dict(profile)
+        return profile
 
     def _batch_fetch_reccobeats(self, enriched_tracks: list) -> None:
         """Batch fetch audio features from ReccoBeats using Spotify track IDs.
@@ -274,7 +586,7 @@ class MetadataEnricher:
         """Search Spotify and return rich metadata dict with album art, preview URL, and artist ID.
 
         Returns:
-            Dict with 'url', 'album_art_url', 'preview_url', 'artist_id', or None on failure.
+            Dict with track URL, album art, preview, and primary artist identity fields.
         """
         if not self.spotify:
             return None
@@ -319,11 +631,14 @@ class MetadataEnricher:
                 album_images[0]['url'] if album_images else None
             )
 
+            primary_artist = (best.get('artists') or [{}])[0]
             return {
                 'url': best['external_urls']['spotify'],
                 'album_art_url': album_art,
                 'preview_url': best.get('preview_url'),
-                'artist_id': best['artists'][0]['id'] if best.get('artists') else None,
+                'artist_id': primary_artist.get('id'),
+                'artist_name': primary_artist.get('name'),
+                'artist_url': (primary_artist.get('external_urls') or {}).get('spotify'),
             }
         except Exception as e:
             print(f"    [Spotify] Search error: {e}")
@@ -338,17 +653,188 @@ class MetadataEnricher:
         Returns:
             List of up to 3 genre strings, or empty list on failure.
         """
+        return self._get_artist_profile(artist_id).get('genres', [])
+
+    def _get_artist_profile(self, artist_id: str) -> dict:
+        """Fetch Spotify artist profile fields used by the UI, with caching."""
         if not artist_id or not self.spotify:
-            return []
-        if artist_id in self._genre_cache:
-            return self._genre_cache[artist_id]
+            return {'genres': [], 'image_url': None, 'url': None, 'name': None}
+        if artist_id in self._artist_cache:
+            return self._artist_cache[artist_id]
         try:
             artist = self.spotify.artist(artist_id)
-            genres = artist.get('genres', [])[:3]
-            self._genre_cache[artist_id] = genres
-            return genres
+            images = artist.get('images', [])
+            image_url = next(
+                (img.get('url') for img in images if img.get('height') == 320),
+                images[0].get('url') if images else None,
+            )
+            profile = {
+                'genres': artist.get('genres', [])[:3],
+                'image_url': image_url,
+                'url': (artist.get('external_urls') or {}).get('spotify'),
+                'name': artist.get('name'),
+            }
+            self._artist_cache[artist_id] = profile
+            return profile
         except Exception:
-            return []
+            return {'genres': [], 'image_url': None, 'url': None, 'name': None}
+
+    def _search_spotify_artist_profile(self, artist_name: str) -> Optional[dict]:
+        """Search Spotify artist profiles and return a best-match profile dict."""
+        if not self.spotify:
+            return None
+        if not _normalize_name(artist_name):
+            return None
+        try:
+            queries = [f"artist:{artist_name}", f"\"{artist_name}\"", artist_name]
+            items_by_id: dict[str, dict] = {}
+            for query in queries:
+                results = self.spotify.search(q=query, type="artist", limit=50)
+                for item in results.get("artists", {}).get("items", []) or []:
+                    artist_id = item.get("id")
+                    if artist_id and artist_id not in items_by_id:
+                        items_by_id[artist_id] = item
+
+            items = list(items_by_id.values())
+            if not items:
+                return None
+
+            exact_items = [
+                item for item in items
+                if _is_exact_artist_name_match(artist_name, item.get("name", ""))
+            ]
+            if not exact_items:
+                return None
+
+            def score(item: dict) -> tuple[int, int]:
+                images = item.get("images", [])
+                image_url = next(
+                    (img.get("url") for img in images if img.get("height") == 320),
+                    images[0].get("url") if images else None,
+                )
+                has_image = 1 if _is_valid_artist_image_url(image_url) else 0
+                popularity = int(item.get("popularity", 0) or 0)
+                return (has_image, popularity)
+
+            best = sorted(exact_items, key=score, reverse=True)[0]
+            best_artist_id = best.get("id")
+
+            images = best.get("images", [])
+            image_url = next(
+                (img.get("url") for img in images if img.get("height") == 320),
+                images[0].get("url") if images else None,
+            )
+            image_url = image_url if _is_valid_artist_image_url(image_url) else None
+            genres = list(best.get("genres") or [])
+            if not genres and best_artist_id:
+                genres = self._get_artist_genres(best_artist_id)
+            return {
+                "id": best_artist_id,
+                "name": best.get("name"),
+                "url": (best.get("external_urls") or {}).get("spotify"),
+                "image_url": image_url,
+                "genres": genres[:12],
+            }
+        except Exception:
+            return None
+
+    def _search_discogs_artist_profile(self, artist_name: str) -> Optional[dict]:
+        """Search Discogs artist profiles and return a best-match profile dict."""
+        if Config.DISCOGS_TOKEN:
+            auth_header = f'Discogs token={Config.DISCOGS_TOKEN}'
+        elif Config.DISCOGS_CONSUMER_KEY and Config.DISCOGS_CONSUMER_SECRET:
+            auth_header = f'Discogs key={Config.DISCOGS_CONSUMER_KEY}, secret={Config.DISCOGS_CONSUMER_SECRET}'
+        else:
+            return None
+
+        if not _normalize_name(artist_name):
+            return None
+
+        headers = {'Authorization': auth_header}
+        search_url = "https://api.discogs.com/database/search"
+        try:
+            response = _discogs_session.get(
+                search_url,
+                headers=headers,
+                params={"q": artist_name, "type": "artist", "per_page": 5},
+                timeout=10,
+            )
+            response.raise_for_status()
+            results = response.json().get("results", []) or []
+            if not results:
+                return None
+
+            def score(result: dict) -> tuple[int, int]:
+                title = (result.get("title") or "").strip()
+                exact = 1 if _is_exact_artist_name_match(artist_name, title) else 0
+                overlap = len(_tokenize_name(artist_name) & _tokenize_name(title))
+                return (exact, overlap)
+
+            best = sorted(results, key=score, reverse=True)[0]
+            title = (best.get("title") or "").strip()
+            # Guard against weak matches; set-level artist profile should be strict.
+            if not _is_exact_artist_name_match(artist_name, title):
+                return None
+
+            artist_id = best.get("id")
+            profile_name = title or artist_name
+            profile_url = f"https://www.discogs.com/artist/{artist_id}" if artist_id else None
+            image_url = best.get("cover_image") or best.get("thumb")
+            profile_genres: list[str] = []
+
+            if artist_id:
+                try:
+                    artist_resp = _discogs_session.get(
+                        f"https://api.discogs.com/artists/{artist_id}",
+                        headers=headers,
+                        timeout=10,
+                    )
+                    artist_resp.raise_for_status()
+                    artist_data = artist_resp.json()
+                    images = artist_data.get("images", []) or []
+                    image_url = _pick_discogs_artist_image(images, fallback_url=image_url)
+                    if artist_data.get("name"):
+                        profile_name = artist_data["name"]
+                    uri = artist_data.get("uri")
+                    if uri:
+                        profile_url = (
+                            f"https://www.discogs.com{uri}" if str(uri).startswith("/") else str(uri)
+                        )
+                except Exception:
+                    pass
+
+                # Pull release-level genre/style tags for confidence validation.
+                try:
+                    genre_resp = _discogs_session.get(
+                        search_url,
+                        headers=headers,
+                        params={"artist": profile_name, "type": "release", "per_page": 50},
+                        timeout=10,
+                    )
+                    genre_resp.raise_for_status()
+                    genre_results = genre_resp.json().get("results", []) or []
+                    genre_counts: dict[str, int] = {}
+                    for result in genre_results:
+                        raw_values = (result.get("styles") or []) + (result.get("genres") or [])
+                        for raw in raw_values:
+                            label = _normalize_genre_label(raw)
+                            if not label:
+                                continue
+                            genre_counts[label] = genre_counts.get(label, 0) + 1
+                    ranked = sorted(genre_counts.items(), key=lambda item: item[1], reverse=True)
+                    profile_genres = [name for name, _ in ranked[:12]]
+                except Exception:
+                    profile_genres = []
+
+            image_url = image_url if _is_valid_artist_image_url(image_url) else None
+            return {
+                "name": profile_name,
+                "url": profile_url,
+                "image_url": image_url,
+                "genres": profile_genres,
+            }
+        except Exception:
+            return None
 
     @_platform_search("YouTube")
     def _search_youtube(self, title: str, artist: str) -> Optional[str]:
@@ -404,7 +890,7 @@ class MetadataEnricher:
                 'per_page': 1
             }
 
-            response = _discogs_session.get(url, headers=headers, params=params)
+            response = _discogs_session.get(url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
 
@@ -431,7 +917,7 @@ class MetadataEnricher:
             resource_url = result.get('resource_url', '')
             if resource_url and label:
                 try:
-                    rel_resp = _discogs_session.get(resource_url, headers=headers)
+                    rel_resp = _discogs_session.get(resource_url, headers=headers, timeout=10)
                     rel_resp.raise_for_status()
                     rel_data = rel_resp.json()
                     rel_labels = rel_data.get('labels', [])
@@ -448,6 +934,7 @@ class MetadataEnricher:
                     lb_resp = _discogs_session.get(
                         url, headers=headers,
                         params={'q': label, 'type': 'label', 'per_page': 1},
+                        timeout=10,
                     )
                     lb_resp.raise_for_status()
                     lb_results = lb_resp.json().get('results', [])

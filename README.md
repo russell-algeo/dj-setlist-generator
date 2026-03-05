@@ -14,6 +14,8 @@ Automatically generate setlists from DJ mixes on YouTube or SoundCloud, complete
 - YouTube and SoundCloud timestamp deep-links
 - Crash recovery with automatic checkpointing
 - Outputs in JSON, Markdown, and interactive HTML formats
+- Explorer UI — redesigned liquid glass master index, artist pages, and set detail views with search, sort, and facet filtering
+- Artist profile images fetched from Spotify and Discogs, validated via genre overlap
 - Resume from where you left off after crashes
 - Push notifications via ntfy.sh (optional)
 
@@ -118,6 +120,12 @@ ENABLE_SPOTIFY_PLAYLISTS=true         # Enable Spotify playlist creation
 AUTO_CREATE_SPOTIFY_PLAYLIST=false    # Skip prompt, auto-create playlist
 CREATE_SET_PLAYLISTS=true             # Set to false to skip per-set playlists; artist playlist still gets populated
 ENABLE_HTML_OUTPUT=true               # Generate interactive HTML setlist
+DETAIL_VIEWS_USE_EXPLORER=true        # Use redesigned explorer UI for set and artist detail pages
+```
+
+### Artist Profile Settings
+```bash
+ARTIST_IMAGE_MIN_GENRE_OVERLAP=0.2    # Minimum genre overlap ratio to accept an artist profile image (0.0–1.0)
 ```
 
 ### Notifications (ntfy.sh)
@@ -186,7 +194,7 @@ Structured data with all track information and metadata.
 Human-readable setlist with timestamps and clickable links.
 
 ### 3. HTML file
-Interactive setlist with an embedded YouTube/SoundCloud player, a clickable mix timeline, track cards with timestamp deep-links, and a floating playback pill. The pill shows a progress bar (clickable to seek), current/total time, play/pause, ±15s skip, scroll-to-track, and scroll-to-top controls. Open in any browser.
+Interactive setlist with an embedded YouTube/SoundCloud player, a clickable mix timeline, track cards with timestamp deep-links, and a floating playback pill. The pill shows a progress bar (clickable to seek), current/total time, play/pause, ±15s skip, scroll-to-track, and scroll-to-top controls. When `DETAIL_VIEWS_USE_EXPLORER=true`, a redesigned explorer UI is used instead, with search, sort (timeline, BPM, artist, confidence), facet filtering by genre/label, and compact density toggle. Open in any browser.
 
 Example markdown output:
 
@@ -250,9 +258,10 @@ python backfill_html.py --dry-run       # Preview without writing
 Re-enrich existing JSON outputs with metadata from Spotify, ReccoBeats, and Discogs (useful after adding new API credentials or when enrichment sources have been updated):
 
 ```bash
-python backfill_enrichment.py                   # Re-enrich all outputs
-python backfill_enrichment.py "Jay Tripwire"    # Re-enrich one artist
-python backfill_enrichment.py --dry-run          # Preview without writing
+python backfill_enrichment.py                           # Re-enrich all outputs
+python backfill_enrichment.py "Jay Tripwire"            # Re-enrich one artist
+python backfill_enrichment.py --dry-run                  # Preview without writing
+python backfill_enrichment.py --set-artist-profiles-only # Only backfill set-level artist profile metadata
 ```
 
 ### master_summary.py
@@ -278,7 +287,12 @@ python master_summary.py                # Generate output/index.html
     ├── setlist_builder.py        # Build setlist from recognitions
     ├── metadata_enricher.py      # Fetch Spotify/YouTube/Discogs links
     ├── output_formatter.py       # Generate JSON and Markdown outputs
-    ├── html_formatter.py         # Generate interactive HTML setlist output
+    ├── html_formatter.py         # Generate interactive HTML setlist output (classic view)
+    ├── explorer_formatter.py     # Generate redesigned explorer master index HTML
+    ├── artist_explorer_formatter.py # Generate explorer artist-level detail HTML
+    ├── set_explorer_formatter.py # Generate explorer set-level detail HTML
+    ├── detail_explorer_common.py # Shared CSS and utilities for explorer views
+    ├── detail_explorer_theme.py  # Theme definitions for explorer UI
     ├── spotify_playlist_creator.py # Create Spotify playlist from setlist
     ├── dj_set_discovery.py       # Discover DJ sets via yt-dlp search
     ├── artist_summary.py         # Generate artist-level summary across all sets

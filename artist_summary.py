@@ -116,7 +116,7 @@ class ArtistSummarizer:
                     })
             set_url = result["url"] or mix_info.get("url", "")
             video_id = _extract_youtube_id(set_url)
-            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg" if video_id else None
+            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
             track_search_text = " ".join(
                 f"{t.get('artist', '')} {t.get('title', '')}".lower()
                 for t in tracks
@@ -138,6 +138,14 @@ class ArtistSummarizer:
                 "mini_timeline": mini_timeline,
                 "thumbnail_url": thumbnail_url,
                 "track_search_text": track_search_text,
+                # Canonical set-level artist profile fields (already confidence-gated upstream).
+                "artist_profile_image": mix_info.get("artist_profile_image"),
+                "artist_profile_name": mix_info.get("artist_profile_name"),
+                "artist_profile_url": mix_info.get("artist_profile_url"),
+                "artist_profile_source": mix_info.get("artist_profile_source"),
+                "artist_profile_confidence": mix_info.get("artist_profile_confidence"),
+                "artist_profile_genre_overlap": mix_info.get("artist_profile_genre_overlap"),
+                "artist_profile_rejected_reason": mix_info.get("artist_profile_rejected_reason"),
             })
 
             set_title = mix_info.get("title", "Unknown")
@@ -151,6 +159,14 @@ class ArtistSummarizer:
                         "title":             track["title"],
                         "spotify_url":       track.get("spotify_url"),
                         "spotify_album_art": track.get("spotify_album_art"),
+                        "spotify_artist_name": track.get("spotify_artist_name"),
+                        "spotify_artist_url": track.get("spotify_artist_url"),
+                        "spotify_artist_profile_image": (
+                            track.get("spotify_artist_profile_image") or track.get("spotify_artist_image")
+                        ),
+                        "spotify_artist_image": (
+                            track.get("spotify_artist_image") or track.get("spotify_artist_profile_image")
+                        ),
                         "from_set":          set_title,
                         "time_range":        time_range,
                         "source_deep_link":  track.get("source_deep_link"),
@@ -232,7 +248,7 @@ class ArtistSummarizer:
                         "confidence": t.get("confidence", "UNCERTAIN"),
                     })
             video_id = _extract_youtube_id(url)
-            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg" if video_id else None
+            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
             track_search_text = " ".join(
                 f"{t.get('artist', '')} {t.get('title', '')}".lower()
                 for t in tracks
@@ -254,6 +270,14 @@ class ArtistSummarizer:
                 "mini_timeline": mini_timeline,
                 "thumbnail_url": thumbnail_url,
                 "track_search_text": track_search_text,
+                # Canonical set-level artist profile fields (already confidence-gated upstream).
+                "artist_profile_image": mix_info.get("artist_profile_image"),
+                "artist_profile_name": mix_info.get("artist_profile_name"),
+                "artist_profile_url": mix_info.get("artist_profile_url"),
+                "artist_profile_source": mix_info.get("artist_profile_source"),
+                "artist_profile_confidence": mix_info.get("artist_profile_confidence"),
+                "artist_profile_genre_overlap": mix_info.get("artist_profile_genre_overlap"),
+                "artist_profile_rejected_reason": mix_info.get("artist_profile_rejected_reason"),
             })
 
             set_title = mix_info.get("title", set_dir.name)
@@ -267,6 +291,14 @@ class ArtistSummarizer:
                         "title":             track["title"],
                         "spotify_url":       track.get("spotify_url"),
                         "spotify_album_art": track.get("spotify_album_art"),
+                        "spotify_artist_name": track.get("spotify_artist_name"),
+                        "spotify_artist_url": track.get("spotify_artist_url"),
+                        "spotify_artist_profile_image": (
+                            track.get("spotify_artist_profile_image") or track.get("spotify_artist_image")
+                        ),
+                        "spotify_artist_image": (
+                            track.get("spotify_artist_image") or track.get("spotify_artist_profile_image")
+                        ),
                         "from_set":          set_title,
                         "time_range":        time_range,
                         "source_deep_link":  track.get("source_deep_link"),
@@ -290,6 +322,14 @@ class ArtistSummarizer:
                     "title":             t["title"],
                     "spotify_url":       t.get("spotify_url"),
                     "spotify_album_art": t.get("spotify_album_art"),
+                    "spotify_artist_name": t.get("spotify_artist_name"),
+                    "spotify_artist_url": t.get("spotify_artist_url"),
+                    "spotify_artist_profile_image": (
+                        t.get("spotify_artist_profile_image") or t.get("spotify_artist_image")
+                    ),
+                    "spotify_artist_image": (
+                        t.get("spotify_artist_image") or t.get("spotify_artist_profile_image")
+                    ),
                     "appearances":       [],
                     "genres":            [],
                     "discogs_label":     None,
@@ -302,6 +342,14 @@ class ArtistSummarizer:
                 track_info[key]["discogs_label_url"] = t.get("discogs_label_url")
             if not track_info[key]["spotify_album_art"] and t.get("spotify_album_art"):
                 track_info[key]["spotify_album_art"] = t["spotify_album_art"]
+            if not track_info[key]["spotify_artist_name"] and t.get("spotify_artist_name"):
+                track_info[key]["spotify_artist_name"] = t["spotify_artist_name"]
+            if not track_info[key]["spotify_artist_url"] and t.get("spotify_artist_url"):
+                track_info[key]["spotify_artist_url"] = t["spotify_artist_url"]
+            if not track_info[key]["spotify_artist_profile_image"] and t.get("spotify_artist_profile_image"):
+                track_info[key]["spotify_artist_profile_image"] = t["spotify_artist_profile_image"]
+            if not track_info[key]["spotify_artist_image"] and t.get("spotify_artist_image"):
+                track_info[key]["spotify_artist_image"] = t["spotify_artist_image"]
             track_info[key]["appearances"].append({
                 "set_title":        t["from_set"],
                 "time_range":       t.get("time_range", ""),

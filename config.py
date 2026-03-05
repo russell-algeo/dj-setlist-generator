@@ -31,6 +31,7 @@ class Config:
     AUTO_CREATE_SPOTIFY_PLAYLIST = os.getenv('AUTO_CREATE_SPOTIFY_PLAYLIST', 'false').lower() == 'true'
     CREATE_SET_PLAYLISTS = os.getenv('CREATE_SET_PLAYLISTS', 'true').lower() == 'true'
     ENABLE_HTML_OUTPUT = os.getenv('ENABLE_HTML_OUTPUT', 'true').lower() == 'true'
+    DETAIL_VIEWS_USE_EXPLORER = os.getenv('DETAIL_VIEWS_USE_EXPLORER', 'true').lower() == 'true'
 
     # Notifications (ntfy.sh)
     NTFY_TOPIC = os.getenv('NTFY_TOPIC', '')  # Set to your ntfy topic to enable notifications
@@ -59,6 +60,9 @@ class Config:
 
     # Quota-Aware Throttling Settings
     QUOTA_COOLDOWN_DURATION = int(os.getenv('QUOTA_COOLDOWN_DURATION', '180'))  # Seconds to wait when quota exhausted
+
+    # Artist image validation settings
+    ARTIST_IMAGE_MIN_GENRE_OVERLAP = float(os.getenv('ARTIST_IMAGE_MIN_GENRE_OVERLAP', '0.2'))
     
     # Cleanup Settings
     CLEANUP_TEMP_FILES = os.getenv('CLEANUP_TEMP_FILES', 'true').lower() == 'true'

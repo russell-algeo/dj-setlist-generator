@@ -36,3 +36,6 @@ output/
 # OS
 .DS_Store
 Thumbs.db
+task_plan.md
+progress.md
+findings.md
