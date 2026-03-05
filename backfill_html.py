@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from html_formatter import HtmlFormatter
+from set_explorer_formatter import save_set_explorer_html
 from artist_summary import ArtistSummarizer
 
 
@@ -26,7 +26,7 @@ _SUMMARY_FILES = {"artist_summary.json", "artist_summary.md", "artist_summary.ht
 # ---------------------------------------------------------------------------
 
 class _ManagerStub:
-    """Minimal stub satisfying HtmlFormatter and ArtistSummarizer __init__."""
+    """Minimal stub satisfying ArtistSummarizer __init__."""
 
     def __init__(self, output_dir: Path, artist_name: str = ""):
         self.output_dir = Path(output_dir)
@@ -121,8 +121,7 @@ def regenerate_set_html(json_path: Path) -> bool:
         return False
 
     enriched_tracks = _json_to_enriched_tracks(tracks_data)
-    fmt = HtmlFormatter(checkpoint_manager=_ManagerStub(json_path.parent))
-    fmt.save_setlist_html(enriched_tracks, mix_info, filename=json_path.stem)
+    save_set_explorer_html(json_path.parent, enriched_tracks, mix_info, filename=json_path.stem)
     return True
 
 

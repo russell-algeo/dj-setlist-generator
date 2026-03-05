@@ -31,7 +31,6 @@ class Config:
     AUTO_CREATE_SPOTIFY_PLAYLIST = os.getenv('AUTO_CREATE_SPOTIFY_PLAYLIST', 'false').lower() == 'true'
     CREATE_SET_PLAYLISTS = os.getenv('CREATE_SET_PLAYLISTS', 'true').lower() == 'true'
     ENABLE_HTML_OUTPUT = os.getenv('ENABLE_HTML_OUTPUT', 'true').lower() == 'true'
-    DETAIL_VIEWS_USE_EXPLORER = os.getenv('DETAIL_VIEWS_USE_EXPLORER', 'true').lower() == 'true'
 
     # Notifications (ntfy.sh)
     NTFY_TOPIC = os.getenv('NTFY_TOPIC', '')  # Set to your ntfy topic to enable notifications

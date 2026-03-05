@@ -1747,7 +1747,7 @@ body.artist-page::after {
 
 
 def save_artist_explorer_html(
-    formatter,
+    output_dir: Path,
     artist_name,
     set_summaries,
     track_counter,
@@ -1756,7 +1756,7 @@ def save_artist_explorer_html(
     failed,
 ) -> Path:
     """Render and save the artist-level explorer page."""
-    output_path = formatter.output_dir / "artist_summary.html"
+    output_path = output_dir / "artist_summary.html"
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     unique_tracks = len(track_counter)

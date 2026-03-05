@@ -120,7 +120,6 @@ ENABLE_SPOTIFY_PLAYLISTS=true         # Enable Spotify playlist creation
 AUTO_CREATE_SPOTIFY_PLAYLIST=false    # Skip prompt, auto-create playlist
 CREATE_SET_PLAYLISTS=true             # Set to false to skip per-set playlists; artist playlist still gets populated
 ENABLE_HTML_OUTPUT=true               # Generate interactive HTML setlist
-DETAIL_VIEWS_USE_EXPLORER=true        # Use redesigned explorer UI for set and artist detail pages
 ```
 
 ### Artist Profile Settings
@@ -194,7 +193,7 @@ Structured data with all track information and metadata.
 Human-readable setlist with timestamps and clickable links.
 
 ### 3. HTML file
-Interactive setlist with an embedded YouTube/SoundCloud player, a clickable mix timeline, track cards with timestamp deep-links, and a floating playback pill. The pill shows a progress bar (clickable to seek), current/total time, play/pause, ±15s skip, scroll-to-track, and scroll-to-top controls. When `DETAIL_VIEWS_USE_EXPLORER=true`, a redesigned explorer UI is used instead, with search, sort (timeline, BPM, artist, confidence), facet filtering by genre/label, and compact density toggle. Open in any browser.
+Interactive setlist using the explorer UI: embedded YouTube/SoundCloud player, clickable mix timeline, track cards with timestamp deep-links, search, sort (timeline, BPM, artist, confidence), facet filtering by genre/label, compact density toggle, and a floating playback pill. Open in any browser.
 
 Example markdown output:
 
@@ -287,8 +286,7 @@ python master_summary.py                # Generate output/index.html
     ├── setlist_builder.py        # Build setlist from recognitions
     ├── metadata_enricher.py      # Fetch Spotify/YouTube/Discogs links
     ├── output_formatter.py       # Generate JSON and Markdown outputs
-    ├── html_formatter.py         # Generate interactive HTML setlist output (classic view)
-    ├── explorer_formatter.py     # Generate redesigned explorer master index HTML
+    ├── explorer_formatter.py     # Generate explorer master index HTML
     ├── artist_explorer_formatter.py # Generate explorer artist-level detail HTML
     ├── set_explorer_formatter.py # Generate explorer set-level detail HTML
     ├── detail_explorer_common.py # Shared CSS and utilities for explorer views

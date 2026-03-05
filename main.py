@@ -11,7 +11,7 @@ from track_recognizer import TrackRecognizer, Recognition
 from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
-from html_formatter import HtmlFormatter
+from set_explorer_formatter import save_set_explorer_html
 from checkpoint_manager import ArtistManager, CheckpointManager, sanitize_filename
 
 class SetlistGenerator:
@@ -67,7 +67,6 @@ class SetlistGenerator:
         segmenter = AudioSegmenter(checkpoint_manager=checkpoint_manager)
         recognizer = TrackRecognizer(checkpoint_manager=checkpoint_manager)
         formatter = OutputFormatter(checkpoint_manager=checkpoint_manager)
-        html_formatter = HtmlFormatter(checkpoint_manager=checkpoint_manager)
 
         # Check for existing checkpoint
         checkpoint = None
@@ -177,7 +176,7 @@ class SetlistGenerator:
             final_output_name = output_name or sanitize_filename(mix_name)
             json_file = formatter.save_setlist_json(enriched_tracks, mix_info, final_output_name)
             md_file = formatter.save_setlist_markdown(enriched_tracks, mix_info, final_output_name)
-            html_file = html_formatter.save_setlist_html(enriched_tracks, mix_info, final_output_name) if Config.ENABLE_HTML_OUTPUT else None
+            html_file = save_set_explorer_html(checkpoint_manager.output_dir, enriched_tracks, mix_info, final_output_name) if Config.ENABLE_HTML_OUTPUT else None
 
             print("\n" + "=" * 70)
             print("COMPLETE!")

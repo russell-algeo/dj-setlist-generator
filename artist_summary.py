@@ -6,7 +6,7 @@ from collections import Counter
 from urllib.parse import urlparse, parse_qs
 
 from output_formatter import OutputFormatter
-from html_formatter import HtmlFormatter
+from artist_explorer_formatter import save_artist_explorer_html
 
 
 def _extract_youtube_id(url: str) -> str | None:
@@ -369,7 +369,6 @@ class ArtistSummarizer:
             track_info[key]["genres"] = [g for g, _ in _genre_counters[key].most_common(5)]
 
         output_fmt = OutputFormatter(artist_manager=self._artist_manager)
-        html_fmt   = HtmlFormatter(artist_manager=self._artist_manager)
 
         output_fmt.save_artist_summary_markdown(
             self._artist_name, set_summaries, track_counter, track_info, successful, failed
@@ -377,6 +376,6 @@ class ArtistSummarizer:
         output_fmt.save_artist_summary_json(
             self._artist_name, set_summaries, track_counter, track_info, all_tracks, successful, failed
         )
-        html_fmt.save_artist_summary_html(
-            self._artist_name, set_summaries, track_counter, track_info, successful, failed
+        save_artist_explorer_html(
+            self._artist_manager.output_dir, self._artist_name, set_summaries, track_counter, track_info, successful, failed
         )

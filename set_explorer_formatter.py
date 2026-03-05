@@ -49,7 +49,7 @@ def _first_nonempty(*values: str) -> str:
 
 
 def _set_cover_fallback_from_other_sets(
-    formatter,
+    output_dir: Path,
     exclude_images: set[str] | None = None,
 ) -> str:
     """
@@ -62,7 +62,7 @@ def _set_cover_fallback_from_other_sets(
     exclude = {str(x).strip() for x in (exclude_images or set()) if str(x or "").strip()}
 
     def _from_artist_summary() -> str:
-        parent = Path(getattr(formatter, "output_dir", "")).parent
+        parent = output_dir.parent
         summary_path = parent / "artist_summary.json"
         if not summary_path.exists():
             return ""
@@ -84,7 +84,7 @@ def _set_cover_fallback_from_other_sets(
         return None
 
     def _from_explorer_data() -> str:
-        start = Path(getattr(formatter, "output_dir", ""))
+        start = output_dir
         out_root = _find_output_root(start)
         if not out_root:
             return ""
@@ -1310,7 +1310,7 @@ body.yt-embed-blocked .js-track-play:hover {
 
 
 def save_set_explorer_html(
-    formatter,
+    output_dir: Path,
     enriched_tracks: list,
     mix_info: dict,
     filename: str | None = None,
@@ -1318,7 +1318,7 @@ def save_set_explorer_html(
     """Render and save the set-level explorer page."""
     if not filename:
         filename = f"setlist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    output_path = formatter.output_dir / f"{filename}.html"
+    output_path = output_dir / f"{filename}.html"
 
     source_url = str(mix_info.get("url") or "")
     total_duration = float(mix_info.get("duration") or 0.0)
@@ -1603,7 +1603,7 @@ def save_set_explorer_html(
             break
 
     fallback_other_set_image = _set_cover_fallback_from_other_sets(
-        formatter,
+        output_dir,
         exclude_images={set_image_source, artist_image_source},
     )
     hero_image_source = _first_nonempty(
