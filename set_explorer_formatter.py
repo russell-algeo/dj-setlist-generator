@@ -9,6 +9,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 from detail_explorer_common import (
+    CONFIDENCE_COLORS,
+    CONFIDENCE_CSS_CLASSES,
+    CONFIDENCE_LEVELS,
     MASTER_DETAIL_BASE_CSS,
     discogs_search_url,
     esc,
@@ -108,6 +111,30 @@ def _set_cover_fallback_from_other_sets(
         return ""
 
     return _first_nonempty(_from_artist_summary(), _from_explorer_data())
+
+
+def _artist_profile_image_from_artist_summary(output_dir: Path) -> str:
+    """Return canonical artist profile image (if any) from artist_summary.json."""
+    summary_path = output_dir.parent / "artist_summary.json"
+    if not summary_path.exists():
+        return ""
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+    top_level = _first_nonempty(
+        payload.get("artist_profile_image"),
+        payload.get("artist_image"),
+    )
+    if top_level:
+        return top_level
+
+    for item in payload.get("sets", []):
+        candidate = str(item.get("artist_profile_image") or "").strip()
+        if candidate:
+            return candidate
+    return ""
 
 
 def _set_css() -> str:
@@ -490,6 +517,12 @@ def _set_css() -> str:
   margin-top: 6px;
 }
 
+#workspace .section-head h2.set-workspace-heading {
+  white-space: nowrap;
+  font-size: clamp(24px, 8vw, 74px);
+  letter-spacing: -0.03em;
+}
+
 .timeline-bar {
   position: relative;
   height: 20px;
@@ -625,18 +658,63 @@ def _set_css() -> str:
   background: #0a0a0a;
   min-height: 240px;
   position: relative;
+  --journey-axis-w: 46px;
 }
 
 .journey-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
   padding: 22px;
   color: var(--muted);
   font-size: 13px;
 }
+.journey-empty[hidden] { display: none !important; }
 
 #journeySvg {
-  width: 100%;
+  width: calc(100% - (var(--journey-axis-w) * 2));
+  margin: 0 var(--journey-axis-w);
   height: 260px;
   display: block;
+}
+
+.journey-yaxis-left,
+.journey-yaxis-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--journey-axis-w);
+  pointer-events: none;
+}
+
+.journey-yaxis-left { left: 0; }
+.journey-yaxis-right { right: 0; }
+
+.journey-axis-tick {
+  position: absolute;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: #7f7f7f;
+  font-family: 'Space Mono', monospace;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.journey-axis-metrics {
+  position: absolute;
+  top: calc(100% - 14px);
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1;
+}
+
+.journey-axis-metric {
+  font-size: 8px;
+  font-family: 'Space Mono', monospace;
+  white-space: nowrap;
 }
 
 .journey-legend {
@@ -888,7 +966,7 @@ def _set_css() -> str:
 }
 
 .action-link {
-  border: 1px dashed #2d2d2d;
+  border: 1px solid #2d2d2d;
   background: transparent;
   color: #bdbdbd;
   border-radius: 0;
@@ -1037,19 +1115,21 @@ body.yt-embed-blocked .js-track-play:hover {
   bottom: 14px;
   transform: translateX(-50%);
   z-index: 20;
-  width: min(1080px, calc(100vw - 18px));
+  width: min(720px, calc(100vw - 18px));
   border: 1px solid var(--line);
   background: rgba(14, 14, 14, 0.97);
   border-radius: 10px;
-  padding: 10px 12px;
-  --dock-now-width: clamp(290px, 30vw, 340px);
+  padding: 8px 12px;
+  --dock-now-width: clamp(220px, 32vw, 270px);
+  --dock-actions-width: 84px;
 }
 
 .dock-grid {
   display: grid;
-  gap: 8px;
-  grid-template-columns: var(--dock-now-width) minmax(0, 1fr) auto;
+  gap: 6px;
+  grid-template-columns: var(--dock-now-width) minmax(0, 1fr) var(--dock-actions-width);
   align-items: center;
+  position: relative;
 }
 
 .dock-now {
@@ -1063,6 +1143,9 @@ body.yt-embed-blocked .js-track-play:hover {
 
 .dock-now > div:last-child {
   min-width: 0;
+  margin-top: -24px;
+  max-width: calc(var(--dock-now-width) - 108px);
+  width: 100%;
 }
 
 .dock-art-frame {
@@ -1104,6 +1187,7 @@ body.yt-embed-blocked .js-track-play:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 700;
+  line-height: 1.15;
 }
 
 .dock-artist {
@@ -1116,24 +1200,33 @@ body.yt-embed-blocked .js-track-play:hover {
 }
 
 .dock-center {
+  display: grid;
+  gap: 4px;
   min-width: 0;
   width: 100%;
+  min-height: 70px;
 }
 
 .dock-main-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   width: 100%;
-  justify-content: flex-start;
+  justify-content: center;
+  min-height: 38px;
 }
 
 .dock-primary-controls {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 8px;
+  width: max-content;
   flex: 0 0 auto;
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -11px);
+  z-index: 1;
 }
 
 .dock-mini-btn {
@@ -1173,27 +1266,83 @@ body.yt-embed-blocked .js-track-play:hover {
 .dock-play-btn {
   width: 38px;
   height: 38px;
-  border: 0;
-  border-radius: 999px;
-  background: #1db954;
-  color: #08120a;
-  font-size: 18px;
+  border: 1px solid var(--lime);
+  border-radius: var(--radius);
+  background: var(--lime);
+  color: #0c1207;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
   font-weight: 800;
+  font-family: 'Space Mono', monospace;
   line-height: 1;
   cursor: pointer;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+}
+
+.dock-play-btn.is-playing {
+  background: #101510;
+  color: var(--lime);
 }
 
 .dock-play-btn:hover {
-  filter: brightness(1.08);
+  border-color: #f3ffc0;
+  background: #e5ff81;
+  color: #0a1006;
 }
 
 .dock-play-btn:active {
-  transform: scale(0.96);
+  transform: translateY(1px);
+}
+
+.dock-play-btn.is-playing:hover {
+  border-color: #f3ffc0;
+  background: #121a12;
+  color: #f3ffc0;
 }
 
 .dock-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  width: var(--dock-actions-width);
+  min-width: var(--dock-actions-width);
+}
+
+.dock-util-btn {
+  border: 1px solid #323232;
+  background: #161616;
+  color: #7f7f7f;
+  border-radius: 2px;
+  min-height: 24px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-family: 'Space Mono', monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
   display: inline-flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.dock-util-icon {
+  font-size: 10px;
+  line-height: 1;
+  color: #676767;
+}
+
+.dock-util-btn:hover {
+  border-color: #4b4b4b;
+  color: #a4a4a4;
+}
+
+.dock-util-btn:active {
+  transform: translateY(1px);
 }
 
 .dock-progress {
@@ -1214,7 +1363,7 @@ body.yt-embed-blocked .js-track-play:hover {
 }
 
 .dock-time {
-  margin-top: 6px;
+  margin-bottom: 3px;
   font-family: 'Space Mono', monospace;
   font-size: 10px;
   color: var(--muted);
@@ -1223,7 +1372,12 @@ body.yt-embed-blocked .js-track-play:hover {
 }
 
 .dock-range {
-  flex: 1 1 auto;
+  width: clamp(280px, 38vw, 500px);
+  margin: 0;
+  position: absolute;
+  left: 50%;
+  top: 40px;
+  transform: translateX(-50%);
   min-width: 0;
 }
 
@@ -1288,19 +1442,36 @@ body.yt-embed-blocked .js-track-play:hover {
   }
   .dock-main-row {
     display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
+    align-items: center;
+    gap: 0;
+    min-height: 0;
   }
   .dock-now {
     grid-template-columns: 58px minmax(0, 1fr);
     width: 100%;
   }
+  .dock-now > div:last-child {
+    margin-top: 0;
+    max-width: none;
+  }
   .dock-art-frame { width: 54px; height: 54px; }
-  .dock-actions { justify-content: flex-start; }
+  .dock-actions { align-self: flex-end; }
+  .dock-range {
+    position: static;
+    width: 100%;
+    margin: 0;
+    left: 0;
+    transform: none;
+    top: auto;
+  }
   .dock-primary-controls {
+    position: static;
+    left: auto;
+    transform: none;
+    width: 100%;
+    z-index: auto;
     gap: 6px;
-    justify-content: flex-start;
+    justify-content: center;
     flex-wrap: wrap;
   }
   .dock-play-btn { width: 34px; height: 34px; font-size: 16px; }
@@ -1360,18 +1531,8 @@ def save_set_explorer_html(
     track_cards_html: list[str] = []
     timeline_segments_html: list[str] = []
     journey_points = []
-    conf_class_map = {
-        "HIGH": "conf-high",
-        "MEDIUM": "conf-medium",
-        "LOW": "conf-low",
-        "UNCERTAIN": "conf-uncertain",
-    }
-    conf_color_map = {
-        "HIGH": "#6fffa4",
-        "MEDIUM": "#ffd166",
-        "LOW": "#ffa55a",
-        "UNCERTAIN": "#7b7b7b",
-    }
+    conf_class_map = CONFIDENCE_CSS_CLASSES
+    conf_color_map = CONFIDENCE_COLORS
 
     for row in rows:
         conf = (row.get("confidence") or "UNCERTAIN").upper()
@@ -1379,6 +1540,7 @@ def save_set_explorer_html(
         conf_color = conf_color_map.get(conf, "#7b7b7b")
         display_artist = row.get("artist") or "Unknown"
         display_title = row.get("title") or "Unknown Track"
+        is_unknown_track = str(display_title).strip().lower() == "unknown track"
         direct_spotify_url = row.get("spotify_url") or ""
         direct_youtube_url = row.get("youtube_url") or ""
         direct_discogs_url = row.get("discogs_url") or ""
@@ -1452,27 +1614,44 @@ def save_set_explorer_html(
             if album_art_url
             else '<span class="track-art--empty">♪</span>'
         )
+
+        def action_link_html(service: str, href: str, label: str, direct: bool) -> str:
+            fallback_class = "" if direct else " fallback"
+            return (
+                f'<a class="action-link {service}{fallback_class}" href="{esc(href)}" '
+                f'target="_blank" rel="noopener">{esc(label)}</a>'
+            )
+
         has_embed = bool(row.get("spotify_track_id"))
-        spotify_external_link_html = (
-            f'<a class="action-link spotify{" fallback" if not direct_spotify_url else ""}" href="{esc(spotify_url)}" target="_blank" rel="noopener">{spotify_link_label}</a>'
+        has_direct_youtube = bool(direct_youtube_url)
+        has_direct_discogs = bool(direct_discogs_url)
+
+        primary_action_html = ""
+        if not is_unknown_track:
+            if has_embed:
+                primary_action_html = (
+                    f'<button class="btn track-tool-btn embed-btn js-spotify-embed" data-track-id="{esc(row["spotify_track_id"])}">Spotify</button>'
+                )
+            elif has_direct_youtube:
+                primary_action_html = action_link_html("youtube", direct_youtube_url, "YouTube", True)
+            elif has_direct_discogs:
+                primary_action_html = action_link_html("discogs", direct_discogs_url, "Discogs", True)
+
+        track_actions_html = (
+            f"{primary_action_html}"
+            '<button class="btn track-tool-btn details-btn js-details-toggle">Details</button>'
         )
-        youtube_discogs_links_html = (
-            f'<a class="action-link youtube{" fallback" if not direct_youtube_url else ""}" href="{esc(youtube_url)}" target="_blank" rel="noopener">{youtube_link_label}</a>'
-            f'<a class="action-link discogs{" fallback" if not direct_discogs_url else ""}" href="{esc(discogs_url)}" target="_blank" rel="noopener">{discogs_link_label}</a>'
-        )
-        external_links_html = spotify_external_link_html + youtube_discogs_links_html
-        if has_embed:
-            track_actions_html = (
-                f'<button class="btn track-tool-btn embed-btn js-spotify-embed" data-track-id="{esc(row["spotify_track_id"])}">Spotify</button>'
-                '<button class="btn track-tool-btn details-btn js-details-toggle">Details</button>'
+
+        details_external_links_html = ""
+        if not is_unknown_track:
+            detail_links = [
+                action_link_html("spotify", spotify_url, spotify_link_label, bool(direct_spotify_url)),
+                action_link_html("youtube", youtube_url, youtube_link_label, bool(direct_youtube_url)),
+                action_link_html("discogs", discogs_url, discogs_link_label, bool(direct_discogs_url)),
+            ]
+            details_external_links_html = (
+                f'<div class="track-external-links in-details">{"".join(detail_links)}</div>'
             )
-            details_external_links_html = f'<div class="track-external-links in-details">{external_links_html}</div>'
-        else:
-            track_actions_html = (
-                f'<div class="track-external-links">{spotify_external_link_html}</div>'
-                '<button class="btn track-tool-btn details-btn js-details-toggle">Details</button>'
-            )
-            details_external_links_html = f'<div class="track-external-links in-details">{youtube_discogs_links_html}</div>'
 
         track_cards_html.append(
             f"""
@@ -1512,11 +1691,11 @@ def save_set_explorer_html(
         )
 
     conf_filter_buttons = ['<button class="btn active js-conf-filter" data-conf="all">All</button>']
-    for conf in ("HIGH", "MEDIUM", "LOW", "UNCERTAIN"):
+    for conf in CONFIDENCE_LEVELS:
         count = counts.get(conf, 0)
         if count:
             conf_filter_buttons.append(
-                f'<button class="btn js-conf-filter" data-conf="{conf}">{conf} ({count})</button>'
+                f'<button class="btn js-conf-filter" data-conf="{conf}">{conf}</button>'
             )
 
     ticks_html = "".join(
@@ -1591,16 +1770,11 @@ def save_set_explorer_html(
     if not set_image_source and platform == "youtube" and embed_id:
         set_image_source = f"https://i.ytimg.com/vi/{embed_id}/hqdefault.jpg"
 
-    artist_image_source = ""
-    for key in (
-        "artist_profile_image",
-        "spotify_artist_profile_image",
-        "discogs_artist_profile_image",
-    ):
-        candidate = str(mix_info.get(key) or "").strip()
-        if candidate:
-            artist_image_source = candidate
-            break
+    artist_image_source = _first_nonempty(
+        mix_info.get("artist_profile_image"),
+        mix_info.get("artist_image"),
+        _artist_profile_image_from_artist_summary(output_dir),
+    )
 
     fallback_other_set_image = _set_cover_fallback_from_other_sets(
         output_dir,
@@ -1711,6 +1885,7 @@ def save_set_explorer_html(
       <div class="topbar-right">
         <nav class="topnav">
           <a href="#overview">Overview</a>
+          <a href="#workspace">Playback</a>
           <a href="#timeline">Timeline</a>
           <a href="#journey">Journey</a>
           <a href="#tracks">Track Atlas</a>
@@ -1745,6 +1920,15 @@ def save_set_explorer_html(
           <span class="cluster-pill">{esc(tempo_span)}</span>
           <span class="cluster-pill">Generated {esc(generated)}</span>
         </div>
+      </div>
+    </section>
+
+    <section class="section" id="workspace">
+      <div class="section-inner">
+        <div class="section-head">
+          <h2 class="set-workspace-heading">Playback Workspace</h2>
+          <p>Start at the embedded source, scan timeline confidence, and inspect full track evidence below.</p>
+        </div>
         <div class="panel timeline-journey-panel" id="timeline">
           <div class="{source_player_frame_class}" id="sourcePlayerFrame">
             {source_player_inner_html}
@@ -1767,7 +1951,9 @@ def save_set_explorer_html(
                 <button class="btn active js-journey-metric" data-metric="dance">Dance</button>
               </div>
               <div class="journey-chart-wrap" id="journeyWrap">
+                <div class="journey-yaxis-left" id="journeyYLeft"></div>
                 <svg id="journeySvg" viewBox="0 0 1000 260" preserveAspectRatio="none"></svg>
+                <div class="journey-yaxis-right" id="journeyYRight"></div>
                 <div class="journey-empty" id="journeyEmpty" hidden>No track metrics available for this set.</div>
               </div>
               <div class="journey-legend">
@@ -1794,7 +1980,6 @@ def save_set_explorer_html(
         </div>
       </div>
     </section>
-
     <div class="footer-note">Generated {esc(generated)} · Set Signal Explorer</div>
   </main>
 
@@ -1819,14 +2004,15 @@ def save_set_explorer_html(
             <button class="dock-nav-btn" id="dockNext" title="Next track">&#9197;</button>
             <button class="dock-mini-btn" id="dockFwd" title="Forward 15 seconds">+15</button>
           </div>
-          <div class="dock-range">
-            <div class="dock-progress" id="dockProgress"><div class="dock-progress-fill" id="dockProgressFill"></div></div>
-            <div class="dock-time"><span id="dockCurrentTime">0:00</span><span>{duration_fmt}</span></div>
-          </div>
+        </div>
+        <div class="dock-range">
+          <div class="dock-time"><span id="dockCurrentTime">0:00</span><span>{duration_fmt}</span></div>
+          <div class="dock-progress" id="dockProgress"><div class="dock-progress-fill" id="dockProgressFill"></div></div>
         </div>
       </div>
       <div class="dock-actions">
-        <button class="btn" id="dockToTrack">Track</button>
+        <button class="dock-util-btn" id="dockToTop"><span class="dock-util-icon" aria-hidden="true">&uarr;</span><span>Top</span></button>
+        <button class="dock-util-btn" id="dockToTrack"><span class="dock-util-icon" aria-hidden="true">&darr;</span><span>Track</span></button>
       </div>
     </div>
   </div>
@@ -2312,6 +2498,8 @@ def save_set_explorer_html(
 
   // Journey rendering
   const journeySvg = document.getElementById('journeySvg');
+  const journeyYLeft = document.getElementById('journeyYLeft');
+  const journeyYRight = document.getElementById('journeyYRight');
   const journeyEmpty = document.getElementById('journeyEmpty');
   const journeyBtns = Array.from(document.querySelectorAll('.js-journey-metric'));
   const journeyColors = {{
@@ -2319,40 +2507,152 @@ def save_set_explorer_html(
     energy: '#ffcf5c',
     dance: '#7dc3ff',
   }};
+  const journeyMetricCodes = {{
+    bpm: 'BPM',
+    energy: 'NRG',
+    dance: 'DNC',
+  }};
+
+  function clearJourneyAxes() {{
+    if (journeyYLeft) journeyYLeft.innerHTML = '';
+    if (journeyYRight) journeyYRight.innerHTML = '';
+  }}
+
+  function scaleFromValues(values, isBpm) {{
+    if (!values.length) return null;
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    if (min === max) {{
+      const pad = isBpm ? 1 : 0.05;
+      min -= pad;
+      max += pad;
+    }}
+    return {{ min, max, isBpm: !!isBpm }};
+  }}
+
+  function renderJourneyAxis(target, scale, side, metrics, chartH, chartPad) {{
+    if (!target) return;
+    if (!scale) {{
+      target.innerHTML = '';
+      return;
+    }}
+    const ticks = 5;
+    const span = Math.max(0.0001, scale.max - scale.min);
+    const align = side === 'right' ? 'right:4px;text-align:right;' : 'left:4px;text-align:left;';
+    const html = [];
+    for (let i = 0; i < ticks; i += 1) {{
+      const pct = i / (ticks - 1);
+      const val = scale.min + (pct * span);
+      const y = chartH - chartPad - (pct * (chartH - (chartPad * 2)));
+      const label = scale.isBpm ? val.toFixed(0) : val.toFixed(2);
+      html.push(
+        `<span class="journey-axis-tick" style="top:${{y.toFixed(1)}}px;${{align}}">${{label}}</span>`
+      );
+    }}
+    if (metrics && metrics.length) {{
+      const labels = metrics
+        .map(m => `<span class="journey-axis-metric" style="color:${{journeyColors[m] || '#888'}}">${{journeyMetricCodes[m] || m.toUpperCase()}}</span>`)
+        .join('');
+      html.push(`<span class="journey-axis-metrics" style="${{align}}">${{labels}}</span>`);
+    }}
+    target.innerHTML = html.join('');
+  }}
+
   function renderJourney() {{
+    if (!journeySvg) return;
     const points = SET_DATA.journeyPoints || [];
     if (!points.length) {{
       journeySvg.innerHTML = '';
       journeyEmpty.hidden = false;
+      clearJourneyAxes();
+      hideJourneyTooltip();
       return;
     }}
-    journeyEmpty.hidden = true;
     const w = 1000;
     const h = 260;
     const pad = 22;
     const total = SET_DATA.duration || 1;
-    const activeMetrics = Array.from(STATE.metrics);
+    const activeMetrics = Array.from(STATE.metrics).filter(metric => Object.prototype.hasOwnProperty.call(journeyColors, metric));
+    const metricPts = {{}};
+    activeMetrics.forEach(metric => {{
+      metricPts[metric] = points
+        .filter(p => p[metric] !== null && p[metric] !== undefined)
+        .map(p => ({{
+          x: Math.max(0, p.start) / total,
+          val: Number(p[metric]),
+          p,
+        }}))
+        .sort((a, b) => a.x - b.x);
+    }});
+    const hasRenderableMetric = activeMetrics.some(metric => (metricPts[metric] || []).length > 0);
+    if (!hasRenderableMetric) {{
+      journeySvg.innerHTML = '';
+      journeyEmpty.hidden = false;
+      clearJourneyAxes();
+      hideJourneyTooltip();
+      return;
+    }}
+    journeyEmpty.hidden = true;
+
+    const isolated = activeMetrics.length === 1;
+    let leftScale = null;
+    let rightScale = null;
+    if (isolated) {{
+      const metric = activeMetrics[0];
+      if (metric === 'bpm') {{
+        const vals = (metricPts[metric] || []).map(p => p.val);
+        leftScale = scaleFromValues(vals, true);
+      }} else {{
+        leftScale = {{ min: 0, max: 1, isBpm: false }};
+      }}
+    }} else {{
+      const hasEnergy = activeMetrics.includes('energy') && (metricPts.energy || []).length > 0;
+      const hasDance = activeMetrics.includes('dance') && (metricPts.dance || []).length > 0;
+      if (hasEnergy || hasDance) {{
+        leftScale = {{ min: 0, max: 1, isBpm: false }};
+      }}
+      if (activeMetrics.includes('bpm') && (metricPts.bpm || []).length) {{
+        const vals = metricPts.bpm.map(p => p.val);
+        rightScale = scaleFromValues(vals, true);
+      }}
+      if (!leftScale && rightScale) {{
+        leftScale = rightScale;
+        rightScale = null;
+      }}
+    }}
+
+    const leftMetrics = [];
+    const rightMetrics = [];
+    if (isolated) {{
+      leftMetrics.push(activeMetrics[0]);
+    }} else {{
+      if (activeMetrics.includes('energy') && (metricPts.energy || []).length) leftMetrics.push('energy');
+      if (activeMetrics.includes('dance') && (metricPts.dance || []).length) leftMetrics.push('dance');
+      if (rightScale && activeMetrics.includes('bpm') && (metricPts.bpm || []).length) rightMetrics.push('bpm');
+      if (!rightMetrics.length && leftScale && leftScale.isBpm && activeMetrics.includes('bpm')) leftMetrics.push('bpm');
+    }}
+    renderJourneyAxis(journeyYLeft, leftScale, 'left', leftMetrics, h, pad);
+    renderJourneyAxis(journeyYRight, rightScale, 'right', rightMetrics, h, pad);
+
     const layers = [];
     activeMetrics.forEach(metric => {{
-      const vals = points.map(p => p[metric]).filter(v => v !== null && v !== undefined);
-      if (!vals.length) return;
-      const min = Math.min(...vals);
-      const max = Math.max(...vals);
-      const range = Math.max(0.0001, max - min);
-      const coords = points
-        .filter(p => p[metric] !== null && p[metric] !== undefined)
-        .map(p => {{
-          const x = pad + (Math.max(0, p.start) / total) * (w - pad * 2);
-          const norm = (p[metric] - min) / range;
+      const pts = metricPts[metric] || [];
+      if (!pts.length) return;
+      const scale = isolated ? leftScale : (metric === 'bpm' && rightScale ? rightScale : leftScale);
+      if (!scale) return;
+      const range = Math.max(0.0001, scale.max - scale.min);
+      const coords = pts.map(entry => {{
+          const x = pad + (entry.x * (w - pad * 2));
+          const norm = (entry.val - scale.min) / range;
           const y = h - pad - norm * (h - pad * 2);
-          return {{ x, y, p }};
-        }});
+          return {{ x, y, entry }};
+      }});
       if (!coords.length) return;
       const path = coords.map((c, i) => `${{i ? 'L' : 'M'}}${{c.x.toFixed(2)}} ${{c.y.toFixed(2)}}`).join(' ');
       layers.push(`<path d="${{path}}" fill="none" stroke="${{journeyColors[metric]}}" stroke-width="2"/>`);
       coords.forEach(c => {{
         layers.push(
-          `<circle cx="${{c.x.toFixed(2)}}" cy="${{c.y.toFixed(2)}}" r="4" fill="${{journeyColors[metric]}}" data-track-idx="${{c.p.idx}}" data-metric="${{metric}}" data-value="${{Number(c.p[metric]).toFixed(3)}}" class="journey-point"/>`
+          `<circle cx="${{c.x.toFixed(2)}}" cy="${{c.y.toFixed(2)}}" r="4" fill="${{journeyColors[metric]}}" data-track-idx="${{c.entry.p.idx}}" data-metric="${{metric}}" data-value="${{Number(c.entry.val).toFixed(3)}}" class="journey-point"/>`
         );
       }});
     }});
@@ -2391,6 +2691,7 @@ def save_set_explorer_html(
     if (dockPlay) {{
       dockPlay.innerHTML = STATE.isPlaying ? '&#10074;&#10074;' : '&#9654;';
       dockPlay.setAttribute('aria-label', STATE.isPlaying ? 'Pause' : 'Play');
+      dockPlay.classList.toggle('is-playing', STATE.isPlaying);
     }}
     updatePlayButtons();
   }}
@@ -2803,6 +3104,28 @@ def save_set_explorer_html(
     if (!STATE.activeIdx) return;
     const card = document.querySelector(`.track-card[data-track-idx="${{STATE.activeIdx}}"]`);
     if (card) card.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+  }});
+  document.getElementById('dockToTop')?.addEventListener('click', () => {{
+    const workspaceHeading = document.querySelector('#workspace .set-workspace-heading');
+    if (workspaceHeading) {{
+      const topbar = document.querySelector('.topbar');
+      const offset = (topbar?.offsetHeight || 0) + 6;
+      const rect = workspaceHeading.getBoundingClientRect();
+      const targetTop = Math.max(0, window.scrollY + rect.top - offset);
+      window.scrollTo({{ top: targetTop, behavior: 'smooth' }});
+      return;
+    }}
+    const timelinePanel = document.getElementById('timeline');
+    if (timelinePanel) {{
+      timelinePanel.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      return;
+    }}
+    const sourceFrame = document.getElementById('sourcePlayerFrame');
+    if (sourceFrame) {{
+      sourceFrame.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      return;
+    }}
+    window.scrollTo({{ top: 0, behavior: 'smooth' }});
   }});
 
   dockProgress?.addEventListener('click', e => {{

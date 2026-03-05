@@ -27,10 +27,12 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import Config
+from detail_explorer_common import (
+    SUMMARY_FILES as _SUMMARY_FILES,
+    is_valid_artist_image_url as _is_valid_artist_image_url,
+    normalize_name as _normalize_name,
+)
 from metadata_enricher import MetadataEnricher, _RECCOBEATS_BASE, _KEY_NAMES
-
-
-_SUMMARY_FILES = {"artist_summary.json", "artist_summary.md", "artist_summary.html"}
 
 
 def _needs_enrichment(track: dict) -> bool:
@@ -72,23 +74,6 @@ def _needs_enrichment(track: dict) -> bool:
     return False
 
 
-def _is_valid_artist_image_url(url: str | None) -> bool:
-    """Return True when image URL appears usable for artist-card artwork."""
-    if not url:
-        return False
-    lower = str(url).strip().lower()
-    if not lower.startswith("http"):
-        return False
-    if "spacer.gif" in lower:
-        return False
-    return True
-
-
-def _normalize_name(value: str) -> str:
-    """Lowercase alphanumeric normalization for loose artist-name matching."""
-    if not value:
-        return ""
-    return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
 def _is_low_res_discogs_image_url(url: str | None) -> bool:

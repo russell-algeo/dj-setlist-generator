@@ -14,11 +14,9 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from detail_explorer_common import SUMMARY_FILES as _SUMMARY_FILES
 from set_explorer_formatter import save_set_explorer_html
 from artist_summary import ArtistSummarizer
-
-
-_SUMMARY_FILES = {"artist_summary.json", "artist_summary.md", "artist_summary.html"}
 
 
 # ---------------------------------------------------------------------------

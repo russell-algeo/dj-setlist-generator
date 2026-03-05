@@ -6,15 +6,20 @@ Usage:
 """
 
 import json
-import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import quote
 
+from detail_explorer_common import (
+    CONFIDENCE_LEVELS,
+    EXCLUDED_GENRES,
+    SUMMARY_FILES as _SUMMARY_FILES,
+    extract_youtube_id as _extract_youtube_id,
+    is_valid_artist_image_url as _is_valid_artist_image_url,
+    normalize_name as _normalize_name,
+)
 from explorer_formatter import save_master_explorer_html
-
-_SUMMARY_FILES = {"artist_summary.json", "artist_summary.md", "artist_summary.html"}
 
 
 def _normalize_key(artist: str, title: str) -> str:
@@ -30,48 +35,43 @@ def _enrich_sets(track: dict) -> list[dict]:
         info = link_map.get(title, {})
         href = info.get("html_master_rel", "")
         pos = info.get("track_position")
+        conf = _normalize_confidence(info.get("confidence"))
         if href and pos:
-            from urllib.parse import quote as _quote
-            href = _quote(href, safe="/") + f"#track-{pos}"
+            href = quote(href, safe="/") + f"#track-{pos}"
         elif href:
-            from urllib.parse import quote as _quote
-            href = _quote(href, safe="/")
-        result.append({"title": title, "href": href})
+            href = quote(href, safe="/")
+        result.append({"title": title, "href": href, "confidence": conf})
     return result
 
 
-def _extract_youtube_id(url: str) -> str | None:
-    if not url:
-        return None
-    try:
-        parsed = urlparse(url)
-        host = parsed.netloc.lower().removeprefix("www.").removeprefix("m.")
-        if host == "youtube.com":
-            return parse_qs(parsed.query).get("v", [None])[0]
-        if host == "youtu.be":
-            return parsed.path.lstrip("/")
-    except Exception:
-        pass
-    return None
+def _normalize_confidence(value: str | None) -> str:
+    """Normalize confidence labels to supported tiers."""
+    conf = str(value or "UNCERTAIN").upper()
+    return conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
 
 
-def _normalize_name(value: str) -> str:
-    """Lowercase alphanumeric normalization for loose artist-name matching."""
-    if not value:
-        return ""
-    return re.sub(r"[^a-z0-9]+", "", value.lower())
+def _blank_confidence_counts() -> dict[str, int]:
+    """Create a zeroed confidence-count map."""
+    return {level: 0 for level in CONFIDENCE_LEVELS}
 
 
-def _is_valid_artist_image_url(url: str | None) -> bool:
-    """Return True when image URL appears usable for card artwork."""
-    if not url:
-        return False
-    lower = str(url).strip().lower()
-    if not lower.startswith("http"):
-        return False
-    if "spacer.gif" in lower:
-        return False
-    return True
+def _primary_confidence(conf_counts: dict[str, int]) -> str:
+    """Pick a representative confidence tier from counts.
+
+    Priority:
+    1) highest count
+    2) strongest tier precedence (HIGH > MEDIUM > LOW > UNCERTAIN)
+    """
+    best = "UNCERTAIN"
+    best_count = -1
+    for level in CONFIDENCE_LEVELS:
+        count = int(conf_counts.get(level, 0))
+        if count > best_count:
+            best = level
+            best_count = count
+    return best
+
+
 
 
 class MasterSummarizer:
@@ -260,6 +260,7 @@ class MasterSummarizer:
                         "discogs_label_url": t.get("discogs_label_url"),
                         "genres": genres,
                         "appearances": 0,
+                        "confidence_counts": _blank_confidence_counts(),
                         "sets": [],
                         "set_link_map": {},  # set_title → {html_master_rel, track_position}
                     }
@@ -291,6 +292,10 @@ class MasterSummarizer:
                         tracks[key]["genres"] = genres
 
                 tracks[key]["appearances"] += 1
+                conf_norm = _normalize_confidence(t.get("confidence"))
+                tracks[key]["confidence_counts"][conf_norm] = int(
+                    tracks[key]["confidence_counts"].get(conf_norm, 0)
+                ) + 1
                 if set_title not in tracks[key]["sets"]:
                     tracks[key]["sets"].append(set_title)
                 # Store link info for this set (first occurrence wins for position)
@@ -298,6 +303,7 @@ class MasterSummarizer:
                     tracks[key]["set_link_map"][set_title] = {
                         "html_master_rel": set_html_master_rel,
                         "track_position": t.get("position"),
+                        "confidence": conf_norm,
                     }
 
         # Genre counter for this artist
@@ -490,6 +496,13 @@ class MasterSummarizer:
                 for k in sorted(shared_keys):
                     a_t = track_to_artists[k].get(a["name"], {})
                     b_t = track_to_artists[k].get(b["name"], {})
+                    a_conf_counts = a_t.get("confidence_counts") or {}
+                    b_conf_counts = b_t.get("confidence_counts") or {}
+                    merged_conf_counts = {
+                        level: int(a_conf_counts.get(level, 0)) + int(b_conf_counts.get(level, 0))
+                        for level in CONFIDENCE_LEVELS
+                    }
+                    shared_confidence = _primary_confidence(merged_conf_counts)
                     shared_tracks.append({
                         "track_key": k,
                         "display_artist": a_t.get("display_artist", ""),
@@ -514,6 +527,8 @@ class MasterSummarizer:
                         )),
                         "discogs_label": a_t.get("discogs_label") or b_t.get("discogs_label"),
                         "discogs_label_url": a_t.get("discogs_label_url") or b_t.get("discogs_label_url"),
+                        "confidence": shared_confidence,
+                        "confidence_counts": merged_conf_counts,
                     })
                 shared_tracks.sort(
                     key=lambda x: x["appearances_a"] + x["appearances_b"], reverse=True

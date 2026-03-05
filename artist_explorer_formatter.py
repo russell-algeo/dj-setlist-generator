@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime
+import json
 from pathlib import Path
 import re
 
 from detail_explorer_common import (
+    CONFIDENCE_COLORS,
+    CONFIDENCE_LEVELS,
     MASTER_DETAIL_BASE_CSS,
     discogs_search_url,
     esc,
+    is_valid_artist_image_url as _is_valid_artist_image_url,
+    normalize_name as _normalize_name,
     normalize_track_key,
     spotify_search_url,
     spotify_track_id,
@@ -28,21 +33,20 @@ def _fmt_duration(seconds: int) -> str:
     return f"{m}m"
 
 
-def _normalize_name(value: str) -> str:
-    if not value:
-        return ""
-    return re.sub(r"[^a-z0-9]+", "", value.lower())
+def _normalize_confidence(value: str | None) -> str:
+    conf = str(value or "UNCERTAIN").upper()
+    return conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
 
 
-def _is_valid_artist_image_url(url: str | None) -> bool:
-    if not url:
-        return False
-    lower = str(url).strip().lower()
-    if not lower.startswith("http"):
-        return False
-    if "spacer.gif" in lower:
-        return False
-    return True
+def _primary_confidence(conf_counts: dict[str, int]) -> str:
+    best = "UNCERTAIN"
+    best_count = -1
+    for level in CONFIDENCE_LEVELS:
+        count = int(conf_counts.get(level, 0))
+        if count > best_count:
+            best = level
+            best_count = count
+    return best
 
 
 def _artist_css() -> str:
@@ -380,6 +384,12 @@ body.artist-page::after {
 }
 
 /* Recurring cards (index-like language) */
+#recurring-section .section-head h2.recurring-heading {
+  white-space: nowrap;
+  font-size: clamp(24px, 9vw, 82px);
+  letter-spacing: -0.03em;
+}
+
 .recurring-controls {
   margin-top: 12px;
   display: grid;
@@ -1011,6 +1021,38 @@ body.artist-page::after {
   flex: 0 0 auto;
   padding: 3px 6px;
   font-size: 9px;
+}
+
+.threshold-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.threshold-stepper .threshold-arrow {
+  width: 20px;
+  min-width: 20px;
+  padding: 3px 0;
+  text-align: center;
+  line-height: 1;
+  font-size: 10px;
+}
+
+.threshold-stepper .threshold-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+  border-color: #3a3a3a;
+  color: #f0f0f0;
+  pointer-events: none;
+  cursor: default;
+}
+
+.threshold-stepper .threshold-arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .taxonomy-controls-row {
@@ -1791,19 +1833,23 @@ def save_artist_explorer_html(
             track_artist_focus[artist] += count
 
         app_rows = []
+        rec_conf_counts = {level: 0 for level in CONFIDENCE_LEVELS}
         for app in appearances:
             set_html = app.get("set_html_rel") or ""
             track_position = app.get("track_position")
             set_anchor = f"{set_html}#track-{track_position}" if set_html and track_position else set_html
+            confidence = _normalize_confidence(app.get("confidence"))
+            rec_conf_counts[confidence] = int(rec_conf_counts.get(confidence, 0)) + 1
             app_rows.append(
                 {
                     "set_title": app.get("set_title") or "Unknown set",
                     "time_range": app.get("time_range") or "",
                     "source_deep_link": app.get("source_deep_link") or "",
                     "set_anchor": set_anchor,
-                    "confidence": app.get("confidence") or "UNCERTAIN",
+                    "confidence": confidence,
                 }
             )
+        rec_conf_levels = [level for level in ("HIGH", "MEDIUM", "LOW") if int(rec_conf_counts.get(level, 0)) > 0]
 
         record = {
             "track_key": key,
@@ -1818,6 +1864,9 @@ def save_artist_explorer_html(
             "genres": genres,
             "album_art": album_art,
             "appearances": app_rows,
+            "confidence": _primary_confidence(rec_conf_counts),
+            "confidence_counts": rec_conf_counts,
+            "confidence_levels": rec_conf_levels,
             "search": f"{artist} {title} {' '.join(genres)} {label}".lower(),
         }
         recurring_records.append(record)
@@ -1872,14 +1921,8 @@ def save_artist_explorer_html(
             youtube_url = info.get("youtube_url") or youtube_search_url(artist, track_title)
             discogs_url = info.get("discogs_url") or info.get("discogs_label_url") or discogs_search_url(artist, track_title)
             album_art = info.get("spotify_album_art") or ""
-            confidence = t.get("confidence") or "UNCERTAIN"
-            confidence_upper = str(confidence).upper()
-            conf_color = {
-                "HIGH": "#00e676",
-                "MEDIUM": "#ffd740",
-                "LOW": "#ff9100",
-                "UNCERTAIN": "#757575",
-            }.get(confidence_upper, "#757575")
+            confidence_upper = _normalize_confidence(t.get("confidence"))
+            conf_color = CONFIDENCE_COLORS.get(confidence_upper, "#757575")
 
             source_deep_link = ""
             time_range = t.get("start_time_formatted") or ""
@@ -1908,7 +1951,7 @@ def save_artist_explorer_html(
                 "track_key": key_raw,
                 "artist": artist,
                 "title": track_title,
-                "confidence": confidence,
+                "confidence": confidence_upper,
                 "time": t.get("start_time_formatted") or "",
                 "genres": genres,
                 "label": label,
@@ -2083,34 +2126,43 @@ def save_artist_explorer_html(
     recurring_cards_html = []
     for rec in recurring_records:
         set_count = rec["count"]
+        conf_counts = rec.get("confidence_counts") or {}
+        high_count = int(conf_counts.get("HIGH", 0))
+        medium_count = int(conf_counts.get("MEDIUM", 0))
+        low_count = int(conf_counts.get("LOW", 0))
 
-        source_groups = []
+        set_links_by_conf: dict[str, list[dict[str, str]]] = {
+            "ALL": [],
+            "HIGH": [],
+            "MEDIUM": [],
+            "LOW": [],
+        }
+        seen_by_conf: dict[str, set[tuple[str, str]]] = {key: set() for key in set_links_by_conf}
         for app in rec.get("appearances", []):
-            set_title = esc(app.get("set_title") or "Unknown set")
-            set_anchor = app.get("set_anchor") or ""
-            source_deep = app.get("source_deep_link") or ""
-            time_range = esc(app.get("time_range") or "")
-            conf = esc(app.get("confidence") or "UNCERTAIN")
-            items = []
-            if set_anchor:
-                items.append(
-                    f'<li><a href="{esc(set_anchor)}" target="_blank" rel="noopener">Set Page</a></li>'
-                )
-            if source_deep:
-                items.append(
-                    f'<li><a href="{esc(source_deep)}" target="_blank" rel="noopener">Source Time {time_range}</a></li>'
-                )
-            if conf:
-                items.append(f"<li>Confidence: {conf}</li>")
-            list_html = f'<ul class="source-list">{"".join(items)}</ul>' if items else '<p class="source-empty">No links</p>'
-            source_groups.append(
-                f"""
-<div class="source-group">
-  <h5>{f'<a href="{esc(set_anchor)}" target="_blank" rel="noopener">{set_title}</a>' if set_anchor else set_title}</h5>
-  {list_html}
-</div>
-"""
-            )
+            set_title = str(app.get("set_title") or "Unknown set")
+            set_anchor = str(app.get("set_anchor") or "").strip()
+            if not set_anchor:
+                continue
+            app_conf = _normalize_confidence(app.get("confidence"))
+            dedupe_key = (set_anchor, set_title.lower())
+            if dedupe_key not in seen_by_conf["ALL"]:
+                seen_by_conf["ALL"].add(dedupe_key)
+                set_links_by_conf["ALL"].append({"title": set_title, "href": set_anchor})
+            if app_conf in ("HIGH", "MEDIUM", "LOW") and dedupe_key not in seen_by_conf[app_conf]:
+                seen_by_conf[app_conf].add(dedupe_key)
+                set_links_by_conf[app_conf].append({"title": set_title, "href": set_anchor})
+
+        set_links_count = len(set_links_by_conf["ALL"])
+        all_set_links_html = "".join(
+            f'<li><a href="{esc(item.get("href") or "")}" target="_blank" rel="noopener">{esc(item.get("title") or "Unknown set")}</a></li>'
+            for item in set_links_by_conf["ALL"]
+        )
+        source_panel_html = (
+            f'<ul class="source-list">{all_set_links_html}</ul>'
+            if all_set_links_html
+            else '<div class="empty">No set links available.</div>'
+        )
+        set_links_json = esc(json.dumps(set_links_by_conf, ensure_ascii=True))
 
         rec_art = rec.get("album_art") or ""
         rec_art_html = f'<img src="{esc(rec_art)}" alt="{esc(rec["title"])}" loading="lazy" />' if rec_art else ""
@@ -2123,30 +2175,45 @@ def save_artist_explorer_html(
 
         recurring_cards_html.append(
             f"""
-<article class="track-card rec-card" data-count="{set_count}" data-search="{esc(rec['search'])}" data-track-key="{esc(rec['track_key'])}">
+<article class="track-card rec-card" data-count="{set_count}" data-count-all="{set_count}" data-count-high="{high_count}" data-count-medium="{medium_count}" data-count-low="{low_count}" data-set-links="{set_links_json}" data-search="{esc(rec['search'])}" data-track-key="{esc(rec['track_key'])}" data-conf="{esc(rec.get('confidence') or 'UNCERTAIN')}" data-conf-levels="{esc('|'.join(rec.get('confidence_levels') or []))}">
   <div class="track-art">{rec_art_html}</div>
   <div class="track-body">
     <h4 class="track-title">{esc(rec['artist'])} - {esc(rec['title'])}</h4>
     <div class="actions">
       {spotify_embed_btn}
-      <button data-action="toggle-sources" data-closed-label="Sets ({set_count})" data-open-label="Hide Sets">Sets ({set_count})</button>
+      <button data-action="toggle-sources" data-closed-label="Sets ({set_links_count})" data-open-label="Hide Sets">Sets ({set_links_count})</button>
     </div>
-    <div class="source-panel">{''.join(source_groups) if source_groups else '<div class="empty">No evidence rows.</div>'}</div>
+    <div class="source-panel">{source_panel_html}</div>
   </div>
 </article>
 """
         )
 
-    recurring_counts = [r["count"] for r in recurring_records if r["count"] >= 2]
-    recurring_max = max(recurring_counts, default=2)
-    recurring_thresholds = [2, 3, 4, 5, 10]
-    if recurring_max > 10 and recurring_max not in recurring_thresholds:
+    recurring_counts = [r["count"] for r in recurring_records if r["count"] >= 1]
+    recurring_max = max(recurring_counts, default=1)
+    recurring_thresholds = [v for v in (1, 2, 3, 5, 8, 12) if v <= recurring_max]
+    if 1 not in recurring_thresholds:
+        recurring_thresholds.insert(0, 1)
+    if recurring_max not in recurring_thresholds:
         recurring_thresholds.append(recurring_max)
-    recurring_default = 2
+    recurring_thresholds = sorted({int(v) for v in recurring_thresholds if int(v) > 0})
+    recurring_default = 1
+    if recurring_default not in recurring_thresholds:
+        recurring_thresholds.insert(0, recurring_default)
+    recurring_thresholds_data = ",".join(str(v) for v in recurring_thresholds)
 
-    recurring_filter_btns = "".join(
-        f'<button class="btn js-rec-threshold{" active" if t == recurring_default else ""}" data-min="{t}">{t}+ sets</button>'
-        for t in recurring_thresholds
+    recurring_filter_btns = (
+        f'<div class="threshold-stepper" id="recThresholdStepper" data-thresholds="{esc(recurring_thresholds_data)}">'
+        f'<button class="btn threshold-arrow" data-action="rec-threshold-down" aria-label="Decrease recurring set threshold">▼</button>'
+        f'<span class="btn threshold-value">{recurring_default}+ SETS</span>'
+        f'<button class="btn threshold-arrow" data-action="rec-threshold-up" aria-label="Increase recurring set threshold">▲</button>'
+        "</div>"
+    )
+    recurring_conf_filter_btns = (
+        '<button class="btn js-rec-conf active" data-conf="all">All confidence</button>'
+        '<button class="btn js-rec-conf" data-conf="HIGH">High</button>'
+        '<button class="btn js-rec-conf" data-conf="MEDIUM">Medium</button>'
+        '<button class="btn js-rec-conf" data-conf="LOW">Low</button>'
     )
 
     if failed:
@@ -2165,6 +2232,7 @@ def save_artist_explorer_html(
         "setAtlasSets": set_atlas_sets,
         "allAtlasTracks": all_atlas_tracks,
         "recurringDefault": recurring_default,
+        "recurringThresholds": recurring_thresholds,
     }
 
     html_template = """<!DOCTYPE html>
@@ -2216,11 +2284,11 @@ def save_artist_explorer_html(
     <section class="section" id="recurring-section">
       <div class="section-inner">
         <div class="section-head">
-          <h2>Recurring Tracks</h2>
+          <h2 class="recurring-heading">Recurring Tracks</h2>
           <p>Index-style track cards with set evidence and source deep links. Threshold and search controls are available below.</p>
         </div>
         <div class="recurring-controls">
-          <div class="controls-row">__RECURRING_FILTER_BTNS__</div>
+          <div class="controls-row">__RECURRING_FILTER_BTNS__ __RECURRING_CONF_FILTER_BTNS__</div>
           <input class="input" id="recSearchInput" type="search" placeholder="Search recurring tracks..." />
         </div>
         <div class="recurring-grid" id="recurringGrid">__RECURRING_CARDS__</div>
@@ -2262,6 +2330,7 @@ def save_artist_explorer_html(
                   </div>
                   <div class="taxonomy-controls-row">
                     <div class="pill-row" id="setAtlasThresholds"></div>
+                    <div class="pill-row" id="setAtlasConfidenceFilters"></div>
                     <div class="control taxonomy-sort-control">
                       <span class="taxonomy-sort-icon" aria-hidden="true">&#8597;</span>
                       <select id="setAtlasSort" aria-label="Sort taxonomy entries">
@@ -2354,6 +2423,7 @@ def save_artist_explorer_html(
   function fmt(n) {
     return Number(n || 0).toLocaleString();
   }
+  const CONF_FILTER_LEVELS = ['HIGH', 'MEDIUM', 'LOW'];
 
   function formatDuration(seconds) {
     const s = Number(seconds || 0);
@@ -2361,6 +2431,168 @@ def save_artist_explorer_html(
     const m = Math.floor((s % 3600) / 60);
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
+  }
+
+  function normalizeConfidence(value) {
+    const conf = String(value || 'UNCERTAIN').toUpperCase();
+    return ['HIGH', 'MEDIUM', 'LOW', 'UNCERTAIN'].includes(conf) ? conf : 'UNCERTAIN';
+  }
+
+  function trackHasConfidence(track, level) {
+    const target = normalizeConfidence(level);
+    const counts = track && typeof track === 'object' ? (track.confidence_counts || {}) : {};
+    const hasCounts = counts && typeof counts === 'object' && Object.keys(counts).length > 0;
+    if (hasCounts) {
+      return Number(counts[target] || 0) > 0;
+    }
+    return normalizeConfidence(track?.confidence) === target;
+  }
+
+  function trackMatchesConfidence(track, confFilter) {
+    if (confFilter === 'all') return true;
+    return trackHasConfidence(track, confFilter);
+  }
+
+  function filterTracksByConfidence(tracks, confFilter) {
+    return (tracks || []).filter((track) => trackMatchesConfidence(track, confFilter));
+  }
+
+  function normalizeConfFilter(confFilter) {
+    const raw = String(confFilter || 'all').toUpperCase();
+    if (raw === 'ALL') return 'all';
+    return CONF_FILTER_LEVELS.includes(raw) ? raw : 'all';
+  }
+
+  function filterSetRefsByConfidence(setRefs, confFilter) {
+    const target = normalizeConfFilter(confFilter);
+    if (target === 'all') return Array.isArray(setRefs) ? setRefs.slice() : [];
+    return (setRefs || []).filter((setRef) => normalizeConfidence(setRef?.confidence) === target);
+  }
+
+  function projectTrackByConfidence(track, confFilter) {
+    const target = normalizeConfFilter(confFilter);
+    if (!track) return null;
+
+    const refs = [];
+    let selectedAppearances = 0;
+    const confCounts = { HIGH: 0, MEDIUM: 0, LOW: 0, UNCERTAIN: 0 };
+
+    for (const ref of (track.selected_refs || [])) {
+      const setRefs = filterSetRefsByConfidence(ref?.set_refs || [], target);
+      if (!setRefs.length) continue;
+      refs.push({
+        ...ref,
+        set_refs: setRefs,
+        appearances: setRefs.length,
+      });
+      for (const setRef of setRefs) {
+        const conf = normalizeConfidence(setRef?.confidence);
+        confCounts[conf] = Number(confCounts[conf] || 0) + 1;
+        selectedAppearances += 1;
+      }
+    }
+
+    if (selectedAppearances <= 0) return null;
+
+    let confidence = normalizeConfidence(track.confidence);
+    if (target === 'all') {
+      confidence = primaryConfidenceFromCounts(confCounts);
+    } else {
+      for (const level of Object.keys(confCounts)) confCounts[level] = 0;
+      confCounts[target] = selectedAppearances;
+      confidence = target;
+    }
+
+    return {
+      ...track,
+      selected_refs: refs,
+      selected_appearances: Number(selectedAppearances || 0),
+      selected_artist_count: refs.length,
+      confidence_counts: confCounts,
+      confidence,
+    };
+  }
+
+  function tracksWithConfidenceProjection(tracks, confFilter) {
+    const out = [];
+    for (const track of tracks || []) {
+      const projected = projectTrackByConfidence(track, confFilter);
+      if (!projected) continue;
+      out.push(projected);
+    }
+    return out;
+  }
+
+  function confidenceCountsFromTracks(tracks) {
+    const out = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+    for (const track of tracks || []) {
+      for (const level of CONF_FILTER_LEVELS) {
+        if (trackHasConfidence(track, level)) out[level] += 1;
+      }
+    }
+    return out;
+  }
+
+  function primaryConfidenceFromCounts(confCounts) {
+    const ordered = ['HIGH', 'MEDIUM', 'LOW', 'UNCERTAIN'];
+    let best = 'UNCERTAIN';
+    let bestCount = -1;
+    for (const level of ordered) {
+      const count = Number((confCounts || {})[level] || 0);
+      if (count > bestCount) {
+        best = level;
+        bestCount = count;
+      }
+    }
+    return best;
+  }
+
+  function parseThresholdLevels(raw, fallback = [1]) {
+    const fromRaw = Array.isArray(raw)
+      ? raw
+      : String(raw || '')
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean);
+    const levels = fromRaw
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v) && v > 0)
+      .sort((a, b) => a - b);
+    if (levels.length) return levels;
+    return fallback.slice();
+  }
+
+  function normalizeThresholdValue(value, levels) {
+    const options = parseThresholdLevels(levels, [1]);
+    const current = Number(value);
+    if (Number.isFinite(current) && options.includes(current)) return current;
+    if (!Number.isFinite(current)) return options[0];
+    let fallback = options[0];
+    for (const option of options) {
+      if (option <= current) fallback = option;
+    }
+    return fallback;
+  }
+
+  function stepThresholdValue(value, levels, direction) {
+    const options = parseThresholdLevels(levels, [1]);
+    const current = normalizeThresholdValue(value, options);
+    const idx = options.indexOf(current);
+    const nextIdx = Math.max(0, Math.min(options.length - 1, idx + (direction > 0 ? 1 : -1)));
+    return options[nextIdx];
+  }
+
+  function buildThresholdStepperHtml(buttonClass, downAction, upAction, currentValue, levels) {
+    const options = parseThresholdLevels(levels, [1]);
+    const current = normalizeThresholdValue(currentValue, options);
+    const idx = options.indexOf(current);
+    const canDown = idx > 0;
+    const canUp = idx < options.length - 1;
+    return `
+      <button class="${buttonClass} threshold-arrow" data-action="${downAction}" ${canDown ? '' : 'disabled'} aria-label="Decrease set threshold">▼</button>
+      <span class="${buttonClass} threshold-value">${fmt(current)}+ SETS</span>
+      <button class="${buttonClass} threshold-arrow" data-action="${upAction}" ${canUp ? '' : 'disabled'} aria-label="Increase set threshold">▲</button>
+    `;
   }
 
   let artistHeroRailRaf = 0;
@@ -2496,32 +2728,124 @@ def save_artist_explorer_html(
 
   // Recurring filters
   const recCards = Array.from(document.querySelectorAll('.rec-card'));
+  const recurringGrid = document.getElementById('recurringGrid');
   const recSearchInput = document.getElementById('recSearchInput');
   const recNoResults = document.getElementById('recNoResults');
-  const recThresholdBtns = Array.from(document.querySelectorAll('.js-rec-threshold'));
-  let recMin = Number((document.querySelector('.js-rec-threshold.active') || {}).dataset?.min || ARTIST_DATA.recurringDefault || 2);
+  const recThresholdStepper = document.getElementById('recThresholdStepper');
+  const REC_THRESHOLD_VALUES = parseThresholdLevels(
+    ARTIST_DATA.recurringThresholds || recThresholdStepper?.dataset?.thresholds || '1,2,3,5,8,12',
+    [1, 2, 3, 5, 8, 12],
+  );
+  const recConfBtns = Array.from(document.querySelectorAll('.js-rec-conf'));
+  let recMin = normalizeThresholdValue(ARTIST_DATA.recurringDefault || REC_THRESHOLD_VALUES[0] || 1, REC_THRESHOLD_VALUES);
+  let recConf = String((document.querySelector('.js-rec-conf.active') || {}).dataset?.conf || 'all').toUpperCase();
+  if (recConf !== 'ALL' && !CONF_FILTER_LEVELS.includes(recConf)) recConf = 'ALL';
+
+  function recurringCountForCard(card, confFilter) {
+    const links = recurringLinksForCard(card, confFilter);
+    if (Array.isArray(links)) return links.length;
+    const key = String(confFilter || 'ALL').toUpperCase();
+    if (key === 'HIGH') return Number(card.dataset.countHigh || 0);
+    if (key === 'MEDIUM') return Number(card.dataset.countMedium || 0);
+    if (key === 'LOW') return Number(card.dataset.countLow || 0);
+    return Number(card.dataset.countAll || card.dataset.count || 0);
+  }
+
+  function recurringLinksForCard(card, confFilter) {
+    if (!card) return [];
+    if (!card._recurringLinksByConf) {
+      try {
+        const parsed = JSON.parse(card.dataset.setLinks || '{}');
+        card._recurringLinksByConf = parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (_err) {
+        card._recurringLinksByConf = {};
+      }
+    }
+    const key = String(confFilter || 'ALL').toUpperCase();
+    const linksByConf = card._recurringLinksByConf || {};
+    const links = linksByConf[key] || linksByConf.ALL || [];
+    return Array.isArray(links) ? links : [];
+  }
+
+  function recurringLinksHtml(links) {
+    if (!links.length) return '<div class="empty">No set links available.</div>';
+    return `<ul class="source-list">${links.map((link) => {
+      const href = escapeHtml(String(link?.href || '').trim());
+      const title = escapeHtml(String(link?.title || 'Unknown set'));
+      return href
+        ? `<li><a href="${href}" target="_blank" rel="noopener">${title}</a></li>`
+        : `<li>${title}</li>`;
+    }).join('')}</ul>`;
+  }
+
+  function syncRecurringCardContext(card, confFilter) {
+    if (!card) return;
+    const links = recurringLinksForCard(card, confFilter);
+    const setCount = links.length;
+    const btn = card.querySelector('[data-action="toggle-sources"]');
+    const panel = card.querySelector('.source-panel');
+    const closedLabel = `Sets (${fmt(setCount)})`;
+    if (btn) {
+      btn.dataset.closedLabel = closedLabel;
+      btn.textContent = card.classList.contains('sources-open')
+        ? (btn.dataset.openLabel || 'Hide Sets')
+        : closedLabel;
+    }
+    if (panel) {
+      panel.innerHTML = recurringLinksHtml(links);
+    }
+  }
+
+  function renderRecurringThresholdStepper() {
+    if (!recThresholdStepper) return;
+    recMin = normalizeThresholdValue(recMin, REC_THRESHOLD_VALUES);
+    recThresholdStepper.innerHTML = buildThresholdStepperHtml(
+      'btn',
+      'rec-threshold-down',
+      'rec-threshold-up',
+      recMin,
+      REC_THRESHOLD_VALUES,
+    );
+  }
 
   function applyRecurringFilters() {
     const q = String(recSearchInput?.value || '').trim().toLowerCase();
+    const visibleCards = [];
     let visible = 0;
     recCards.forEach((card) => {
-      const count = Number(card.dataset.count || 0);
+      const count = recurringCountForCard(card, recConf);
       const search = String(card.dataset.search || '');
-      const show = count >= recMin && (!q || search.includes(q));
+      const confMatch = recConf === 'ALL' ? true : count > 0;
+      const show = count >= recMin && confMatch && (!q || search.includes(q));
+      syncRecurringCardContext(card, recConf);
       card.style.display = show ? '' : 'none';
-      if (show) visible += 1;
+      if (show) {
+        visible += 1;
+        visibleCards.push({
+          card,
+          count,
+          name: String(card.querySelector('.track-title')?.textContent || '').toLowerCase(),
+        });
+      }
     });
-    recNoResults.style.display = visible ? 'none' : 'block';
+    if (recurringGrid) {
+      visibleCards
+        .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name))
+        .forEach((entry) => recurringGrid.appendChild(entry.card));
+    }
+    if (recNoResults) recNoResults.style.display = visible ? 'none' : 'block';
   }
 
-  recThresholdBtns.forEach((btn) => {
+  recConfBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
-      recThresholdBtns.forEach((b) => b.classList.toggle('active', b === btn));
-      recMin = Number(btn.dataset.min || 2);
+      recConfBtns.forEach((b) => b.classList.toggle('active', b === btn));
+      recConf = String(btn.dataset.conf || 'all').toUpperCase();
+      if (recConf !== 'ALL' && !CONF_FILTER_LEVELS.includes(recConf)) recConf = 'ALL';
       applyRecurringFilters();
     });
   });
   if (recSearchInput) recSearchInput.addEventListener('input', applyRecurringFilters);
+  renderRecurringThresholdStepper();
 
   // Set Explorer
   const setGrid = document.getElementById('setGrid');
@@ -2729,6 +3053,7 @@ def save_artist_explorer_html(
   const atlasEvidencePagerEl = document.getElementById('setAtlasEvidencePager');
   const atlasLensTabsEl = document.getElementById('setAtlasLensTabs');
   const atlasThresholdsEl = document.getElementById('setAtlasThresholds');
+  const atlasConfidenceFiltersEl = document.getElementById('setAtlasConfidenceFilters');
   const atlasQueryInput = document.getElementById('setAtlasQuery');
   const atlasSortSelect = document.getElementById('setAtlasSort');
   const atlasTitleEl = document.getElementById('setAtlasTitle');
@@ -2736,6 +3061,7 @@ def save_artist_explorer_html(
   const artistWideAtlasTracks = Array.isArray(ARTIST_DATA.allAtlasTracks) ? ARTIST_DATA.allAtlasTracks : [];
 
   const ATLAS_ROWS_PER_PAGE = 10;
+  const ATLAS_THRESHOLD_VALUES = [1, 2, 3, 5, 8, 12];
   let selectedAtlasSetIdx = ARTIST_DATA.setAtlasSets.length ? String(ARTIST_DATA.setAtlasSets[0].idx) : null;
   let atlasSelectedSetIds = new Set(selectedAtlasSetIdx ? [selectedAtlasSetIdx] : []);
   let atlasDockedSelectedSetIds = new Set(selectedAtlasSetIdx ? [selectedAtlasSetIdx] : []);
@@ -2745,6 +3071,7 @@ def save_artist_explorer_html(
   let atlasCompareMode = 'union';
   let atlasLens = 'genres';
   let atlasMin = 1;
+  let atlasTrackConf = 'all';
   let atlasQuery = '';
   let atlasSort = 'count';
   let atlasPage = 0;
@@ -2844,6 +3171,35 @@ def save_artist_explorer_html(
     ];
   }
 
+  function atlasTrackMergeKey(track) {
+    return String(track?.track_key || `${track?.artist || 'Unknown'} - ${track?.title || 'Unknown'}`).trim().toLowerCase();
+  }
+
+  function collectUniqueTracks(rows) {
+    const merged = new Map();
+    for (const row of rows || []) {
+      for (const track of (row?.tracks || [])) {
+        const key = atlasTrackMergeKey(track);
+        if (!merged.has(key)) merged.set(key, track);
+      }
+    }
+    return Array.from(merged.values());
+  }
+
+  function renderAtlasConfidenceFilters(tracks) {
+    if (!atlasConfidenceFiltersEl) return;
+    const total = (tracks || []).length;
+    const buttons = [
+      `<button class="chip-btn ${atlasTrackConf === 'all' ? 'active' : ''}" data-action="set-atlas-conf" data-conf="all">All (${fmt(total)})</button>`,
+    ];
+    for (const level of CONF_FILTER_LEVELS) {
+      buttons.push(
+        `<button class="chip-btn ${atlasTrackConf === level ? 'active' : ''}" data-action="set-atlas-conf" data-conf="${level}">${level}</button>`
+      );
+    }
+    atlasConfidenceFiltersEl.innerHTML = buttons.join('');
+  }
+
   function getSetAtlasCompositeTracks() {
     const selectedSets = getSelectedAtlasSets();
     if (atlasScope === 'set') {
@@ -2869,12 +3225,17 @@ def save_artist_explorer_html(
               album_art: track.album_art || '',
               selected_appearances: 0,
               selected_artist_count: 0,
+              confidence: 'UNCERTAIN',
+              confidence_counts: { HIGH: 0, MEDIUM: 0, LOW: 0, UNCERTAIN: 0 },
               _refsMap: new Map(),
               _setIds: new Set(),
             });
           }
           const row = merged.get(mergeKey);
           row.selected_appearances += 1;
+          const conf = normalizeConfidence(track.confidence);
+          row.confidence_counts[conf] = Number(row.confidence_counts[conf] || 0) + 1;
+          row.confidence = primaryConfidenceFromCounts(row.confidence_counts);
           if (!row.spotify_url && track.spotify_url) row.spotify_url = track.spotify_url;
           if (!row.album_art && track.album_art) row.album_art = track.album_art;
           if ((!row.genres || !row.genres.length) && (track.genres || []).length) row.genres = track.genres || [];
@@ -2894,7 +3255,11 @@ def save_artist_explorer_html(
           const ref = row._refsMap.get(selectedSetRefKey);
           const setHref = track.set_anchor || selectedSet.set_href || '';
           if (setHref && !(ref.set_refs || []).some((r) => r.href === setHref)) {
-            ref.set_refs.push({ title: setTitle, href: setHref });
+            ref.set_refs.push({
+              title: setTitle,
+              href: setHref,
+              confidence: normalizeConfidence(track.confidence),
+            });
           }
           if (!ref.source_deep_link && track.source_deep_link) ref.source_deep_link = track.source_deep_link;
           if (!ref.time_range && (track.time_range || track.time)) ref.time_range = track.time_range || track.time;
@@ -2934,11 +3299,16 @@ def save_artist_explorer_html(
           album_art: occ.album_art || '',
           selected_appearances: 0,
           selected_artist_count: 0,
+          confidence: 'UNCERTAIN',
+          confidence_counts: { HIGH: 0, MEDIUM: 0, LOW: 0, UNCERTAIN: 0 },
           _refsMap: new Map(),
         });
       }
       const row = merged.get(mergeKey);
       row.selected_appearances += 1;
+      const conf = normalizeConfidence(occ.confidence);
+      row.confidence_counts[conf] = Number(row.confidence_counts[conf] || 0) + 1;
+      row.confidence = primaryConfidenceFromCounts(row.confidence_counts);
       if (!row.spotify_url && occ.spotify_url) row.spotify_url = occ.spotify_url;
       if (!row.album_art && occ.album_art) row.album_art = occ.album_art;
       if ((!row.genres || !row.genres.length) && (occ.genres || []).length) row.genres = occ.genres || [];
@@ -2957,7 +3327,11 @@ def save_artist_explorer_html(
       const ref = row._refsMap.get(setTitle);
       const setHref = occ.set_anchor || '';
       if (setHref && !(ref.set_refs || []).some((r) => r.href === setHref)) {
-        ref.set_refs.push({ title: setTitle, href: setHref });
+        ref.set_refs.push({
+          title: setTitle,
+          href: setHref,
+          confidence: normalizeConfidence(occ.confidence),
+        });
       }
       if (!ref.source_deep_link && occ.source_deep_link) ref.source_deep_link = occ.source_deep_link;
       if (!ref.time_range && (occ.time_range || occ.time)) ref.time_range = occ.time_range || occ.time;
@@ -3061,9 +3435,10 @@ def save_artist_explorer_html(
     `;
   }
 
-  function buildSetAtlasRows(compositeTracks) {
+  function buildSetAtlasRows(compositeTracks, confFilter = 'all') {
     const lens = atlasLens;
     const bucket = new Map();
+    const scopedTracks = tracksWithConfidenceProjection(compositeTracks, confFilter);
 
     function put(name, track) {
       const key = (name || '').trim() || 'Unknown';
@@ -3078,7 +3453,7 @@ def save_artist_explorer_html(
       row.plays += Number(track.selected_appearances || 0);
     }
 
-    for (const track of compositeTracks) {
+    for (const track of scopedTracks) {
       if (lens === 'genres') {
         const genres = (track.genres || []).length ? track.genres : ['Unknown Genre'];
         for (const g of genres) put(g, track);
@@ -3131,63 +3506,67 @@ def save_artist_explorer_html(
     return fallback ? String(fallback.label_url || '').trim() : '';
   }
 
-  function buildSetAtlasTrackSourceGroups(track) {
-    return (track.selected_refs || []).map((ref) => {
-      const setRefs = (ref.set_refs || []).slice(0, 8);
-      const headingHref = setRefs[0]?.href || '';
-      const setLinks = setRefs.map((s) => {
-        const href = s.href || '';
-        if (href) return `<li><a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || 'Set')}</a></li>`;
-        return `<li>${escapeHtml(s.title || 'Set')}</li>`;
-      }).join('');
-      const sourceLi = ref.source_deep_link
-        ? `<li><a href="${escapeHtml(ref.source_deep_link)}" target="_blank" rel="noopener noreferrer">Source ${escapeHtml(ref.time_range || '')}</a></li>`
-        : '';
-      const body = `${setLinks}${sourceLi}`;
-      return `
-        <div class="source-group">
-          <h5>${headingHref ? `<a href="${escapeHtml(headingHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(ref.artist_name || 'Set')}</a>` : escapeHtml(ref.artist_name || 'Set')}</h5>
-          ${body ? `<ul class="source-list">${body}</ul>` : '<p class="source-empty">No set links</p>'}
-        </div>
-      `;
-    }).join('');
+  function buildSetAtlasTrackSetLinks(track) {
+    const links = [];
+    const seen = new Set();
+    for (const ref of (track.selected_refs || [])) {
+      for (const setRef of (ref.set_refs || [])) {
+        const href = String(setRef.href || '').trim();
+        if (!href) continue;
+        const title = String(setRef.title || ref.artist_name || 'Set').trim() || 'Set';
+        const key = `${href}|||${title.toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        links.push({ title, href });
+      }
+    }
+    return links;
   }
 
   function renderSetAtlasTrackCard(track) {
     const image = track.album_art || '';
     const spotifyId = extractSpotifyId(track.spotify_url || '');
-    const sourceGroups = buildSetAtlasTrackSourceGroups(track);
-    const sourceSets = (track.selected_refs || []).reduce((sum, ref) => sum + ((ref.set_refs || []).length || 0), 0);
-    const sourceLabel = `Sets (${fmt(sourceSets)})`;
+    const conf = normalizeConfidence(track.confidence);
+    const confColor = { HIGH: '#00e676', MEDIUM: '#ffd740', LOW: '#ff9100', UNCERTAIN: '#757575' }[conf] || '#757575';
+    const setLinks = buildSetAtlasTrackSetLinks(track);
+    const sourceLabel = `Sets (${fmt(setLinks.length)})`;
+    const sourceList = setLinks.length
+      ? `<ul class="source-list">${setLinks.map((setLink) => `<li><a href="${escapeHtml(setLink.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(setLink.title)}</a></li>`).join('')}</ul>`
+      : '<div class="empty">No set links available.</div>';
 
     return `
       <article class="track-card" data-track-key="${escapeHtml(track.track_key || '')}">
         <div class="track-art">${image ? `<img src="${image}" alt="${escapeHtml(track.title || 'Track')}" loading="lazy" />` : ''}</div>
         <div class="track-body">
           <h4 class="track-title">${escapeHtml(track.artist || 'Unknown')} - ${escapeHtml(track.title || 'Unknown')}</h4>
+          <p class="muted">Confidence <span class="set-track-conf" style="border-color:${confColor}; color:${confColor};">${escapeHtml(conf)}</span></p>
           <div class="actions">
             ${spotifyId ? `<button data-action="set-atlas-spotify" data-url="${escapeHtml(track.spotify_url || '')}">Spotify</button>` : ''}
             <button data-action="set-atlas-sources" data-closed-label="${escapeHtml(sourceLabel)}" data-open-label="Hide Sets">${escapeHtml(sourceLabel)}</button>
           </div>
-          <div class="source-panel">${sourceGroups || '<div class="empty">No provenance rows.</div>'}</div>
+          <div class="source-panel">${sourceList}</div>
         </div>
       </article>
     `;
   }
 
   function renderInlineSetAtlasEvidence(row) {
-    const tracks = [...(row.tracks || [])].sort((a, b) => {
+    const tracksAll = [...(row.tracks || [])].sort((a, b) => {
       return (Number(b.selected_appearances || 0) - Number(a.selected_appearances || 0))
         || (Number(b.selected_artist_count || 0) - Number(a.selected_artist_count || 0))
         || String(a.artist || '').localeCompare(String(b.artist || ''));
     });
+    const tracks = filterTracksByConfidence(tracksAll, atlasTrackConf);
     const labelDiscogsUrl = resolveSetAtlasLabelDiscogsUrl(row);
     const headActions = labelDiscogsUrl
       ? `<div class="inline-head-actions"><a class="discogs" href="${escapeHtml(labelDiscogsUrl)}" target="_blank" rel="noopener noreferrer">Label Page</a></div>`
       : '';
+    const countLabel = atlasTrackConf === 'all'
+      ? `${fmt(tracks.length)} matching tracks`
+      : `${fmt(tracks.length)} / ${fmt(tracksAll.length)} matching tracks`;
     const head = `
       <div class="inline-head-row">
-        <p class="inline-head">${escapeHtml(row.name)} | ${fmt(tracks.length)} matching tracks</p>
+        <p class="inline-head">${escapeHtml(row.name)} | ${countLabel}</p>
         ${headActions}
       </div>
     `;
@@ -3196,7 +3575,7 @@ def save_artist_explorer_html(
       return `
         <div class="inline-evidence">
           ${head}
-          <div class="empty">No evidence tracks for this entry.</div>
+          <div class="empty">No evidence tracks match the selected confidence filter.</div>
         </div>
       `;
     }
@@ -3218,6 +3597,7 @@ def save_artist_explorer_html(
       atlasSummaryEl.textContent = 'No selected set.';
       atlasRowsEl.innerHTML = '<div class="empty">No selected set available.</div>';
       atlasPagerEl.innerHTML = '';
+      if (atlasConfidenceFiltersEl) atlasConfidenceFiltersEl.innerHTML = '';
       atlasNoResults.style.display = 'block';
       if (atlasEvidencePanel) atlasEvidencePanel.classList.remove('open');
       if (atlasEvidenceEl) atlasEvidenceEl.innerHTML = '';
@@ -3240,9 +3620,9 @@ def save_artist_explorer_html(
       }
     }
 
-    const thresholds = [1, 2, 3, 5, 8, 12];
     const composite = getSetAtlasCompositeTracks();
-    const rows = buildSetAtlasRows(composite);
+    const rowsAll = buildSetAtlasRows(composite, 'all');
+    const rows = buildSetAtlasRows(composite, atlasTrackConf);
     const isTracksLens = atlasLens === 'tracks';
 
     if (atlasLensTabsEl) {
@@ -3253,21 +3633,32 @@ def save_artist_explorer_html(
     }
 
     if (atlasThresholdsEl) {
-      atlasThresholdsEl.innerHTML = thresholds.map((v) => {
-        const active = Number(atlasMin || 1) === v;
-        return `<button class="chip-btn ${active ? 'active' : ''}" data-action="set-atlas-threshold" data-threshold="${v}">${v}+</button>`;
-      }).join('');
+      atlasMin = normalizeThresholdValue(atlasMin, ATLAS_THRESHOLD_VALUES);
+      atlasThresholdsEl.innerHTML = `<div class="threshold-stepper">${
+        buildThresholdStepperHtml(
+          'chip-btn',
+          'set-atlas-threshold-down',
+          'set-atlas-threshold-up',
+          atlasMin,
+          ATLAS_THRESHOLD_VALUES,
+        )
+      }</div>`;
     }
+    renderAtlasConfidenceFilters(collectUniqueTracks(rowsAll));
 
     if (isTracksLens) {
       atlasActiveName = null;
-      if (!rows.length) {
-        atlasRowsEl.innerHTML = '<div class="empty">No tracks match current scope and query.</div>';
+      const tracksUniverse = rowsAll.map((row) => (row.tracks || [])[0]).filter(Boolean);
+      const tracks = rows.map((row) => (row.tracks || [])[0]).filter(Boolean);
+      const countLabel = atlasTrackConf === 'all'
+        ? `${fmt(tracks.length)} matching tracks`
+        : `${fmt(tracks.length)} / ${fmt(tracksUniverse.length)} matching tracks`;
+      if (!tracks.length) {
+        atlasRowsEl.innerHTML = '<div class="empty">No tracks match current scope, query, and confidence filter.</div>';
       } else {
-        const tracks = rows.map((row) => (row.tracks || [])[0]).filter(Boolean);
         atlasRowsEl.innerHTML = `
           <div class="inline-evidence">
-            <p class="inline-head">Tracks | ${fmt(tracks.length)} matching tracks</p>
+            <p class="inline-head">Tracks | ${countLabel}</p>
             <div class="evidence-grid">${tracks.map((track) => renderSetAtlasTrackCard(track)).join('')}</div>
           </div>
         `;
@@ -3467,6 +3858,14 @@ def save_artist_explorer_html(
         return;
       }
 
+      if (action === 'rec-threshold-down' || action === 'rec-threshold-up') {
+        const direction = action === 'rec-threshold-up' ? 1 : -1;
+        recMin = stepThresholdValue(recMin, REC_THRESHOLD_VALUES, direction);
+        renderRecurringThresholdStepper();
+        applyRecurringFilters();
+        return;
+      }
+
       if (action === 'set-atlas-scope') {
         const scope = actionEl.dataset.scope || 'set';
         atlasScope = (scope === 'artist') ? 'artist' : 'set';
@@ -3526,9 +3925,25 @@ def save_artist_explorer_html(
 
       if (action === 'set-atlas-threshold') {
         const v = Number(actionEl.dataset.threshold || 1);
-        atlasMin = Number.isFinite(v) && v > 0 ? v : 1;
+        atlasMin = normalizeThresholdValue(Number.isFinite(v) && v > 0 ? v : 1, ATLAS_THRESHOLD_VALUES);
         atlasPage = 0;
         atlasActiveName = null;
+        renderSetAtlas();
+        return;
+      }
+
+      if (action === 'set-atlas-threshold-down' || action === 'set-atlas-threshold-up') {
+        const direction = action === 'set-atlas-threshold-up' ? 1 : -1;
+        atlasMin = stepThresholdValue(atlasMin, ATLAS_THRESHOLD_VALUES, direction);
+        atlasPage = 0;
+        atlasActiveName = null;
+        renderSetAtlas();
+        return;
+      }
+
+      if (action === 'set-atlas-conf') {
+        const conf = String(actionEl.dataset.conf || 'all').toUpperCase();
+        atlasTrackConf = conf === 'ALL' ? 'all' : (CONF_FILTER_LEVELS.includes(conf) ? conf : 'all');
         renderSetAtlas();
         return;
       }
@@ -3753,6 +4168,7 @@ def save_artist_explorer_html(
         .replace("__TOTAL_DETECTIONS__", str(total_appearances))
         .replace("__RECURRING_TRACKS__", str(recurring_tracks))
         .replace("__RECURRING_FILTER_BTNS__", recurring_filter_btns)
+        .replace("__RECURRING_CONF_FILTER_BTNS__", recurring_conf_filter_btns)
         .replace("__RECURRING_CARDS__", "".join(recurring_cards_html))
         .replace("__ATLAS_SET_CARDS__", "".join(atlas_set_cards_html))
         .replace("__SET_CARDS__", "".join(set_cards_html))

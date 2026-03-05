@@ -7,17 +7,20 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 
+from detail_explorer_common import CONFIDENCE_LEVELS, EXCLUDED_GENRES
+
 
 def _uniq_ordered(values: list[str]) -> list[str]:
     seen: set[str] = set()
     output: list[str] = []
+    _excluded_lower = {g.lower() for g in EXCLUDED_GENRES}
     for value in values:
         if not value:
             continue
         v = value.strip()
         if not v:
             continue
-        if v.lower() == "house":
+        if v.lower() in _excluded_lower:
             continue
         if v not in seen:
             seen.add(v)
@@ -33,6 +36,8 @@ def _build_track_set_refs(track: dict) -> list[dict]:
         info = link_map.get(set_title, {})
         href = info.get("html_master_rel") or ""
         pos = info.get("track_position")
+        conf = str(info.get("confidence") or "UNCERTAIN").upper()
+        conf = conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
         if href and pos:
             href = f"{href}#track-{pos}"
         refs.append(
@@ -40,9 +45,37 @@ def _build_track_set_refs(track: dict) -> list[dict]:
                 "title": set_title,
                 "href": href,
                 "track_position": pos,
+                "confidence": conf,
             }
         )
     return refs
+
+
+def _normalize_confidence(value: str | None) -> str:
+    conf = str(value or "UNCERTAIN").upper()
+    return conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
+
+
+def _blank_confidence_counts() -> dict[str, int]:
+    return {level: 0 for level in CONFIDENCE_LEVELS}
+
+
+def _merge_confidence_counts(base: dict[str, int], extra: dict[str, int]) -> dict[str, int]:
+    merged = {level: int(base.get(level, 0)) for level in CONFIDENCE_LEVELS}
+    for level in CONFIDENCE_LEVELS:
+        merged[level] += int(extra.get(level, 0))
+    return merged
+
+
+def _primary_confidence(conf_counts: dict[str, int]) -> str:
+    best = "UNCERTAIN"
+    best_count = -1
+    for level in CONFIDENCE_LEVELS:
+        count = int(conf_counts.get(level, 0))
+        if count > best_count:
+            best = level
+            best_count = count
+    return best
 
 
 def _build_client_data(master_data: dict) -> dict:
@@ -61,6 +94,11 @@ def _build_client_data(master_data: dict) -> dict:
             label = track.get("discogs_label")
             appearances = int(track.get("appearances", 0))
             set_refs = _build_track_set_refs(track)
+            confidence_counts = _blank_confidence_counts()
+            raw_conf_counts = track.get("confidence_counts") or {}
+            for level in CONFIDENCE_LEVELS:
+                confidence_counts[level] = int(raw_conf_counts.get(level, 0))
+            confidence = _primary_confidence(confidence_counts)
 
             if label:
                 label_counter[label] += max(1, appearances)
@@ -83,6 +121,8 @@ def _build_client_data(master_data: dict) -> dict:
                 "label_url": track.get("discogs_label_url"),
                 "genres": genres,
                 "appearances": appearances,
+                "confidence": confidence,
+                "confidence_counts": confidence_counts,
                 "sets": track.get("sets", []),
                 "set_refs": set_refs,
             }
@@ -107,6 +147,8 @@ def _build_client_data(master_data: dict) -> dict:
                     "artist_refs": [],
                     "artists_count": 0,
                     "total_appearances": 0,
+                    "confidence": confidence,
+                    "confidence_counts": dict(confidence_counts),
                 }
 
             catalog_entry = track_catalog[key]
@@ -125,6 +167,11 @@ def _build_client_data(master_data: dict) -> dict:
             catalog_entry["genres"] = _uniq_ordered(
                 catalog_entry.get("genres", []) + track_entry["genres"]
             )
+            catalog_entry["confidence_counts"] = _merge_confidence_counts(
+                catalog_entry.get("confidence_counts") or _blank_confidence_counts(),
+                track_entry.get("confidence_counts") or _blank_confidence_counts(),
+            )
+            catalog_entry["confidence"] = _primary_confidence(catalog_entry["confidence_counts"])
             catalog_entry["artist_refs"].append(
                 {
                     "artist_name": artist.get("name", "Unknown"),
@@ -250,6 +297,11 @@ def _build_client_data(master_data: dict) -> dict:
                         "discogs_label": t.get("discogs_label"),
                         "discogs_label_url": t.get("discogs_label_url"),
                         "genres": _uniq_ordered([g.title() for g in t.get("genres", [])]),
+                        "confidence": _normalize_confidence(t.get("confidence")),
+                        "confidence_counts": {
+                            level: int((t.get("confidence_counts") or {}).get(level, 0))
+                            for level in CONFIDENCE_LEVELS
+                        },
                         "appearances_a": int(t.get("appearances_a", 0)),
                         "appearances_b": int(t.get("appearances_b", 0)),
                         "sets_a": t.get("sets_a", []) or [],
@@ -1239,6 +1291,38 @@ def _render_html(data: dict) -> str:
       font-size: 9px;
     }
 
+    .threshold-stepper {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+
+    .threshold-stepper .threshold-arrow {
+      width: 20px;
+      min-width: 20px;
+      padding: 3px 0;
+      text-align: center;
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .threshold-stepper .threshold-value {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 82px;
+      border-color: #3a3a3a;
+      color: #f0f0f0;
+      pointer-events: none;
+      cursor: default;
+    }
+
+    .threshold-stepper .threshold-arrow:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
     .taxonomy-controls-row {
       display: flex;
       align-items: center;
@@ -2099,9 +2183,7 @@ def _render_html(data: dict) -> str:
         <div class="section-head">
           <h2>ARTIST ATLAS</h2>
           <p>
-            Select one artist for a focused reading, or compare two or more artists using union or intersection mode.
-            Use Select All to analyze trends across every scraped set at once.
-            The right pane nests a taxonomy atlas for genres, labels, track artists, and tracks with drill-through evidence.
+            Select artists to compare and drill into the right-side taxonomy atlas for evidence.
           </p>
         </div>
 
@@ -2130,6 +2212,7 @@ def _render_html(data: dict) -> str:
                   </div>
                   <div class="taxonomy-controls-row">
                     <div class="pill-row" id="taxonomyThresholds"></div>
+                    <div class="pill-row" id="taxonomyTrackConfFilters"></div>
                     <div class="control taxonomy-sort-control">
                       <span class="taxonomy-sort-icon" aria-hidden="true">&#8597;</span>
                       <select id="taxonomySort" aria-label="Sort taxonomy entries">
@@ -2198,6 +2281,7 @@ def _render_html(data: dict) -> str:
             </div>
             <div class="taxonomy-controls-row">
               <div class="pill-row" id="pairThresholds"></div>
+              <div class="pill-row" id="pairTrackConfFilters"></div>
               <div class="control taxonomy-sort-control">
                 <span class="taxonomy-sort-icon" aria-hidden="true">&#8597;</span>
                 <select id="pairSort" aria-label="Sort pair entries">
@@ -2291,6 +2375,7 @@ def _render_html(data: dict) -> str:
       taxonomyQuery: '',
       taxonomySort: 'count',
       taxonomyMinUsage: 1,
+      taxonomyTrackConf: 'all',
       taxonomyPage: 0,
       taxonomyActiveName: null,
       taxonomyEvidencePage: 0,
@@ -2302,6 +2387,7 @@ def _render_html(data: dict) -> str:
       pairQuery: '',
       pairSort: 'count',
       pairMinUsage: 1,
+      pairTrackConf: 'all',
       pairPage: 0,
       pairActiveName: null,
       setQuery: '',
@@ -2316,6 +2402,8 @@ def _render_html(data: dict) -> str:
 
     const $ = (id) => document.getElementById(id);
     const fmt = (n) => Number(n || 0).toLocaleString();
+    const CONF_FILTER_LEVELS = ['HIGH', 'MEDIUM', 'LOW'];
+    const THRESHOLD_LEVELS = [1, 2, 3, 5, 8, 12];
 
     function isHoverCapablePointer() {
       return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -2346,6 +2434,193 @@ def _render_html(data: dict) -> str:
       if (!url) return '';
       const m = String(url).match(/track\/([A-Za-z0-9]+)/);
       return m ? m[1] : '';
+    }
+
+    function normalizeConfidence(value) {
+      const conf = String(value || 'UNCERTAIN').toUpperCase();
+      return Object.prototype.hasOwnProperty.call(CONF_COLOR, conf) ? conf : 'UNCERTAIN';
+    }
+
+    function primaryConfidenceFromCounts(confCounts) {
+      const ordered = ['HIGH', 'MEDIUM', 'LOW', 'UNCERTAIN'];
+      let best = 'UNCERTAIN';
+      let bestCount = -1;
+      for (const level of ordered) {
+        const count = Number((confCounts || {})[level] || 0);
+        if (count > bestCount) {
+          best = level;
+          bestCount = count;
+        }
+      }
+      return best;
+    }
+
+    function trackHasConfidence(track, level) {
+      const target = normalizeConfidence(level);
+      const counts = track && typeof track === 'object' ? (track.confidence_counts || {}) : {};
+      const hasCounts = counts && typeof counts === 'object' && Object.keys(counts).length > 0;
+      if (hasCounts) {
+        return Number(counts[target] || 0) > 0;
+      }
+      return normalizeConfidence(track?.confidence) === target;
+    }
+
+    function trackMatchesConfidence(track, confFilter) {
+      if (confFilter === 'all') return true;
+      return trackHasConfidence(track, confFilter);
+    }
+
+    function filterTracksByConfidence(tracks, confFilter) {
+      return (tracks || []).filter((track) => trackMatchesConfidence(track, confFilter));
+    }
+
+    function normalizeConfFilter(confFilter) {
+      const raw = String(confFilter || 'all').toUpperCase();
+      if (raw === 'ALL') return 'all';
+      return CONF_FILTER_LEVELS.includes(raw) ? raw : 'all';
+    }
+
+    function filterSetRefsByConfidence(setRefs, confFilter) {
+      const target = normalizeConfFilter(confFilter);
+      if (target === 'all') return Array.isArray(setRefs) ? setRefs.slice() : [];
+      return (setRefs || []).filter((setRef) => normalizeConfidence(setRef?.confidence) === target);
+    }
+
+    function projectTrackByConfidence(track, confFilter) {
+      const target = normalizeConfFilter(confFilter);
+      if (!track) return null;
+
+      const refs = [];
+      let selectedAppearances = 0;
+      const confCounts = { HIGH: 0, MEDIUM: 0, LOW: 0, UNCERTAIN: 0 };
+
+      for (const ref of (track.selected_refs || [])) {
+        const setRefs = filterSetRefsByConfidence(ref?.set_refs || [], target);
+        if (!setRefs.length) continue;
+        refs.push({
+          ...ref,
+          set_refs: setRefs,
+          appearances: setRefs.length,
+        });
+        for (const setRef of setRefs) {
+          const conf = normalizeConfidence(setRef?.confidence);
+          confCounts[conf] = Number(confCounts[conf] || 0) + 1;
+          selectedAppearances += 1;
+        }
+      }
+
+      if (selectedAppearances <= 0) return null;
+
+      let confidence = normalizeConfidence(track.confidence);
+      if (target === 'all') {
+        confidence = primaryConfidenceFromCounts(confCounts);
+      } else {
+        for (const level of Object.keys(confCounts)) confCounts[level] = 0;
+        confCounts[target] = selectedAppearances;
+        confidence = target;
+      }
+
+      return {
+        ...track,
+        selected_refs: refs,
+        selected_appearances: Number(selectedAppearances || 0),
+        selected_artist_count: refs.length,
+        confidence_counts: confCounts,
+        confidence,
+      };
+    }
+
+    function tracksWithConfidenceProjection(tracks, confFilter) {
+      const out = [];
+      for (const track of tracks || []) {
+        const projected = projectTrackByConfidence(track, confFilter);
+        if (!projected) continue;
+        out.push(projected);
+      }
+      return out;
+    }
+
+    function trackMergeKey(track) {
+      return String(track?.track_key || `${track?.artist || 'Unknown'} - ${track?.title || 'Unknown'}`).trim().toLowerCase();
+    }
+
+    function collectUniqueTracks(rows) {
+      const merged = new Map();
+      for (const row of rows || []) {
+        for (const track of (row?.tracks || [])) {
+          const key = trackMergeKey(track);
+          if (!merged.has(key)) merged.set(key, track);
+        }
+      }
+      return Array.from(merged.values());
+    }
+
+    function confidenceCountsFromTracks(tracks) {
+      const counts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+      for (const track of tracks || []) {
+        for (const level of CONF_FILTER_LEVELS) {
+          if (trackHasConfidence(track, level)) counts[level] += 1;
+        }
+      }
+      return counts;
+    }
+
+    function normalizeThresholdValue(value, levels) {
+      const options = (levels || []).map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+      if (!options.length) return 1;
+      const current = Number(value);
+      if (Number.isFinite(current) && options.includes(current)) return current;
+      if (!Number.isFinite(current)) return options[0];
+      let fallback = options[0];
+      for (const option of options) {
+        if (option <= current) fallback = option;
+      }
+      return fallback;
+    }
+
+    function stepThresholdValue(value, levels, direction) {
+      const options = (levels || []).map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+      if (!options.length) return 1;
+      const current = normalizeThresholdValue(value, options);
+      const idx = options.indexOf(current);
+      const nextIdx = Math.max(0, Math.min(options.length - 1, idx + (direction > 0 ? 1 : -1)));
+      return options[nextIdx];
+    }
+
+    function renderThresholdStepper(containerId, downAction, upAction, currentValue, levels) {
+      const mount = $(containerId);
+      if (!mount) return;
+      const options = (levels || []).map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+      if (!options.length) {
+        mount.innerHTML = '';
+        return;
+      }
+      const current = normalizeThresholdValue(currentValue, options);
+      const idx = options.indexOf(current);
+      const canDown = idx > 0;
+      const canUp = idx < options.length - 1;
+      mount.innerHTML = `
+        <div class="threshold-stepper">
+          <button class="chip-btn threshold-arrow" data-action="${downAction}" ${canDown ? '' : 'disabled'} aria-label="Decrease set threshold">▼</button>
+          <span class="chip-btn threshold-value">${fmt(current)}+ SETS</span>
+          <button class="chip-btn threshold-arrow" data-action="${upAction}" ${canUp ? '' : 'disabled'} aria-label="Increase set threshold">▲</button>
+        </div>
+      `;
+    }
+
+    function renderConfidenceFilterButtons(containerId, action, active, tracks) {
+      const mount = $(containerId);
+      if (!mount) return;
+      const total = (tracks || []).length;
+      const buttons = [
+        `<button class="chip-btn ${active === 'all' ? 'active' : ''}" data-action="${action}" data-conf="all">All (${fmt(total)})</button>`,
+      ];
+      for (const level of CONF_FILTER_LEVELS) {
+        buttons.push(
+          `<button class="chip-btn ${active === level ? 'active' : ''}" data-action="${action}" data-conf="${level}">${level}</button>`
+        );
+      }
+      mount.innerHTML = buttons.join('');
     }
 
     function hashString(value) {
@@ -2683,6 +2958,9 @@ def _render_html(data: dict) -> str:
       const grid = $('artistGrid');
       const beforeRects = captureArtistCardRects(grid);
       const visibleArtists = filteredArtists();
+      const selectedNames = new Set(selectedArtistsList());
+      const totalArtists = artistsByName.size;
+      const allSelected = totalArtists > 0 && selectedNames.size === totalArtists;
 
       if (!visibleArtists.length) {
         grid.classList.remove('selected-dock');
@@ -2690,7 +2968,7 @@ def _render_html(data: dict) -> str:
         return;
       }
 
-      if (!visibleArtists.some((a) => a.name === STATE.focusArtist)) {
+      if (!allSelected && !visibleArtists.some((a) => a.name === STATE.focusArtist)) {
         STATE.focusArtist = visibleArtists[0].name;
       }
 
@@ -2700,7 +2978,9 @@ def _render_html(data: dict) -> str:
 
       syncDockedSelectedArtists(false);
 
-      const visibleDockedSelected = visibleArtists.filter((a) => STATE.dockedSelectedArtists.has(a.name));
+      const visibleDockedSelected = allSelected
+        ? []
+        : visibleArtists.filter((a) => STATE.dockedSelectedArtists.has(a.name));
       const shouldDockSelected = visibleDockedSelected.length > 0;
       grid.classList.toggle('selected-dock', shouldDockSelected);
 
@@ -2709,18 +2989,20 @@ def _render_html(data: dict) -> str:
         : visibleArtists;
 
       grid.innerHTML = orderedArtists.map((artist, idx) => {
-        const focus = artist.name === STATE.focusArtist;
-        const selected = STATE.selectedArtists.has(artist.name);
+        const focus = !allSelected && artist.name === STATE.focusArtist;
+        const selected = selectedNames.has(artist.name);
+        const selectedVisual = selected && !allSelected;
+        const compareLabel = allSelected ? 'In Scope' : (selected ? 'In Compare' : 'Add to Compare');
         const hoverLatched = artist.name === STATE.hoverLatchedArtist;
         const image = artist.artist_profile_image || artist.artist_image || artist.cover_image || fallbackMedia(`artist:${artist.name}`);
         const z = orderedArtists.length - idx;
         return `
-          <article class="artist-card ${focus ? 'focus' : ''} ${selected ? 'selected' : ''} ${hoverLatched ? 'hover-latched' : ''}" data-artist="${escapeHtml(artist.name)}" data-action="focus-artist" style="z-index:${z};">
+          <article class="artist-card ${focus ? 'focus' : ''} ${selectedVisual ? 'selected' : ''} ${hoverLatched ? 'hover-latched' : ''}" data-artist="${escapeHtml(artist.name)}" data-action="focus-artist" style="z-index:${z};">
             ${image ? `<img src="${image}" alt="${escapeHtml(artist.name)}" loading="lazy" />` : ''}
             <div class="artist-detail">
               <div class="artist-meta-row">
                 <div class="card-actions">
-                  <button class="chip-btn ${selected ? 'active' : ''}" data-action="toggle-compare-artist" data-artist="${escapeHtml(artist.name)}">${selected ? 'In Compare' : 'Add to Compare'}</button>
+                  <button class="chip-btn ${selectedVisual ? 'active' : ''}" data-action="toggle-compare-artist" data-artist="${escapeHtml(artist.name)}">${compareLabel}</button>
                   <a class="chip-btn" href="${artist.html_rel || '#'}" target="_blank" rel="noopener noreferrer">Artist Page</a>
                 </div>
               </div>
@@ -2885,9 +3167,10 @@ def _render_html(data: dict) -> str:
       ];
     }
 
-    function buildTaxonomyRows(compositeTracks) {
+    function buildTaxonomyRows(compositeTracks, confFilter = 'all') {
       const lens = STATE.taxonomyLens;
       const bucket = new Map();
+      const scopedTracks = tracksWithConfidenceProjection(compositeTracks, confFilter);
 
       function put(name, track) {
         const key = (name || '').trim() || 'Unknown';
@@ -2902,7 +3185,7 @@ def _render_html(data: dict) -> str:
         row.plays += Number(track.selected_appearances || 0);
       }
 
-      for (const track of compositeTracks) {
+      for (const track of scopedTracks) {
         if (lens === 'genres') {
           const genres = (track.genres || []).length ? track.genres : ['Unknown Genre'];
           for (const g of genres) put(g, track);
@@ -2940,8 +3223,8 @@ def _render_html(data: dict) -> str:
 
     function renderTaxonomy() {
       const composite = getCompositeTracks();
-      const rows = buildTaxonomyRows(composite);
-      const thresholds = [1, 2, 3, 5, 8, 12];
+      const rowsAll = buildTaxonomyRows(composite, 'all');
+      const rows = buildTaxonomyRows(composite, STATE.taxonomyTrackConf);
       const isTracksLens = STATE.taxonomyLens === 'tracks';
 
       $('taxonomyTabs').innerHTML = taxonomyLenses().map((lens) => {
@@ -2949,20 +3232,29 @@ def _render_html(data: dict) -> str:
         return `<button class="chip-btn ${active ? 'active' : ''}" data-action="taxonomy-lens" data-lens="${lens.id}">${lens.label}</button>`;
       }).join('');
 
-      $('taxonomyThresholds').innerHTML = thresholds.map((v) => {
-        const active = Number(STATE.taxonomyMinUsage || 1) === v;
-        return `<button class="chip-btn ${active ? 'active' : ''}" data-action="taxonomy-threshold" data-threshold="${v}">${v}+</button>`;
-      }).join('');
+      STATE.taxonomyMinUsage = normalizeThresholdValue(STATE.taxonomyMinUsage, THRESHOLD_LEVELS);
+      renderThresholdStepper('taxonomyThresholds', 'taxonomy-threshold-down', 'taxonomy-threshold-up', STATE.taxonomyMinUsage, THRESHOLD_LEVELS);
+      const allTaxonomyTracks = collectUniqueTracks(rowsAll);
+      renderConfidenceFilterButtons(
+        'taxonomyTrackConfFilters',
+        'taxonomy-conf',
+        STATE.taxonomyTrackConf,
+        allTaxonomyTracks,
+      );
 
       if (isTracksLens) {
         STATE.taxonomyActiveName = null;
-        if (!rows.length) {
-          $('taxonomyRows').innerHTML = '<div class="empty">No tracks match current scope and query.</div>';
+        const tracksUniverse = rowsAll.map((row) => (row.tracks || [])[0]).filter(Boolean);
+        const tracks = rows.map((row) => (row.tracks || [])[0]).filter(Boolean);
+        const countLabel = STATE.taxonomyTrackConf === 'all'
+          ? `${fmt(tracks.length)} matching tracks`
+          : `${fmt(tracks.length)} / ${fmt(tracksUniverse.length)} matching tracks`;
+        if (!tracks.length) {
+          $('taxonomyRows').innerHTML = '<div class="empty">No tracks match current scope, query, and confidence filter.</div>';
         } else {
-          const tracks = rows.map((row) => (row.tracks || [])[0]).filter(Boolean);
           $('taxonomyRows').innerHTML = `
             <div class="inline-evidence">
-              <p class="inline-head">Tracks | ${fmt(tracks.length)} matching tracks</p>
+              <p class="inline-head">Tracks | ${countLabel}</p>
               <div class="evidence-grid">${tracks.map((track) => renderTaxonomyTrackCard(track)).join('')}</div>
             </div>
           `;
@@ -3022,7 +3314,7 @@ def _render_html(data: dict) -> str:
         <button data-action="taxonomy-page" data-delta="1" ${STATE.taxonomyPage >= totalPages - 1 ? 'disabled' : ''}>Next</button>
       `;
 
-      renderTaxonomyEvidence(rows);
+      renderTaxonomyEvidence(rows, rowsAll);
       syncAtlasHeights();
     }
 
@@ -3054,6 +3346,8 @@ def _render_html(data: dict) -> str:
     function renderTaxonomyTrackCard(track) {
       const image = track.album_art || track.artist_image || '';
       const spotifyId = extractSpotifyId(track.spotify_url);
+      const conf = normalizeConfidence(track.confidence);
+      const confColor = CONF_COLOR[conf] || '#757575';
       const selectedRefs = track.selected_refs || [];
       const sourceDjs = selectedRefs.length;
       const sourceSets = selectedRefs.reduce((sum, ref) => {
@@ -3068,6 +3362,7 @@ def _render_html(data: dict) -> str:
           <div class="track-art">${image ? `<img src="${image}" alt="${escapeHtml(track.title || 'Track')}" loading="lazy" />` : ''}</div>
           <div class="track-body">
             <h4 class="track-title">${escapeHtml(track.artist || 'Unknown')} - ${escapeHtml(track.title || 'Unknown')}</h4>
+            <p class="muted">Confidence <span class="set-track-conf" style="border-color:${confColor}; color:${confColor};">${escapeHtml(conf)}</span></p>
             <div class="actions">
               ${spotifyId ? `<button data-action="spotify-embed" data-url="${track.spotify_url}">Spotify</button>` : ''}
               <button data-action="toggle-sources" data-closed-label="${escapeHtml(sourceLabel)}" data-open-label="${escapeHtml(sourceOpenLabel)}">${escapeHtml(sourceLabel)}</button>
@@ -3100,18 +3395,22 @@ def _render_html(data: dict) -> str:
     }
 
     function renderInlineTaxonomyEvidence(row) {
-      const tracks = [...(row.tracks || [])].sort((a, b) => {
+      const tracksAll = [...(row.tracks || [])].sort((a, b) => {
         return (Number(b.selected_appearances || 0) - Number(a.selected_appearances || 0))
           || (Number(b.selected_artist_count || 0) - Number(a.selected_artist_count || 0))
           || String(a.artist || '').localeCompare(String(b.artist || ''));
       });
+      const tracks = filterTracksByConfidence(tracksAll, STATE.taxonomyTrackConf);
       const labelDiscogsUrl = resolveLabelDiscogsUrl(row);
       const headActions = labelDiscogsUrl
         ? `<div class="inline-head-actions"><a class="discogs" href="${escapeHtml(labelDiscogsUrl)}" target="_blank" rel="noopener noreferrer">Label Page</a></div>`
         : '';
+      const countLabel = STATE.taxonomyTrackConf === 'all'
+        ? `${fmt(tracks.length)} matching tracks`
+        : `${fmt(tracks.length)} / ${fmt(tracksAll.length)} matching tracks`;
       const head = `
         <div class="inline-head-row">
-          <p class="inline-head">${escapeHtml(row.name)} | ${fmt(tracks.length)} matching tracks</p>
+          <p class="inline-head">${escapeHtml(row.name)} | ${countLabel}</p>
           ${headActions}
         </div>
       `;
@@ -3120,7 +3419,7 @@ def _render_html(data: dict) -> str:
         return `
           <div class="inline-evidence">
             ${head}
-            <div class="empty">No evidence tracks for this entry.</div>
+            <div class="empty">No evidence tracks match the selected confidence filter.</div>
           </div>
         `;
       }
@@ -3133,7 +3432,7 @@ def _render_html(data: dict) -> str:
       `;
     }
 
-    function renderTaxonomyEvidence(rows) {
+    function renderTaxonomyEvidence(rows, rowsAll = rows) {
       const evidencePanel = $('taxonomyEvidencePanel');
 
       if (STATE.taxonomyLens !== 'tracks') {
@@ -3159,6 +3458,14 @@ def _render_html(data: dict) -> str:
             || (Number(b.selected_artist_count || 0) - Number(a.selected_artist_count || 0))
             || String(a.artist || '').localeCompare(String(b.artist || ''));
         });
+        const mergedAll = new Map();
+        for (const row of rowsAll || []) {
+          for (const track of row.tracks || []) {
+            const k = track.track_key || `${track.artist || 'Unknown'} - ${track.title || 'Unknown'}`;
+            if (!mergedAll.has(k)) mergedAll.set(k, track);
+          }
+        }
+        const tracksAll = Array.from(mergedAll.values());
 
         const totalPages = Math.max(1, Math.ceil(tracks.length / PAGE.evidence));
         if (STATE.taxonomyEvidencePage >= totalPages) STATE.taxonomyEvidencePage = totalPages - 1;
@@ -3167,10 +3474,14 @@ def _render_html(data: dict) -> str:
         const start = STATE.taxonomyEvidencePage * PAGE.evidence;
         const page = tracks.slice(start, start + PAGE.evidence);
 
-        $('evidenceSummary').textContent = `${fmt(tracks.length)} tracks sorted by plays.`;
+        if (STATE.taxonomyTrackConf === 'all') {
+          $('evidenceSummary').textContent = `${fmt(tracks.length)} tracks sorted by plays.`;
+        } else {
+          $('evidenceSummary').textContent = `${fmt(tracks.length)} / ${fmt(tracksAll.length)} tracks for ${STATE.taxonomyTrackConf} confidence.`;
+        }
 
         if (!tracks.length) {
-          $('taxonomyEvidence').innerHTML = '<div class="empty">No tracks match current compare scope.</div>';
+          $('taxonomyEvidence').innerHTML = '<div class="empty">No tracks match the current scope and confidence filter.</div>';
         } else {
           $('taxonomyEvidence').innerHTML = page.map((track) => renderTaxonomyTrackCard(track)).join('');
         }
@@ -3294,36 +3605,57 @@ def _render_html(data: dict) -> str:
       ];
     }
 
-    function pairTrackToTaxonomyTrack(sharedTrack, aName, bName) {
+    function pairTrackToTaxonomyTrack(sharedTrack, aName, bName, confFilter = 'all') {
+      const target = normalizeConfFilter(confFilter);
       const refs = [];
       const setsA = Array.isArray(sharedTrack.sets_a) ? sharedTrack.sets_a : [];
       const setsB = Array.isArray(sharedTrack.sets_b) ? sharedTrack.sets_b : [];
-      const appA = Number(sharedTrack.appearances_a || 0);
-      const appB = Number(sharedTrack.appearances_b || 0);
+      const scopedSetsA = filterSetRefsByConfidence(setsA, target);
+      const scopedSetsB = filterSetRefsByConfidence(setsB, target);
+      const appA = scopedSetsA.length;
+      const appB = scopedSetsB.length;
       const aDir = (artistsByName.get(aName) || {}).dir_name || '';
       const bDir = (artistsByName.get(bName) || {}).dir_name || '';
 
-      if (setsA.length || appA > 0) {
+      if (scopedSetsA.length || appA > 0) {
         refs.push({
           artist_name: aName,
           dir_name: aDir,
           appearances: appA,
-          set_refs: setsA,
+          set_refs: scopedSetsA,
         });
       }
-      if (setsB.length || appB > 0) {
+      if (scopedSetsB.length || appB > 0) {
         refs.push({
           artist_name: bName,
           dir_name: bDir,
           appearances: appB,
-          set_refs: setsB,
+          set_refs: scopedSetsB,
         });
+      }
+
+      const confidenceCounts = { HIGH: 0, MEDIUM: 0, LOW: 0, UNCERTAIN: 0 };
+      for (const setRef of [...scopedSetsA, ...scopedSetsB]) {
+        const conf = normalizeConfidence(setRef?.confidence);
+        confidenceCounts[conf] = Number(confidenceCounts[conf] || 0) + 1;
+      }
+      const selectedAppearances = appA + appB;
+      if (selectedAppearances <= 0) return null;
+      let confidence = normalizeConfidence(sharedTrack.confidence);
+      if (target === 'all') {
+        confidence = primaryConfidenceFromCounts(confidenceCounts);
+      } else {
+        for (const level of Object.keys(confidenceCounts)) confidenceCounts[level] = 0;
+        confidenceCounts[target] = selectedAppearances;
+        confidence = target;
       }
 
       return {
         track_key: sharedTrack.track_key || `${sharedTrack.display_artist || 'Unknown'} - ${sharedTrack.display_title || 'Unknown'}`,
         artist: sharedTrack.display_artist || 'Unknown',
         title: sharedTrack.display_title || 'Unknown',
+        confidence,
+        confidence_counts: confidenceCounts,
         spotify_url: sharedTrack.spotify_url || '',
         album_art: sharedTrack.spotify_album_art || '',
         artist_profile_image: sharedTrack.spotify_artist_profile_image || '',
@@ -3332,17 +3664,21 @@ def _render_html(data: dict) -> str:
         label_url: sharedTrack.discogs_label_url || '',
         genres: sharedTrack.genres || [],
         selected_refs: refs,
-        selected_appearances: appA + appB,
+        selected_appearances: selectedAppearances,
         selected_artist_count: refs.length,
+        _pair_counts: { a: appA, b: appB },
       };
     }
 
-    function buildPairRows(pairRow, aName, bName) {
+    function buildPairRows(pairRow, aName, bName, confFilter = 'all') {
       const sharedTracks = pairRow.shared_tracks || [];
       const tracksByKey = new Map();
       for (const t of sharedTracks) {
         const key = t.track_key || `${t.display_artist || 'Unknown'} - ${t.display_title || 'Unknown'}`;
-        tracksByKey.set(key, pairTrackToTaxonomyTrack(t, aName, bName));
+        const mapped = pairTrackToTaxonomyTrack(t, aName, bName, confFilter);
+        if (mapped && Number(mapped.selected_appearances || 0) > 0) {
+          tracksByKey.set(key, mapped);
+        }
       }
 
       const lens = STATE.pairLens;
@@ -3352,45 +3688,50 @@ def _render_html(data: dict) -> str:
         rows = sharedTracks.map((t) => {
           const key = t.track_key || `${t.display_artist || 'Unknown'} - ${t.display_title || 'Unknown'}`;
           const mappedTrack = tracksByKey.get(key);
-          const total = Number(t.appearances_a || 0) + Number(t.appearances_b || 0);
+          if (!mappedTrack) return null;
+          const total = Number(mappedTrack.selected_appearances || 0);
+          const counts = mappedTrack._pair_counts || { a: 0, b: 0 };
           return {
             id: key,
             name: `${t.display_artist || 'Unknown'} - ${t.display_title || 'Unknown'}`,
             count: total,
             tracks: mappedTrack ? [mappedTrack] : [],
-            meta: `${aName} ${fmt(t.appearances_a)} | ${bName} ${fmt(t.appearances_b)}`,
+            meta: `${aName} ${fmt(counts.a)} | ${bName} ${fmt(counts.b)}`,
           };
-        });
+        }).filter(Boolean);
       } else if (lens === 'genres') {
         rows = (pairRow.shared_genres || []).map((g) => {
           const keys = g.track_keys || [];
+          const tracks = keys.map((k) => tracksByKey.get(k)).filter(Boolean);
           return {
             id: g.genre || 'Unknown Genre',
             name: g.genre || 'Unknown Genre',
-            count: keys.length,
-            tracks: keys.map((k) => tracksByKey.get(k)).filter(Boolean),
+            count: tracks.length,
+            tracks,
             meta: `${aName} ${fmt(g.count_a)} | ${bName} ${fmt(g.count_b)}`,
           };
         });
       } else if (lens === 'labels') {
         rows = (pairRow.shared_labels || []).map((l) => {
           const keys = l.track_keys || [];
+          const tracks = keys.map((k) => tracksByKey.get(k)).filter(Boolean);
           return {
             id: l.label || 'Unknown Label',
             name: l.label || 'Unknown Label',
-            count: keys.length,
-            tracks: keys.map((k) => tracksByKey.get(k)).filter(Boolean),
+            count: tracks.length,
+            tracks,
             meta: `${aName} ${fmt(l.count_a)} | ${bName} ${fmt(l.count_b)}`,
           };
         });
       } else {
         rows = (pairRow.shared_music_artists || []).map((m) => {
           const keys = m.track_keys || [];
+          const tracks = keys.map((k) => tracksByKey.get(k)).filter(Boolean);
           return {
             id: m.music_artist || 'Unknown Artist',
             name: m.music_artist || 'Unknown Artist',
-            count: keys.length,
-            tracks: keys.map((k) => tracksByKey.get(k)).filter(Boolean),
+            count: tracks.length,
+            tracks,
             meta: `${aName} ${fmt(m.count_a)} | ${bName} ${fmt(m.count_b)}`,
           };
         });
@@ -3434,19 +3775,23 @@ def _render_html(data: dict) -> str:
     }
 
     function renderInlinePairEvidence(row) {
-      const tracks = [...(row.tracks || [])].sort((a, b) => {
+      const tracksAll = [...(row.tracks || [])].sort((a, b) => {
         return (Number(b.selected_appearances || 0) - Number(a.selected_appearances || 0))
           || (Number(b.selected_artist_count || 0) - Number(a.selected_artist_count || 0))
           || String(a.artist || '').localeCompare(String(b.artist || ''));
       });
+      const tracks = filterTracksByConfidence(tracksAll, STATE.pairTrackConf);
       const labelDiscogsUrl = resolvePairLabelDiscogsUrl(row);
       const headActions = labelDiscogsUrl
         ? `<div class="inline-head-actions"><a class="discogs" href="${escapeHtml(labelDiscogsUrl)}" target="_blank" rel="noopener noreferrer">Label Page</a></div>`
         : '';
       const meta = row.meta ? ` | ${escapeHtml(row.meta)}` : '';
+      const countLabel = STATE.pairTrackConf === 'all'
+        ? `${fmt(tracks.length)} shared tracks`
+        : `${fmt(tracks.length)} / ${fmt(tracksAll.length)} shared tracks`;
       const head = `
         <div class="inline-head-row">
-          <p class="inline-head">${escapeHtml(row.name)} | ${fmt(tracks.length)} shared tracks${meta}</p>
+          <p class="inline-head">${escapeHtml(row.name)} | ${countLabel}${meta}</p>
           ${headActions}
         </div>
       `;
@@ -3455,7 +3800,7 @@ def _render_html(data: dict) -> str:
         return `
           <div class="inline-evidence">
             ${head}
-            <div class="empty">No evidence tracks for this entry.</div>
+            <div class="empty">No evidence tracks match the selected confidence filter.</div>
           </div>
         `;
       }
@@ -3475,6 +3820,7 @@ def _render_html(data: dict) -> str:
         $('pairSummary').textContent = 'Pick an edge in the network or select exactly two artists.';
         $('pairTabs').innerHTML = '';
         $('pairThresholds').innerHTML = '';
+        $('pairTrackConfFilters').innerHTML = '';
         $('pairRows').innerHTML = '<div class="empty">No active pair selected.</div>';
         $('pairPager').innerHTML = '';
         return;
@@ -3492,25 +3838,34 @@ def _render_html(data: dict) -> str:
         return `<button class="chip-btn ${activeLens ? 'active' : ''}" data-action="pair-lens" data-lens="${lens.id}">${lens.label}</button>`;
       }).join('');
 
-      const thresholds = [1, 2, 3, 5, 8, 12];
-      $('pairThresholds').innerHTML = thresholds.map((v) => {
-        const activeThreshold = Number(STATE.pairMinUsage || 1) === v;
-        return `<button class="chip-btn ${activeThreshold ? 'active' : ''}" data-action="pair-threshold" data-threshold="${v}">${v}+</button>`;
-      }).join('');
+      STATE.pairMinUsage = normalizeThresholdValue(STATE.pairMinUsage, THRESHOLD_LEVELS);
+      renderThresholdStepper('pairThresholds', 'pair-threshold-down', 'pair-threshold-up', STATE.pairMinUsage, THRESHOLD_LEVELS);
 
       $('pairSort').value = STATE.pairSort;
 
-      const rows = buildPairRows(pairRow, aName, bName);
+      const rowsAll = buildPairRows(pairRow, aName, bName, 'all');
+      const rows = buildPairRows(pairRow, aName, bName, STATE.pairTrackConf);
+      const allPairTracks = collectUniqueTracks(rowsAll);
+      renderConfidenceFilterButtons(
+        'pairTrackConfFilters',
+        'pair-conf',
+        STATE.pairTrackConf,
+        allPairTracks,
+      );
 
       if (STATE.pairLens === 'tracks') {
         STATE.pairActiveName = null;
+        const tracksUniverse = rowsAll.map((row) => (row.tracks || [])[0]).filter(Boolean);
         const tracks = rows.map((row) => (row.tracks || [])[0]).filter(Boolean);
+        const countLabel = STATE.pairTrackConf === 'all'
+          ? `${fmt(tracks.length)} matching tracks`
+          : `${fmt(tracks.length)} / ${fmt(tracksUniverse.length)} matching tracks`;
         if (!tracks.length) {
-          $('pairRows').innerHTML = '<div class="empty">No tracks match current controls.</div>';
+          $('pairRows').innerHTML = '<div class="empty">No tracks match current controls and confidence filter.</div>';
         } else {
           $('pairRows').innerHTML = `
             <div class="inline-evidence">
-              <p class="inline-head">Tracks | ${fmt(tracks.length)} matching tracks</p>
+              <p class="inline-head">Tracks | ${countLabel}</p>
               <div class="evidence-grid">${tracks.map((track) => renderTaxonomyTrackCard(track)).join('')}</div>
             </div>
           `;
@@ -3859,9 +4214,9 @@ def _render_html(data: dict) -> str:
             .filter((name) => name && artistsByName.has(name));
           if (!names.length) return;
           STATE.selectedArtists = new Set(names);
-          if (!STATE.focusArtist || !artistsByName.has(STATE.focusArtist)) {
-            STATE.focusArtist = names[0];
-          }
+          STATE.focusArtist = null;
+          STATE.hoverLatchedArtist = null;
+          STATE.dockedSelectedArtists = new Set();
           syncDockedSelectedArtists(true);
           STATE.taxonomyPage = 0;
           STATE.taxonomyEvidencePage = 0;
@@ -3929,6 +4284,24 @@ def _render_html(data: dict) -> str:
           STATE.taxonomyPage = 0;
           STATE.taxonomyEvidencePage = 0;
           STATE.taxonomyActiveName = null;
+          renderTaxonomy();
+          return;
+        }
+
+        if (action === 'taxonomy-threshold-down' || action === 'taxonomy-threshold-up') {
+          const direction = action === 'taxonomy-threshold-up' ? 1 : -1;
+          STATE.taxonomyMinUsage = stepThresholdValue(STATE.taxonomyMinUsage, THRESHOLD_LEVELS, direction);
+          STATE.taxonomyPage = 0;
+          STATE.taxonomyEvidencePage = 0;
+          STATE.taxonomyActiveName = null;
+          renderTaxonomy();
+          return;
+        }
+
+        if (action === 'taxonomy-conf') {
+          const conf = String(actionEl.dataset.conf || 'all').toUpperCase();
+          STATE.taxonomyTrackConf = conf === 'ALL' ? 'all' : (CONF_FILTER_LEVELS.includes(conf) ? conf : 'all');
+          STATE.taxonomyEvidencePage = 0;
           renderTaxonomy();
           return;
         }
@@ -4138,6 +4511,22 @@ def _render_html(data: dict) -> str:
           STATE.pairMinUsage = Number.isFinite(v) && v > 0 ? v : 1;
           STATE.pairPage = 0;
           STATE.pairActiveName = null;
+          renderPairWorkspace();
+          return;
+        }
+
+        if (action === 'pair-threshold-down' || action === 'pair-threshold-up') {
+          const direction = action === 'pair-threshold-up' ? 1 : -1;
+          STATE.pairMinUsage = stepThresholdValue(STATE.pairMinUsage, THRESHOLD_LEVELS, direction);
+          STATE.pairPage = 0;
+          STATE.pairActiveName = null;
+          renderPairWorkspace();
+          return;
+        }
+
+        if (action === 'pair-conf') {
+          const conf = String(actionEl.dataset.conf || 'all').toUpperCase();
+          STATE.pairTrackConf = conf === 'ALL' ? 'all' : (CONF_FILTER_LEVELS.includes(conf) ? conf : 'all');
           renderPairWorkspace();
           return;
         }

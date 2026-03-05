@@ -5,7 +5,90 @@ from __future__ import annotations
 import json
 import re
 from html import escape
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, parse_qs
+
+
+# ---------------------------------------------------------------------------
+# Shared constants
+# ---------------------------------------------------------------------------
+
+SUMMARY_FILES = {"artist_summary.json", "artist_summary.md", "artist_summary.html"}
+"""Filenames that represent artist-level summaries (not per-set outputs)."""
+
+EXCLUDED_GENRES = {"House"}
+"""Genre names filtered out of top-genre displays (too broad to be useful)."""
+
+CONFIDENCE_LEVELS = ("HIGH", "MEDIUM", "LOW", "UNCERTAIN")
+"""Ordered confidence tiers for track recognition."""
+
+CONFIDENCE_CSS_CLASSES = {
+    "HIGH": "conf-high",
+    "MEDIUM": "conf-medium",
+    "LOW": "conf-low",
+    "UNCERTAIN": "conf-uncertain",
+}
+
+CONFIDENCE_COLORS = {
+    "HIGH": "#00e676",
+    "MEDIUM": "#ffd740",
+    "LOW": "#ff9100",
+    "UNCERTAIN": "#757575",
+}
+
+ARTIST_PROFILE_FIELDS = (
+    "spotify_artist_profile_image",
+    "discogs_artist_image",
+    "discogs_artist_name",
+    "discogs_artist_url",
+    "discogs_artist_profile",
+    "discogs_artist_genres",
+    "spotify_artist_profile_url",
+    "spotify_artist_profile_name",
+    "spotify_artist_profile_genres",
+    "spotify_artist_profile_followers",
+    "spotify_artist_profile_popularity",
+)
+"""Fields copied from artist profile enrichment into per-set mix_info."""
+
+
+# ---------------------------------------------------------------------------
+# Shared utilities
+# ---------------------------------------------------------------------------
+
+
+def normalize_name(value: str) -> str:
+    """Lowercase alphanumeric normalization for loose artist-name matching."""
+    if not value:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def is_valid_artist_image_url(url: str | None) -> bool:
+    """Return True when image URL appears usable for artist-card artwork."""
+    if not url:
+        return False
+    lower = str(url).strip().lower()
+    if not lower.startswith("http"):
+        return False
+    if "spacer.gif" in lower:
+        return False
+    return True
+
+
+def extract_youtube_id(url: str) -> str | None:
+    """Extract YouTube video ID from a URL."""
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().removeprefix("www.").removeprefix("m.")
+        if host == "youtube.com":
+            return parse_qs(parsed.query).get("v", [None])[0]
+        if host == "youtu.be":
+            return parsed.path.lstrip("/")
+    except Exception:
+        pass
+    return None
 
 
 def esc(value) -> str:

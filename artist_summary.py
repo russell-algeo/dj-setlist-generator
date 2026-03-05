@@ -3,26 +3,13 @@
 import json
 from pathlib import Path
 from collections import Counter
-from urllib.parse import urlparse, parse_qs
 
+from detail_explorer_common import (
+    SUMMARY_FILES as _SUMMARY_FILES,
+    extract_youtube_id as _extract_youtube_id,
+)
 from output_formatter import OutputFormatter
 from artist_explorer_formatter import save_artist_explorer_html
-
-
-def _extract_youtube_id(url: str) -> str | None:
-    """Extract YouTube video ID from URL."""
-    if not url:
-        return None
-    try:
-        parsed = urlparse(url)
-        host = parsed.netloc.lower().removeprefix('www.').removeprefix('m.')
-        if host == 'youtube.com':
-            return parse_qs(parsed.query).get('v', [None])[0]
-        if host == 'youtu.be':
-            return parsed.path.lstrip('/')
-    except Exception:
-        pass
-    return None
 
 
 class ArtistSummarizer:
@@ -181,14 +168,13 @@ class ArtistSummarizer:
         # Include manually-migrated sets that weren't part of this discovery run.
         # Scan the artist output directory for set subdirectories with JSON output
         # that weren't already processed above.
-        SUMMARY_FILES = {"artist_summary.json", "artist_summary.md", "artist_summary.html"}
         for set_dir in sorted(self._output_dir.iterdir()):
             if not set_dir.is_dir() or set_dir.resolve() in covered_output_dirs:
                 continue
 
             json_files = [
                 f for f in set_dir.glob("*.json")
-                if f.name not in SUMMARY_FILES
+                if f.name not in _SUMMARY_FILES
             ]
             if not json_files:
                 continue

@@ -40,11 +40,10 @@ _discogs_session = _make_discogs_session()
 _KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 
-def _normalize_name(value: str) -> str:
-    """Lowercase alphanumeric normalization for loose artist-name matching."""
-    if not value:
-        return ""
-    return re.sub(r"[^a-z0-9]+", "", value.lower())
+from detail_explorer_common import (
+    normalize_name as _normalize_name,
+    is_valid_artist_image_url as _is_valid_artist_image_url,
+)
 
 
 def _tokenize_name(value: str) -> set[str]:
@@ -67,16 +66,6 @@ def _is_exact_artist_name_match(expected: str, candidate: str) -> bool:
     return True
 
 
-def _is_valid_artist_image_url(url: str | None) -> bool:
-    """Return True when image URL appears usable for artist-card artwork."""
-    if not url:
-        return False
-    lower = str(url).strip().lower()
-    if not lower.startswith("http"):
-        return False
-    if "spacer.gif" in lower:
-        return False
-    return True
 
 
 def _pick_discogs_artist_image(images: list[dict], fallback_url: str | None = None) -> str | None:
@@ -124,11 +113,7 @@ def _normalize_genre_label(value: str) -> str:
 
 def _genre_label_set(genres: list[str] | None) -> set[str]:
     """Build a normalized set of genre/style labels."""
-    return {
-        _normalize_genre_label(g)
-        for g in (genres or [])
-        if _normalize_genre_label(g)
-    }
+    return {n for g in (genres or []) if (n := _normalize_genre_label(g))}
 
 
 def _genre_token_set(genres: list[str] | None) -> set[str]:
