@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import Config
 from detail_explorer_common import (
+    ARTIST_PROFILE_FIELDS,
     SUMMARY_FILES as _SUMMARY_FILES,
     is_valid_artist_image_url as _is_valid_artist_image_url,
     normalize_name as _normalize_name,
@@ -181,17 +182,23 @@ def _enrich_json(
     set_artist_profiles_only: bool = False,
     force_set_artist_profile: bool = False,
     expected_genres: list[str] | None = None,
+    preloaded_data: dict | None = None,
 ) -> bool:
     """Re-enrich a single JSON file with missing metadata.
 
     Returns True if the file was updated (or would be in dry-run mode).
+    If *preloaded_data* is provided, skip the file read (avoids double I/O
+    when the caller already parsed the JSON for genre inference).
     """
-    try:
-        with open(json_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"  ERROR reading {json_path}: {e}")
-        return False
+    if preloaded_data is not None:
+        data = preloaded_data
+    else:
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"  ERROR reading {json_path}: {e}")
+            return False
 
     tracks = data.get("tracks", [])
     mix_info = data.setdefault("mix_info", {})
@@ -222,23 +229,8 @@ def _enrich_json(
                 set_artist_name,
                 expected_genres=expected_genres or [],
             )
-            mix_info["artist_profile_name"] = profile.get("artist_profile_name")
-            mix_info["artist_profile_image"] = profile.get("artist_profile_image")
-            mix_info["artist_profile_url"] = profile.get("artist_profile_url")
-            mix_info["artist_profile_source"] = profile.get("artist_profile_source")
-            mix_info["artist_profile_confidence"] = profile.get("artist_profile_confidence")
-            mix_info["artist_profile_genre_overlap"] = profile.get("artist_profile_genre_overlap")
-            mix_info["artist_profile_expected_genres"] = profile.get("artist_profile_expected_genres")
-            mix_info["artist_profile_provider_genres"] = profile.get("artist_profile_provider_genres")
-            mix_info["artist_profile_rejected_reason"] = profile.get("artist_profile_rejected_reason")
-            mix_info["spotify_artist_profile_name"] = profile.get("spotify_artist_profile_name")
-            mix_info["spotify_artist_profile_image"] = profile.get("spotify_artist_profile_image")
-            mix_info["spotify_artist_profile_url"] = profile.get("spotify_artist_profile_url")
-            mix_info["spotify_artist_profile_genres"] = profile.get("spotify_artist_profile_genres")
-            mix_info["discogs_artist_profile_name"] = profile.get("discogs_artist_profile_name")
-            mix_info["discogs_artist_profile_image"] = profile.get("discogs_artist_profile_image")
-            mix_info["discogs_artist_profile_url"] = profile.get("discogs_artist_profile_url")
-            mix_info["discogs_artist_profile_genres"] = profile.get("discogs_artist_profile_genres")
+            for field in ARTIST_PROFILE_FIELDS:
+                mix_info[field] = profile.get(field)
             set_artist_changed = True
 
     # --- Phase 1: Spotify album art, preview, artist profile fields ---
@@ -480,9 +472,10 @@ def scan_and_enrich(
         )
 
         if has_sub_json:
-            # Artist mode
+            # Artist mode — first pass: read all JSON and infer genres
             print(f"\n[Artist] {entry.name}")
             artist_tracks: list[dict] = []
+            cached_payloads: dict[Path, dict] = {}
             for set_dir in sorted(sub_dirs):
                 for json_path in sorted(set_dir.glob("*.json")):
                     if json_path.name in _SUMMARY_FILES:
@@ -490,11 +483,13 @@ def scan_and_enrich(
                     try:
                         with open(json_path, encoding="utf-8") as f:
                             payload = json.load(f)
+                        cached_payloads[json_path] = payload
                         artist_tracks.extend(payload.get("tracks", []) or [])
                     except Exception:
                         continue
             artist_expected_genres = _infer_expected_genres_from_tracks(artist_tracks)
 
+            # Second pass: enrich using cached payloads (no re-read)
             for set_dir in sorted(sub_dirs):
                 for json_path in sorted(set_dir.glob("*.json")):
                     if json_path.name in _SUMMARY_FILES:
@@ -507,6 +502,7 @@ def scan_and_enrich(
                         set_artist_profiles_only=set_artist_profiles_only,
                         force_set_artist_profile=force_set_artist_profile,
                         expected_genres=artist_expected_genres,
+                        preloaded_data=cached_payloads.get(json_path),
                     ):
                         total_updated += 1
         else:

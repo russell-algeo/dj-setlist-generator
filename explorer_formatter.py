@@ -111,12 +111,8 @@ def _build_client_data(master_data: dict) -> dict:
                 "title": track.get("display_title", "Unknown"),
                 "spotify_url": track.get("spotify_url"),
                 "album_art": track.get("spotify_album_art"),
-                "artist_profile_image": (
-                    track.get("spotify_artist_profile_image") or track.get("spotify_artist_image")
-                ),
-                "artist_image": (
-                    track.get("spotify_artist_image") or track.get("spotify_artist_profile_image")
-                ),
+                "artist_profile_image": track.get("spotify_artist_profile_image"),
+                "artist_image": track.get("spotify_artist_profile_image"),
                 "label": label,
                 "label_url": track.get("discogs_label_url"),
                 "genres": genres,
@@ -237,7 +233,7 @@ def _build_client_data(master_data: dict) -> dict:
             )
 
         artist_profile_image = artist.get("artist_profile_image") or artist.get("artist_image")
-        artist_image = artist.get("artist_image") or artist_profile_image
+        artist_image = artist_profile_image
         cover_image = artist_profile_image or next(
             (s.get("thumbnail_url") for s in set_payload if s.get("thumbnail_url")), None
         )
@@ -291,9 +287,7 @@ def _build_client_data(master_data: dict) -> dict:
                         "display_title": t.get("display_title"),
                         "spotify_url": t.get("spotify_url"),
                         "spotify_album_art": t.get("spotify_album_art"),
-                        "spotify_artist_profile_image": (
-                            t.get("spotify_artist_profile_image") or t.get("spotify_artist_image")
-                        ),
+                        "spotify_artist_profile_image": t.get("spotify_artist_profile_image"),
                         "discogs_label": t.get("discogs_label"),
                         "discogs_label_url": t.get("discogs_label_url"),
                         "genres": _uniq_ordered([g.title() for g in t.get("genres", [])]),

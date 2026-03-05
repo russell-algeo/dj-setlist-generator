@@ -36,17 +36,23 @@ CONFIDENCE_COLORS = {
 }
 
 ARTIST_PROFILE_FIELDS = (
-    "spotify_artist_profile_image",
-    "discogs_artist_image",
-    "discogs_artist_name",
-    "discogs_artist_url",
-    "discogs_artist_profile",
-    "discogs_artist_genres",
-    "spotify_artist_profile_url",
+    "artist_profile_name",
+    "artist_profile_image",
+    "artist_profile_url",
+    "artist_profile_source",
+    "artist_profile_confidence",
+    "artist_profile_genre_overlap",
+    "artist_profile_expected_genres",
+    "artist_profile_provider_genres",
+    "artist_profile_rejected_reason",
     "spotify_artist_profile_name",
+    "spotify_artist_profile_image",
+    "spotify_artist_profile_url",
     "spotify_artist_profile_genres",
-    "spotify_artist_profile_followers",
-    "spotify_artist_profile_popularity",
+    "discogs_artist_profile_name",
+    "discogs_artist_profile_image",
+    "discogs_artist_profile_url",
+    "discogs_artist_profile_genres",
 )
 """Fields copied from artist profile enrichment into per-set mix_info."""
 
@@ -89,6 +95,70 @@ def extract_youtube_id(url: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+def select_artist_hero_image(
+    set_summaries: list[dict],
+    track_info: dict[str, dict],
+    artist_name: str,
+) -> tuple[str, str | None, str | None, str | None]:
+    """Pick the best artist image using a 3-tier priority cascade.
+
+    Returns (image_url, source_label, profile_name, profile_url).
+    All strings default to "" or None when unavailable.
+
+    Priority:
+    1. Set-level artist profile image (ranked: spotify > discogs)
+    2. Spotify track-artist profile image matching the artist name
+    3. First available set thumbnail
+    """
+    _SOURCE_RANK = {"spotify": 2, "discogs": 1}
+    image = ""
+    source_label: str | None = None
+    profile_name: str | None = None
+    profile_url: str | None = None
+
+    # Tier 1: set-level artist profile images
+    candidates = []
+    for s in set_summaries:
+        img = s.get("artist_profile_image")
+        if not is_valid_artist_image_url(img):
+            continue
+        src = (s.get("artist_profile_source") or "").strip().lower()
+        candidates.append((_SOURCE_RANK.get(src, 0), src, img,
+                           s.get("artist_profile_name"), s.get("artist_profile_url")))
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        _, source_label, image, profile_name, profile_url = candidates[0]
+        source_label = source_label or "set_artist_profile"
+
+    # Tier 2: Spotify track-artist profile image (exact name match)
+    normalized = normalize_name(artist_name)
+    if not image and normalized:
+        for info in track_info.values():
+            pname = info.get("spotify_artist_name")
+            img = info.get("spotify_artist_profile_image")
+            if (
+                is_valid_artist_image_url(img)
+                and pname
+                and normalize_name(pname) == normalized
+            ):
+                image = img
+                profile_name = pname
+                profile_url = info.get("spotify_artist_url")
+                source_label = "spotify_artist_profile"
+                break
+
+    # Tier 3: first set thumbnail
+    if not image:
+        for s in set_summaries:
+            thumb = s.get("thumbnail_url") or ""
+            if thumb:
+                image = thumb
+                source_label = "thumbnail"
+                break
+
+    return image, source_label, profile_name, profile_url
 
 
 def esc(value) -> str:

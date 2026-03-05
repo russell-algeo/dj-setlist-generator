@@ -5,11 +5,133 @@ from pathlib import Path
 from collections import Counter
 
 from detail_explorer_common import (
+    EXCLUDED_GENRES,
     SUMMARY_FILES as _SUMMARY_FILES,
     extract_youtube_id as _extract_youtube_id,
 )
 from output_formatter import OutputFormatter
 from artist_explorer_formatter import save_artist_explorer_html
+
+
+def _process_set_json(
+    data: dict,
+    set_output_dir: Path,
+    artist_output_dir: Path,
+    url: str,
+    title_fallback: str,
+    set_index: int,
+) -> tuple[dict, list[dict]]:
+    """Process a single set's JSON data into a set summary and track list.
+
+    Returns (set_summary, track_entries) where track_entries is the list of
+    individual track dicts ready for aggregation into all_tracks.
+    """
+    tracks = data.get("tracks", [])
+    mix_info = data.get("mix_info", {})
+    metadata = data.get("metadata", {})
+
+    html_files = list(set_output_dir.glob("*.html"))
+    set_html_rel = None
+    if html_files:
+        try:
+            set_html_rel = str(html_files[0].relative_to(artist_output_dir))
+        except ValueError:
+            pass
+
+    set_tracks = []
+    for track in tracks:
+        if track.get("title") != "Unknown Track":
+            set_tracks.append({
+                "artist": track.get("artist", "Unknown"),
+                "title": track.get("title", "Unknown Track"),
+                "start_time_formatted": track.get("start_time_formatted", ""),
+                "confidence": track.get("confidence", "UNCERTAIN"),
+                "spotify_url": track.get("spotify_url"),
+                "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
+            })
+
+    duration = mix_info.get("duration", 0)
+    total_tracks_count = metadata.get("total_tracks", len(tracks))
+    recognized = sum(1 for t in tracks if t.get("title") != "Unknown Track")
+    recognition_rate = (recognized / total_tracks_count * 100) if total_tracks_count else 0
+    confidence_counts = {
+        "HIGH": metadata.get("high_confidence_tracks", 0),
+        "MEDIUM": metadata.get("medium_confidence_tracks", 0),
+        "LOW": metadata.get("low_confidence_tracks", 0),
+        "UNCERTAIN": metadata.get("uncertain_tracks", 0),
+    }
+    mini_timeline = []
+    for t in tracks:
+        if duration and t.get("start_time") is not None:
+            start = t["start_time"]
+            end = t.get("end_time") or duration
+            start_pct = start / duration * 100
+            width_pct = max(0.5, (end - start) / duration * 100)
+            mini_timeline.append({
+                "start_pct": start_pct,
+                "width_pct": width_pct,
+                "confidence": t.get("confidence", "UNCERTAIN"),
+            })
+
+    set_url = url or mix_info.get("url", "")
+    video_id = _extract_youtube_id(set_url)
+    thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
+    track_search_text = " ".join(
+        f"{t.get('artist', '')} {t.get('title', '')}".lower()
+        for t in tracks
+        if t.get("title") != "Unknown Track"
+    )
+
+    set_summary = {
+        "title": mix_info.get("title", title_fallback),
+        "url": set_url,
+        "total_tracks": total_tracks_count,
+        "high_confidence": metadata.get("high_confidence_tracks", 0),
+        "set_html_rel": set_html_rel,
+        "tracks": set_tracks,
+        "index": set_index,
+        "duration": duration,
+        "recognition_rate": recognition_rate,
+        "confidence_counts": confidence_counts,
+        "mini_timeline": mini_timeline,
+        "thumbnail_url": thumbnail_url,
+        "track_search_text": track_search_text,
+        "artist_profile_image": mix_info.get("artist_profile_image"),
+        "artist_profile_name": mix_info.get("artist_profile_name"),
+        "artist_profile_url": mix_info.get("artist_profile_url"),
+        "artist_profile_source": mix_info.get("artist_profile_source"),
+        "artist_profile_confidence": mix_info.get("artist_profile_confidence"),
+        "artist_profile_genre_overlap": mix_info.get("artist_profile_genre_overlap"),
+        "artist_profile_rejected_reason": mix_info.get("artist_profile_rejected_reason"),
+    }
+
+    set_title = mix_info.get("title", title_fallback)
+    track_entries: list[dict] = []
+    for pos, track in enumerate(tracks, 1):
+        if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
+            start_fmt = track.get("start_time_formatted", "")
+            end_fmt = track.get("end_time_formatted") or ""
+            time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
+            track_entries.append({
+                "artist": track["artist"],
+                "title": track["title"],
+                "spotify_url": track.get("spotify_url"),
+                "spotify_album_art": track.get("spotify_album_art"),
+                "spotify_artist_name": track.get("spotify_artist_name"),
+                "spotify_artist_url": track.get("spotify_artist_url"),
+                "spotify_artist_profile_image": track.get("spotify_artist_profile_image"),
+                "from_set": set_title,
+                "time_range": time_range,
+                "source_deep_link": track.get("source_deep_link"),
+                "set_html_rel": set_html_rel,
+                "confidence": track.get("confidence", "UNCERTAIN"),
+                "genres": ((track.get("discogs_styles") or []) + (track.get("spotify_genres") or [])) or (track.get("discogs_genres") or []),
+                "track_position": pos,
+                "discogs_label": track.get("discogs_label"),
+                "discogs_label_url": track.get("discogs_label_url"),
+            })
+
+    return set_summary, track_entries
 
 
 class ArtistSummarizer:
@@ -29,8 +151,8 @@ class ArtistSummarizer:
         successful = [r for r in results if r["status"] == "SUCCESS"]
         failed = [r for r in results if r["status"] != "SUCCESS"]
 
-        all_tracks = []
-        set_summaries = []
+        all_tracks: list[dict] = []
+        set_summaries: list[dict] = []
 
         # Track which output directories were covered by the current discovery run
         covered_output_dirs: set[Path] = set()
@@ -52,122 +174,18 @@ class ArtistSummarizer:
 
             covered_output_dirs.add(Path(set_output_dir).resolve())
 
-            tracks = data.get("tracks", [])
-            mix_info = data.get("mix_info", {})
-            metadata = data.get("metadata", {})
-
-            # Find per-set HTML file and compute its path relative to the
-            # artist summary page so set cards can link to it directly.
-            html_files = list(Path(set_output_dir).glob("*.html"))
-            set_html_rel = None
-            if html_files:
-                try:
-                    set_html_rel = str(html_files[0].relative_to(self._output_dir))
-                except ValueError:
-                    pass  # output_dir outside expected tree — skip relative link
-
-            set_tracks = []
-            for track in tracks:
-                if track.get("title") != "Unknown Track":
-                    set_tracks.append({
-                        "artist": track.get("artist", "Unknown"),
-                        "title": track.get("title", "Unknown Track"),
-                        "start_time_formatted": track.get("start_time_formatted", ""),
-                        "confidence": track.get("confidence", "UNCERTAIN"),
-                        "spotify_url": track.get("spotify_url"),
-                        "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
-                    })
-
-            # Extra fields for improved set grid (Feature 6)
-            duration = mix_info.get("duration", 0)
-            total_tracks_count = metadata.get("total_tracks", len(tracks))
-            recognized = sum(1 for t in tracks if t.get("title") != "Unknown Track")
-            recognition_rate = (recognized / total_tracks_count * 100) if total_tracks_count else 0
-            confidence_counts = {
-                "HIGH": metadata.get("high_confidence_tracks", 0),
-                "MEDIUM": metadata.get("medium_confidence_tracks", 0),
-                "LOW": metadata.get("low_confidence_tracks", 0),
-                "UNCERTAIN": metadata.get("uncertain_tracks", 0),
-            }
-            mini_timeline = []
-            for t in tracks:
-                if duration and t.get("start_time") is not None:
-                    start = t["start_time"]
-                    end = t.get("end_time") or duration
-                    start_pct = start / duration * 100
-                    width_pct = max(0.5, (end - start) / duration * 100)
-                    mini_timeline.append({
-                        "start_pct": start_pct,
-                        "width_pct": width_pct,
-                        "confidence": t.get("confidence", "UNCERTAIN"),
-                    })
-            set_url = result["url"] or mix_info.get("url", "")
-            video_id = _extract_youtube_id(set_url)
-            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
-            track_search_text = " ".join(
-                f"{t.get('artist', '')} {t.get('title', '')}".lower()
-                for t in tracks
-                if t.get("title") != "Unknown Track"
+            summary, track_entries = _process_set_json(
+                data,
+                Path(set_output_dir),
+                self._output_dir,
+                url=result["url"],
+                title_fallback=result.get("mix_name", "Unknown"),
+                set_index=len(set_summaries),
             )
-
-            set_summaries.append({
-                "title": mix_info.get("title", result.get("mix_name", "Unknown")),
-                "url": result["url"],
-                "total_tracks": total_tracks_count,
-                "high_confidence": metadata.get("high_confidence_tracks", 0),
-                "set_html_rel": set_html_rel,
-                "tracks": set_tracks,
-                "index": len(set_summaries),
-                # NEW fields for Feature 6
-                "duration": duration,
-                "recognition_rate": recognition_rate,
-                "confidence_counts": confidence_counts,
-                "mini_timeline": mini_timeline,
-                "thumbnail_url": thumbnail_url,
-                "track_search_text": track_search_text,
-                # Canonical set-level artist profile fields (already confidence-gated upstream).
-                "artist_profile_image": mix_info.get("artist_profile_image"),
-                "artist_profile_name": mix_info.get("artist_profile_name"),
-                "artist_profile_url": mix_info.get("artist_profile_url"),
-                "artist_profile_source": mix_info.get("artist_profile_source"),
-                "artist_profile_confidence": mix_info.get("artist_profile_confidence"),
-                "artist_profile_genre_overlap": mix_info.get("artist_profile_genre_overlap"),
-                "artist_profile_rejected_reason": mix_info.get("artist_profile_rejected_reason"),
-            })
-
-            set_title = mix_info.get("title", "Unknown")
-            for pos, track in enumerate(tracks, 1):
-                if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
-                    start_fmt = track.get("start_time_formatted", "")
-                    end_fmt   = track.get("end_time_formatted") or ""
-                    time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
-                    all_tracks.append({
-                        "artist":            track["artist"],
-                        "title":             track["title"],
-                        "spotify_url":       track.get("spotify_url"),
-                        "spotify_album_art": track.get("spotify_album_art"),
-                        "spotify_artist_name": track.get("spotify_artist_name"),
-                        "spotify_artist_url": track.get("spotify_artist_url"),
-                        "spotify_artist_profile_image": (
-                            track.get("spotify_artist_profile_image") or track.get("spotify_artist_image")
-                        ),
-                        "spotify_artist_image": (
-                            track.get("spotify_artist_image") or track.get("spotify_artist_profile_image")
-                        ),
-                        "from_set":          set_title,
-                        "time_range":        time_range,
-                        "source_deep_link":  track.get("source_deep_link"),
-                        "set_html_rel":      set_html_rel,
-                        "confidence":        track.get("confidence", "UNCERTAIN"),
-                        "genres":            ((track.get("discogs_styles") or []) + (track.get("spotify_genres") or [])) or (track.get("discogs_genres") or []),
-                        "track_position":    pos,
-                        "discogs_label":     track.get("discogs_label"),
-                        "discogs_label_url": track.get("discogs_label_url"),
-                    })
+            set_summaries.append(summary)
+            all_tracks.extend(track_entries)
 
         # Include manually-migrated sets that weren't part of this discovery run.
-        # Scan the artist output directory for set subdirectories with JSON output
-        # that weren't already processed above.
         for set_dir in sorted(self._output_dir.iterdir()):
             if not set_dir.is_dir() or set_dir.resolve() in covered_output_dirs:
                 continue
@@ -185,146 +203,44 @@ class ArtistSummarizer:
             except (json.JSONDecodeError, OSError):
                 continue
 
-            tracks = data.get("tracks", [])
             mix_info = data.get("mix_info", {})
-            metadata = data.get("metadata", {})
-            url = mix_info.get("url", "")
 
-            html_files = list(set_dir.glob("*.html"))
-            set_html_rel = None
-            if html_files:
-                try:
-                    set_html_rel = str(html_files[0].relative_to(self._output_dir))
-                except ValueError:
-                    pass
-
-            set_tracks = []
-            for track in tracks:
-                if track.get("title") != "Unknown Track":
-                    set_tracks.append({
-                        "artist": track.get("artist", "Unknown"),
-                        "title": track.get("title", "Unknown Track"),
-                        "start_time_formatted": track.get("start_time_formatted", ""),
-                        "confidence": track.get("confidence", "UNCERTAIN"),
-                        "spotify_url": track.get("spotify_url"),
-                        "track_key": f"{track.get('artist', 'Unknown')} - {track.get('title', 'Unknown Track')}",
-                    })
-
-            # Extra fields for improved set grid (Feature 6)
-            duration = mix_info.get("duration", 0)
-            total_tracks_count = metadata.get("total_tracks", len(tracks))
-            recognized = sum(1 for t in tracks if t.get("title") != "Unknown Track")
-            recognition_rate = (recognized / total_tracks_count * 100) if total_tracks_count else 0
-            confidence_counts = {
-                "HIGH": metadata.get("high_confidence_tracks", 0),
-                "MEDIUM": metadata.get("medium_confidence_tracks", 0),
-                "LOW": metadata.get("low_confidence_tracks", 0),
-                "UNCERTAIN": metadata.get("uncertain_tracks", 0),
-            }
-            mini_timeline = []
-            for t in tracks:
-                if duration and t.get("start_time") is not None:
-                    start = t["start_time"]
-                    end = t.get("end_time") or duration
-                    start_pct = start / duration * 100
-                    width_pct = max(0.5, (end - start) / duration * 100)
-                    mini_timeline.append({
-                        "start_pct": start_pct,
-                        "width_pct": width_pct,
-                        "confidence": t.get("confidence", "UNCERTAIN"),
-                    })
-            video_id = _extract_youtube_id(url)
-            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
-            track_search_text = " ".join(
-                f"{t.get('artist', '')} {t.get('title', '')}".lower()
-                for t in tracks
-                if t.get("title") != "Unknown Track"
+            summary, track_entries = _process_set_json(
+                data,
+                set_dir,
+                self._output_dir,
+                url=mix_info.get("url", ""),
+                title_fallback=set_dir.name,
+                set_index=len(set_summaries),
             )
-
-            set_summaries.append({
-                "title": mix_info.get("title", set_dir.name),
-                "url": url,
-                "total_tracks": total_tracks_count,
-                "high_confidence": metadata.get("high_confidence_tracks", 0),
-                "set_html_rel": set_html_rel,
-                "tracks": set_tracks,
-                "index": len(set_summaries),
-                # NEW fields for Feature 6
-                "duration": duration,
-                "recognition_rate": recognition_rate,
-                "confidence_counts": confidence_counts,
-                "mini_timeline": mini_timeline,
-                "thumbnail_url": thumbnail_url,
-                "track_search_text": track_search_text,
-                # Canonical set-level artist profile fields (already confidence-gated upstream).
-                "artist_profile_image": mix_info.get("artist_profile_image"),
-                "artist_profile_name": mix_info.get("artist_profile_name"),
-                "artist_profile_url": mix_info.get("artist_profile_url"),
-                "artist_profile_source": mix_info.get("artist_profile_source"),
-                "artist_profile_confidence": mix_info.get("artist_profile_confidence"),
-                "artist_profile_genre_overlap": mix_info.get("artist_profile_genre_overlap"),
-                "artist_profile_rejected_reason": mix_info.get("artist_profile_rejected_reason"),
-            })
-
-            set_title = mix_info.get("title", set_dir.name)
-            for pos, track in enumerate(tracks, 1):
-                if track.get("artist") != "Unknown" and track.get("title") != "Unknown Track":
-                    start_fmt = track.get("start_time_formatted", "")
-                    end_fmt   = track.get("end_time_formatted") or ""
-                    time_range = f"{start_fmt} \u2013 {end_fmt}" if end_fmt else start_fmt
-                    all_tracks.append({
-                        "artist":            track["artist"],
-                        "title":             track["title"],
-                        "spotify_url":       track.get("spotify_url"),
-                        "spotify_album_art": track.get("spotify_album_art"),
-                        "spotify_artist_name": track.get("spotify_artist_name"),
-                        "spotify_artist_url": track.get("spotify_artist_url"),
-                        "spotify_artist_profile_image": (
-                            track.get("spotify_artist_profile_image") or track.get("spotify_artist_image")
-                        ),
-                        "spotify_artist_image": (
-                            track.get("spotify_artist_image") or track.get("spotify_artist_profile_image")
-                        ),
-                        "from_set":          set_title,
-                        "time_range":        time_range,
-                        "source_deep_link":  track.get("source_deep_link"),
-                        "set_html_rel":      set_html_rel,
-                        "confidence":        track.get("confidence", "UNCERTAIN"),
-                        "genres":            ((track.get("discogs_styles") or []) + (track.get("spotify_genres") or [])) or (track.get("discogs_genres") or []),
-                        "track_position":    pos,
-                        "discogs_label":     track.get("discogs_label"),
-                        "discogs_label_url": track.get("discogs_label_url"),
-                    })
+            set_summaries.append(summary)
+            all_tracks.extend(track_entries)
 
         track_counter = Counter()
         track_info = {}
         _genre_counters: dict = {}
+        _excluded_genres = {g.title() for g in EXCLUDED_GENRES}
         for t in all_tracks:
             key = f"{t['artist']} - {t['title']}"
             track_counter[key] += 1
             if key not in track_info:
                 track_info[key] = {
-                    "artist":            t["artist"],
-                    "title":             t["title"],
-                    "spotify_url":       t.get("spotify_url"),
+                    "artist": t["artist"],
+                    "title": t["title"],
+                    "spotify_url": t.get("spotify_url"),
                     "spotify_album_art": t.get("spotify_album_art"),
                     "spotify_artist_name": t.get("spotify_artist_name"),
                     "spotify_artist_url": t.get("spotify_artist_url"),
-                    "spotify_artist_profile_image": (
-                        t.get("spotify_artist_profile_image") or t.get("spotify_artist_image")
-                    ),
-                    "spotify_artist_image": (
-                        t.get("spotify_artist_image") or t.get("spotify_artist_profile_image")
-                    ),
-                    "appearances":       [],
-                    "genres":            [],
-                    "discogs_label":     None,
+                    "spotify_artist_profile_image": t.get("spotify_artist_profile_image"),
+                    "appearances": [],
+                    "genres": [],
+                    "discogs_label": None,
                     "discogs_label_url": None,
                 }
                 _genre_counters[key] = Counter()
             # Take first non-None label/art values encountered
             if not track_info[key]["discogs_label"] and t.get("discogs_label"):
-                track_info[key]["discogs_label"]     = t["discogs_label"]
+                track_info[key]["discogs_label"] = t["discogs_label"]
                 track_info[key]["discogs_label_url"] = t.get("discogs_label_url")
             if not track_info[key]["spotify_album_art"] and t.get("spotify_album_art"):
                 track_info[key]["spotify_album_art"] = t["spotify_album_art"]
@@ -334,19 +250,17 @@ class ArtistSummarizer:
                 track_info[key]["spotify_artist_url"] = t["spotify_artist_url"]
             if not track_info[key]["spotify_artist_profile_image"] and t.get("spotify_artist_profile_image"):
                 track_info[key]["spotify_artist_profile_image"] = t["spotify_artist_profile_image"]
-            if not track_info[key]["spotify_artist_image"] and t.get("spotify_artist_image"):
-                track_info[key]["spotify_artist_image"] = t["spotify_artist_image"]
             track_info[key]["appearances"].append({
-                "set_title":        t["from_set"],
-                "time_range":       t.get("time_range", ""),
+                "set_title": t["from_set"],
+                "time_range": t.get("time_range", ""),
                 "source_deep_link": t.get("source_deep_link"),
-                "set_html_rel":     t.get("set_html_rel"),
-                "confidence":       t.get("confidence", "UNCERTAIN"),
-                "track_position":   t.get("track_position"),
+                "set_html_rel": t.get("set_html_rel"),
+                "confidence": t.get("confidence", "UNCERTAIN"),
+                "track_position": t.get("track_position"),
             })
             for genre in t.get("genres", []):
                 normalized = genre.title()
-                if normalized == "House":
+                if normalized in _excluded_genres:
                     continue
                 _genre_counters[key][normalized] += 1
 

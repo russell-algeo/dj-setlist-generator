@@ -18,8 +18,11 @@ from detail_explorer_common import (
     extract_youtube_id as _extract_youtube_id,
     is_valid_artist_image_url as _is_valid_artist_image_url,
     normalize_name as _normalize_name,
+    select_artist_hero_image,
 )
 from explorer_formatter import save_master_explorer_html
+
+_EXCLUDED_GENRES_TITLED = {g.title() for g in EXCLUDED_GENRES}
 
 
 def _normalize_key(artist: str, title: str) -> str:
@@ -250,12 +253,7 @@ class MasterSummarizer:
                         "spotify_album_art": t.get("spotify_album_art"),
                         "spotify_artist_name": t.get("spotify_artist_name"),
                         "spotify_artist_url": t.get("spotify_artist_url"),
-                        "spotify_artist_profile_image": (
-                            t.get("spotify_artist_profile_image") or t.get("spotify_artist_image")
-                        ),
-                        "spotify_artist_image": (
-                            t.get("spotify_artist_image") or t.get("spotify_artist_profile_image")
-                        ),
+                        "spotify_artist_profile_image": t.get("spotify_artist_profile_image"),
                         "discogs_label": t.get("discogs_label"),
                         "discogs_label_url": t.get("discogs_label_url"),
                         "genres": genres,
@@ -271,20 +269,8 @@ class MasterSummarizer:
                         tracks[key]["spotify_artist_name"] = t["spotify_artist_name"]
                     if not tracks[key].get("spotify_artist_url") and t.get("spotify_artist_url"):
                         tracks[key]["spotify_artist_url"] = t["spotify_artist_url"]
-                    if (
-                        not tracks[key].get("spotify_artist_profile_image")
-                        and (t.get("spotify_artist_profile_image") or t.get("spotify_artist_image"))
-                    ):
-                        tracks[key]["spotify_artist_profile_image"] = (
-                            t.get("spotify_artist_profile_image") or t.get("spotify_artist_image")
-                        )
-                    if (
-                        not tracks[key].get("spotify_artist_image")
-                        and (t.get("spotify_artist_image") or t.get("spotify_artist_profile_image"))
-                    ):
-                        tracks[key]["spotify_artist_image"] = (
-                            t.get("spotify_artist_image") or t.get("spotify_artist_profile_image")
-                        )
+                    if not tracks[key].get("spotify_artist_profile_image") and t.get("spotify_artist_profile_image"):
+                        tracks[key]["spotify_artist_profile_image"] = t["spotify_artist_profile_image"]
                     if not tracks[key]["discogs_label"] and t.get("discogs_label"):
                         tracks[key]["discogs_label"] = t["discogs_label"]
                         tracks[key]["discogs_label_url"] = t.get("discogs_label_url")
@@ -311,7 +297,7 @@ class MasterSummarizer:
         for track in tracks.values():
             for g in track.get("genres", []):
                 normalized = g.title()
-                if normalized != "House":
+                if normalized not in _EXCLUDED_GENRES_TITLED:
                     genre_counter[normalized] += 1
 
         top_genres = [g for g, _ in genre_counter.most_common(3)]
@@ -319,47 +305,9 @@ class MasterSummarizer:
         unique_count = len(tracks)
         repeat_count = sum(1 for t in tracks.values() if t["appearances"] > 1)
         signature_score = (repeat_count / unique_count * 100) if unique_count else 0
-        artist_image = None
-        artist_profile_url = None
-        artist_profile_name = None
-        artist_image_source = None
-        normalized_artist = _normalize_name(artist_name)
-        source_rank = {"spotify": 2, "discogs": 1}
-        set_profile_candidates = []
-        for s in all_sets:
-            image = s.get("artist_profile_image")
-            if not _is_valid_artist_image_url(image):
-                continue
-            source = (s.get("artist_profile_source") or "").strip().lower()
-            set_profile_candidates.append(
-                (
-                    source_rank.get(source, 0),
-                    source,
-                    image,
-                    s.get("artist_profile_name"),
-                    s.get("artist_profile_url"),
-                )
-            )
-        if set_profile_candidates:
-            set_profile_candidates.sort(key=lambda item: item[0], reverse=True)
-            _, source, artist_image, artist_profile_name, artist_profile_url = set_profile_candidates[0]
-            artist_image_source = source or "set_artist_profile"
-
-        for track in tracks.values():
-            profile_name = track.get("spotify_artist_name")
-            image = track.get("spotify_artist_profile_image") or track.get("spotify_artist_image")
-            if (
-                not artist_image
-                and image
-                and _is_valid_artist_image_url(image)
-                and profile_name
-                and _normalize_name(profile_name) == normalized_artist
-            ):
-                artist_image = image
-                artist_profile_name = profile_name
-                artist_profile_url = track.get("spotify_artist_url")
-                artist_image_source = "spotify_artist_profile"
-                break
+        artist_image, artist_image_source, artist_profile_name, artist_profile_url = (
+            select_artist_hero_image(all_sets, tracks, artist_name)
+        )
 
         return {
             "name": artist_name,
@@ -419,7 +367,7 @@ class MasterSummarizer:
                     music_artist_to_djs[music_artist][artist["name"]] += 1
                 for g in track.get("genres", []):
                     norm = g.title()
-                    if norm != "House":
+                    if norm not in _EXCLUDED_GENRES_TITLED:
                         genre_to_artists[norm][artist["name"]] += 1
 
             global_genre_counter.update(artist["genre_counter"])
@@ -456,9 +404,7 @@ class MasterSummarizer:
                 "display_title": first["display_title"],
                 "spotify_url": first.get("spotify_url"),
                 "spotify_album_art": first.get("spotify_album_art"),
-                "spotify_artist_profile_image": (
-                    first.get("spotify_artist_profile_image") or first.get("spotify_artist_image")
-                ),
+                "spotify_artist_profile_image": first.get("spotify_artist_profile_image"),
                 "total_appearances": total_app,
                 "num_djs": len(artist_map),
                 "is_cross_artist": len(artist_map) >= 2,
@@ -512,9 +458,7 @@ class MasterSummarizer:
                         ),
                         "spotify_artist_profile_image": (
                             a_t.get("spotify_artist_profile_image")
-                            or a_t.get("spotify_artist_image")
                             or b_t.get("spotify_artist_profile_image")
-                            or b_t.get("spotify_artist_image")
                         ),
                         "spotify_url": a_t.get("spotify_url") or b_t.get("spotify_url"),
                         "appearances_a": a_t.get("appearances", 0),

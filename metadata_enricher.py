@@ -213,6 +213,8 @@ class MetadataEnricher:
         self._artist_cache = {}
         # normalized artist name -> set-level profile metadata
         self._set_artist_profile_cache = {}
+        # label name -> label URL (or None if lookup failed)
+        self._label_url_cache: dict[str, str | None] = {}
 
     @staticmethod
     def infer_genre_profile(track_metadata: list[dict], limit: int = 20) -> list[str]:
@@ -671,23 +673,25 @@ class MetadataEnricher:
         if not _normalize_name(artist_name):
             return None
         try:
+            # Try queries from most specific to least; short-circuit once we
+            # have an exact name match to avoid unnecessary API calls.
             queries = [f"artist:{artist_name}", f"\"{artist_name}\"", artist_name]
             items_by_id: dict[str, dict] = {}
+            exact_items: list[dict] = []
             for query in queries:
                 results = self.spotify.search(q=query, type="artist", limit=50)
                 for item in results.get("artists", {}).get("items", []) or []:
                     artist_id = item.get("id")
                     if artist_id and artist_id not in items_by_id:
                         items_by_id[artist_id] = item
+                # Check for exact matches after each query
+                exact_items = [
+                    item for item in items_by_id.values()
+                    if _is_exact_artist_name_match(artist_name, item.get("name", ""))
+                ]
+                if exact_items:
+                    break
 
-            items = list(items_by_id.values())
-            if not items:
-                return None
-
-            exact_items = [
-                item for item in items
-                if _is_exact_artist_name_match(artist_name, item.get("name", ""))
-            ]
             if not exact_items:
                 return None
 
@@ -894,41 +898,10 @@ class MetadataEnricher:
             labels = result.get('label', [])
             label = labels[0] if labels else None
 
-            # Fetch label ID for a direct Discogs label profile URL.
-            # Strategy 1: fetch the full release via resource_url — labels array contains IDs.
-            # Strategy 2 (fallback): search by label name when the release endpoint fails or
-            #   returns no labels (e.g. some compilations omit the labels array).
+            # Fetch label URL, using cache to avoid repeated lookups for the same label.
             label_url = None
-            resource_url = result.get('resource_url', '')
-            if resource_url and label:
-                try:
-                    rel_resp = _discogs_session.get(resource_url, headers=headers, timeout=10)
-                    rel_resp.raise_for_status()
-                    rel_data = rel_resp.json()
-                    rel_labels = rel_data.get('labels', [])
-                    if rel_labels:
-                        label_id = rel_labels[0].get('id')
-                        if label_id:
-                            label_url = f"https://www.discogs.com/label/{label_id}"
-                except Exception as e:
-                    print(f"    [Discogs] Release fetch error (label URL): {e}")
-
-            # Fallback: search for the label by name to get its ID
-            if label and not label_url:
-                try:
-                    lb_resp = _discogs_session.get(
-                        url, headers=headers,
-                        params={'q': label, 'type': 'label', 'per_page': 1},
-                        timeout=10,
-                    )
-                    lb_resp.raise_for_status()
-                    lb_results = lb_resp.json().get('results', [])
-                    if lb_results:
-                        label_id = lb_results[0].get('id')
-                        if label_id:
-                            label_url = f"https://www.discogs.com/label/{label_id}"
-                except Exception as e:
-                    print(f"    [Discogs] Label search error: {e}")
+            if label:
+                label_url = self._resolve_label_url(label, result, headers, url)
 
             return {
                 'url': discogs_url,
@@ -940,3 +913,47 @@ class MetadataEnricher:
         except Exception as e:
             print(f"    [Discogs] Search error: {e}")
             return None
+
+    def _resolve_label_url(
+        self, label: str, search_result: dict, headers: dict, search_url: str,
+    ) -> str | None:
+        """Resolve a Discogs label URL, using a cache to avoid repeat lookups."""
+        if label in self._label_url_cache:
+            return self._label_url_cache[label]
+
+        label_url = None
+
+        # Strategy 1: fetch the full release via resource_url
+        resource_url = search_result.get('resource_url', '')
+        if resource_url:
+            try:
+                rel_resp = _discogs_session.get(resource_url, headers=headers, timeout=10)
+                rel_resp.raise_for_status()
+                rel_data = rel_resp.json()
+                rel_labels = rel_data.get('labels', [])
+                if rel_labels:
+                    label_id = rel_labels[0].get('id')
+                    if label_id:
+                        label_url = f"https://www.discogs.com/label/{label_id}"
+            except Exception as e:
+                print(f"    [Discogs] Release fetch error (label URL): {e}")
+
+        # Strategy 2 (fallback): search by label name
+        if not label_url:
+            try:
+                lb_resp = _discogs_session.get(
+                    search_url, headers=headers,
+                    params={'q': label, 'type': 'label', 'per_page': 1},
+                    timeout=10,
+                )
+                lb_resp.raise_for_status()
+                lb_results = lb_resp.json().get('results', [])
+                if lb_results:
+                    label_id = lb_results[0].get('id')
+                    if label_id:
+                        label_url = f"https://www.discogs.com/label/{label_id}"
+            except Exception as e:
+                print(f"    [Discogs] Label search error: {e}")
+
+        self._label_url_cache[label] = label_url
+        return label_url

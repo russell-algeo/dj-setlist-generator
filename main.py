@@ -13,6 +13,7 @@ from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
 from set_explorer_formatter import save_set_explorer_html
 from checkpoint_manager import ArtistManager, CheckpointManager, sanitize_filename
+from detail_explorer_common import ARTIST_PROFILE_FIELDS
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
@@ -152,23 +153,8 @@ class SetlistGenerator:
                         artist_name,
                         expected_genres=expected_genres,
                     )
-                    mix_info['artist_profile_name'] = artist_profile.get('artist_profile_name')
-                    mix_info['artist_profile_image'] = artist_profile.get('artist_profile_image')
-                    mix_info['artist_profile_url'] = artist_profile.get('artist_profile_url')
-                    mix_info['artist_profile_source'] = artist_profile.get('artist_profile_source')
-                    mix_info['artist_profile_confidence'] = artist_profile.get('artist_profile_confidence')
-                    mix_info['artist_profile_genre_overlap'] = artist_profile.get('artist_profile_genre_overlap')
-                    mix_info['artist_profile_expected_genres'] = artist_profile.get('artist_profile_expected_genres')
-                    mix_info['artist_profile_provider_genres'] = artist_profile.get('artist_profile_provider_genres')
-                    mix_info['artist_profile_rejected_reason'] = artist_profile.get('artist_profile_rejected_reason')
-                    mix_info['spotify_artist_profile_name'] = artist_profile.get('spotify_artist_profile_name')
-                    mix_info['spotify_artist_profile_image'] = artist_profile.get('spotify_artist_profile_image')
-                    mix_info['spotify_artist_profile_url'] = artist_profile.get('spotify_artist_profile_url')
-                    mix_info['spotify_artist_profile_genres'] = artist_profile.get('spotify_artist_profile_genres')
-                    mix_info['discogs_artist_profile_name'] = artist_profile.get('discogs_artist_profile_name')
-                    mix_info['discogs_artist_profile_image'] = artist_profile.get('discogs_artist_profile_image')
-                    mix_info['discogs_artist_profile_url'] = artist_profile.get('discogs_artist_profile_url')
-                    mix_info['discogs_artist_profile_genres'] = artist_profile.get('discogs_artist_profile_genres')
+                    for field in ARTIST_PROFILE_FIELDS:
+                        mix_info[field] = artist_profile.get(field)
                 except Exception as e:
                     print(f"  [Artist Profile] Set-level profile enrichment skipped: {e}")
 

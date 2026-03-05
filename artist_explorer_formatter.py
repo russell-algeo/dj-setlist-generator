@@ -17,6 +17,7 @@ from detail_explorer_common import (
     is_valid_artist_image_url as _is_valid_artist_image_url,
     normalize_name as _normalize_name,
     normalize_track_key,
+    select_artist_hero_image,
     spotify_search_url,
     spotify_track_id,
     to_json,
@@ -2055,42 +2056,7 @@ def save_artist_explorer_html(
             }
         )
 
-    # Match index artist-card image selection criteria:
-    # 1) Prefer validated set-level artist profile image (ranked by source)
-    # 2) Fall back to exact-name Spotify track artist profile image
-    # 3) Fall back to first set thumbnail image
-    hero_image = ""
-    source_rank = {"spotify": 2, "discogs": 1}
-    set_profile_candidates = []
-    for s in set_summaries:
-        image = s.get("artist_profile_image")
-        if not _is_valid_artist_image_url(image):
-            continue
-        source = (s.get("artist_profile_source") or "").strip().lower()
-        set_profile_candidates.append((source_rank.get(source, 0), image))
-    if set_profile_candidates:
-        set_profile_candidates.sort(key=lambda item: item[0], reverse=True)
-        hero_image = set_profile_candidates[0][1]
-
-    normalized_artist = _normalize_name(artist_name)
-    if not hero_image and normalized_artist:
-        for info in track_info.values():
-            profile_name = info.get("spotify_artist_name")
-            image = info.get("spotify_artist_profile_image") or info.get("spotify_artist_image")
-            if (
-                _is_valid_artist_image_url(image)
-                and profile_name
-                and _normalize_name(profile_name) == normalized_artist
-            ):
-                hero_image = image
-                break
-
-    if not hero_image:
-        for s in set_summaries:
-            thumb = s.get("thumbnail_url") or ""
-            if thumb:
-                hero_image = thumb
-                break
+    hero_image, _, _, _ = select_artist_hero_image(set_summaries, track_info, artist_name)
 
     hero_image_html = (
         f'<img src="{esc(hero_image)}" alt="{esc(artist_name)} artist image" loading="eager" />'
