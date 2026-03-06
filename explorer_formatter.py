@@ -7,7 +7,14 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 
-from detail_explorer_common import CONFIDENCE_LEVELS, EXCLUDED_GENRES
+from detail_explorer_common import (
+    CONFIDENCE_LEVELS,
+    EXCLUDED_GENRES,
+    blank_confidence_counts as _blank_confidence_counts,
+    merge_confidence_counts as _merge_confidence_counts,
+    normalize_confidence as _normalize_confidence,
+    primary_confidence as _primary_confidence,
+)
 
 
 def _uniq_ordered(values: list[str]) -> list[str]:
@@ -49,33 +56,6 @@ def _build_track_set_refs(track: dict) -> list[dict]:
             }
         )
     return refs
-
-
-def _normalize_confidence(value: str | None) -> str:
-    conf = str(value or "UNCERTAIN").upper()
-    return conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
-
-
-def _blank_confidence_counts() -> dict[str, int]:
-    return {level: 0 for level in CONFIDENCE_LEVELS}
-
-
-def _merge_confidence_counts(base: dict[str, int], extra: dict[str, int]) -> dict[str, int]:
-    merged = {level: int(base.get(level, 0)) for level in CONFIDENCE_LEVELS}
-    for level in CONFIDENCE_LEVELS:
-        merged[level] += int(extra.get(level, 0))
-    return merged
-
-
-def _primary_confidence(conf_counts: dict[str, int]) -> str:
-    best = "UNCERTAIN"
-    best_count = -1
-    for level in CONFIDENCE_LEVELS:
-        count = int(conf_counts.get(level, 0))
-        if count > best_count:
-            best = level
-            best_count = count
-    return best
 
 
 def _build_client_data(master_data: dict) -> dict:

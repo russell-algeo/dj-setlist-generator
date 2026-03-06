@@ -15,8 +15,10 @@ from detail_explorer_common import (
     discogs_search_url,
     esc,
     is_valid_artist_image_url as _is_valid_artist_image_url,
+    normalize_confidence as _normalize_confidence,
     normalize_name as _normalize_name,
     normalize_track_key,
+    primary_confidence as _primary_confidence,
     select_artist_hero_image,
     spotify_search_url,
     spotify_track_id,
@@ -32,22 +34,6 @@ def _fmt_duration(seconds: int) -> str:
     if h:
         return f"{h}h {m}m"
     return f"{m}m"
-
-
-def _normalize_confidence(value: str | None) -> str:
-    conf = str(value or "UNCERTAIN").upper()
-    return conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
-
-
-def _primary_confidence(conf_counts: dict[str, int]) -> str:
-    best = "UNCERTAIN"
-    best_count = -1
-    for level in CONFIDENCE_LEVELS:
-        count = int(conf_counts.get(level, 0))
-        if count > best_count:
-            best = level
-            best_count = count
-    return best
 
 
 def _artist_css() -> str:

@@ -62,6 +62,37 @@ ARTIST_PROFILE_FIELDS = (
 # ---------------------------------------------------------------------------
 
 
+def normalize_confidence(value: str | None) -> str:
+    """Normalize a raw confidence string to one of CONFIDENCE_LEVELS."""
+    conf = str(value or "UNCERTAIN").upper()
+    return conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
+
+
+def blank_confidence_counts() -> dict[str, int]:
+    """Return a zeroed confidence-count dict keyed by CONFIDENCE_LEVELS."""
+    return {level: 0 for level in CONFIDENCE_LEVELS}
+
+
+def merge_confidence_counts(base: dict[str, int], extra: dict[str, int]) -> dict[str, int]:
+    """Add extra confidence counts into base and return a new dict."""
+    merged = {level: int(base.get(level, 0)) for level in CONFIDENCE_LEVELS}
+    for level in CONFIDENCE_LEVELS:
+        merged[level] += int(extra.get(level, 0))
+    return merged
+
+
+def primary_confidence(conf_counts: dict[str, int]) -> str:
+    """Return the highest-count confidence level from a counts dict."""
+    best = "UNCERTAIN"
+    best_count = -1
+    for level in CONFIDENCE_LEVELS:
+        count = int(conf_counts.get(level, 0))
+        if count > best_count:
+            best = level
+            best_count = count
+    return best
+
+
 def normalize_name(value: str) -> str:
     """Lowercase alphanumeric normalization for loose artist-name matching."""
     if not value:
