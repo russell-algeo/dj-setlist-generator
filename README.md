@@ -182,6 +182,12 @@ CLEANUP_TEMP_FILES=true       # Delete downloaded audio after completion
 CLEANUP_CHECKPOINTS=true      # Delete checkpoint files after completion
 ```
 
+### False-Positive Suppression
+- Known bad tracks live in `false_positive_rules.json` at the project root.
+- `setlist_builder.py` loads that file and removes any matching clustered track before overlap resolution.
+- Matching prefers `shazam_track_id`; if no ID rule matches, it falls back to normalized `artist` + `title`.
+- Checkpoints remain raw: Shazam hits still get saved there, and suppression only affects setlist building and downstream outputs.
+
 ## Output
 
 The tool generates three files per set in the `output/` directory:
@@ -223,7 +229,7 @@ Confidence is calculated from detection count and cluster density:
 1. **Download** audio and convert to MP3
 2. **Stream: Segment + Recognize** — FFmpeg extracts segments on-the-fly (no full-file RAM load); each batch is recognized via Shazam in parallel, then segment files are immediately deleted. Only `BATCH_SIZE` (~20) segment files exist on disk at any time
 3. **Save checkpoints** after each batch
-4. **Build setlist** — cluster and deduplicate detections, resolve overlaps, fill gaps with Unknown Track entries
+4. **Build setlist** — cluster and deduplicate detections, suppress known false positives, resolve overlaps, fill gaps with Unknown Track entries
 5. **Enrich and output** — add Spotify/YouTube/Discogs links, save JSON, Markdown, and HTML files
 
 ## Artist Discovery Mode

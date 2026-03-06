@@ -21,13 +21,30 @@ from detail_explorer_common import (
     select_artist_hero_image,
 )
 from explorer_formatter import save_master_explorer_html
+from false_positive_policy import FalsePositivePolicy
 
 _EXCLUDED_GENRES_TITLED = {g.title() for g in EXCLUDED_GENRES}
+_FALSE_POSITIVE_POLICY = FalsePositivePolicy.load_from_path(
+    Path("false_positive_rules.json")
+)
 
 
 def _normalize_key(artist: str, title: str) -> str:
     """Normalized lowercase track key for cross-artist matching."""
     return f"{artist.strip().lower()} - {title.strip().lower()}"
+
+
+def _is_false_positive_track(track: dict) -> bool:
+    """Return True if an output track matches the false-positive policy."""
+    if track.get("artist") == "Unknown" or track.get("title") == "Unknown Track":
+        return False
+    return bool(
+        _FALSE_POSITIVE_POLICY.match(
+            track.get("artist", ""),
+            track.get("title", ""),
+            track.get("shazam_track_id"),
+        )
+    )
 
 
 def _enrich_sets(track: dict) -> list[dict]:
@@ -142,14 +159,20 @@ class MasterSummarizer:
                 continue
 
             mix_info = set_data.get("mix_info", {})
-            metadata = set_data.get("metadata", {})
-            raw_tracks = set_data.get("tracks", [])
+            raw_tracks = [
+                track for track in set_data.get("tracks", [])
+                if not _is_false_positive_track(track)
+            ]
             set_title = mix_info.get("title", set_dir.name)
             set_url = mix_info.get("url", "")
             duration = mix_info.get("duration", 0)
-            total_tracks = metadata.get("total_tracks", len(raw_tracks))
+            total_tracks = len(raw_tracks)
             recognized = sum(1 for t in raw_tracks if t.get("title") != "Unknown Track")
             recognition_rate = (recognized / total_tracks * 100) if total_tracks else 0
+            confidence_counts = _blank_confidence_counts()
+            for track in raw_tracks:
+                level = _normalize_confidence(track.get("confidence"))
+                confidence_counts[level] += 1
 
             # HTML path relative to artist dir (for artist page links)
             html_files = list(set_dir.glob("*.html"))
@@ -208,19 +231,14 @@ class MasterSummarizer:
                 "discogs_artist_profile_image": mix_info.get("discogs_artist_profile_image"),
                 "discogs_artist_profile_url": mix_info.get("discogs_artist_profile_url"),
                 "total_tracks": total_tracks,
-                "high_confidence": metadata.get("high_confidence_tracks", 0),
+                "high_confidence": confidence_counts["HIGH"],
                 "set_html_rel": set_html_rel,
                 "set_html_master_rel": set_html_master_rel,
                 "tracks": set_tracks_list,
                 "index": len(all_sets),
                 "duration": duration,
                 "recognition_rate": recognition_rate,
-                "confidence_counts": {
-                    "HIGH": metadata.get("high_confidence_tracks", 0),
-                    "MEDIUM": metadata.get("medium_confidence_tracks", 0),
-                    "LOW": metadata.get("low_confidence_tracks", 0),
-                    "UNCERTAIN": metadata.get("uncertain_tracks", 0),
-                },
+                "confidence_counts": confidence_counts,
                 "mini_timeline": mini_timeline,
                 "thumbnail_url": thumbnail_url,
                 "track_search_text": " ".join(

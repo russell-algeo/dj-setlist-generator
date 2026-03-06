@@ -1,16 +1,34 @@
 """Aggregate artist summary across all processed DJ sets."""
 
 import json
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 from detail_explorer_common import (
     EXCLUDED_GENRES,
     SUMMARY_FILES as _SUMMARY_FILES,
     extract_youtube_id as _extract_youtube_id,
 )
+from false_positive_policy import FalsePositivePolicy
 from output_formatter import OutputFormatter
 from artist_explorer_formatter import save_artist_explorer_html
+
+_FALSE_POSITIVE_POLICY = FalsePositivePolicy.load_from_path(
+    Path("false_positive_rules.json")
+)
+
+
+def _is_false_positive_track(track: dict) -> bool:
+    """Return True if an output track matches the false-positive policy."""
+    if track.get("artist") == "Unknown" or track.get("title") == "Unknown Track":
+        return False
+    return bool(
+        _FALSE_POSITIVE_POLICY.match(
+            track.get("artist", ""),
+            track.get("title", ""),
+            track.get("shazam_track_id"),
+        )
+    )
 
 
 def _process_set_json(
@@ -26,9 +44,11 @@ def _process_set_json(
     Returns (set_summary, track_entries) where track_entries is the list of
     individual track dicts ready for aggregation into all_tracks.
     """
-    tracks = data.get("tracks", [])
+    tracks = [
+        track for track in data.get("tracks", [])
+        if not _is_false_positive_track(track)
+    ]
     mix_info = data.get("mix_info", {})
-    metadata = data.get("metadata", {})
 
     html_files = list(set_output_dir.glob("*.html"))
     set_html_rel = None
@@ -51,14 +71,15 @@ def _process_set_json(
             })
 
     duration = mix_info.get("duration", 0)
-    total_tracks_count = metadata.get("total_tracks", len(tracks))
+    total_tracks_count = len(tracks)
     recognized = sum(1 for t in tracks if t.get("title") != "Unknown Track")
     recognition_rate = (recognized / total_tracks_count * 100) if total_tracks_count else 0
+    confidence_counter = Counter(str(t.get("confidence", "UNCERTAIN")).upper() for t in tracks)
     confidence_counts = {
-        "HIGH": metadata.get("high_confidence_tracks", 0),
-        "MEDIUM": metadata.get("medium_confidence_tracks", 0),
-        "LOW": metadata.get("low_confidence_tracks", 0),
-        "UNCERTAIN": metadata.get("uncertain_tracks", 0),
+        "HIGH": confidence_counter.get("HIGH", 0),
+        "MEDIUM": confidence_counter.get("MEDIUM", 0),
+        "LOW": confidence_counter.get("LOW", 0),
+        "UNCERTAIN": confidence_counter.get("UNCERTAIN", 0),
     }
     mini_timeline = []
     for t in tracks:
@@ -86,7 +107,7 @@ def _process_set_json(
         "title": mix_info.get("title", title_fallback),
         "url": set_url,
         "total_tracks": total_tracks_count,
-        "high_confidence": metadata.get("high_confidence_tracks", 0),
+        "high_confidence": confidence_counts["HIGH"],
         "set_html_rel": set_html_rel,
         "tracks": set_tracks,
         "index": set_index,
@@ -126,7 +147,7 @@ def _process_set_json(
                 "set_html_rel": set_html_rel,
                 "confidence": track.get("confidence", "UNCERTAIN"),
                 "genres": ((track.get("discogs_styles") or []) + (track.get("spotify_genres") or [])) or (track.get("discogs_genres") or []),
-                "track_position": pos,
+                "track_position": track.get("position", pos),
                 "discogs_label": track.get("discogs_label"),
                 "discogs_label_url": track.get("discogs_label_url"),
             })

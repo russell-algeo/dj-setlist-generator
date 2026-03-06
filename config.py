@@ -17,7 +17,6 @@ class Config:
     DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
     DISCOGS_CONSUMER_KEY = os.getenv('DISCOGS_CONSUMER_KEY', '')
     DISCOGS_CONSUMER_SECRET = os.getenv('DISCOGS_CONSUMER_SECRET', '')
-
     # DJ Set Discovery Settings
     DISCOVERY_RESULTS_PER_QUERY = int(os.getenv('DISCOVERY_RESULTS_PER_QUERY', '20'))
     MIN_SET_DURATION_MINUTES = int(os.getenv('MIN_SET_DURATION_MINUTES', '20'))

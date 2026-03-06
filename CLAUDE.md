@@ -77,9 +77,12 @@ Uses yt-dlp to search YouTube (`ytsearch`) and SoundCloud (`scsearch`) directly 
 ### Core Algorithm (setlist_builder.py)
 The setlist building uses a clustering approach:
 - Groups all detections of the same track (by `artist|title|shazam_id`)
-- Resolves temporal overlaps using scoring: `detection_count * 2.0 + density * 20.0` (span excluded to prevent scattered detections from winning)
+- Suppresses clustered matches found in `false_positive_rules.json` before overlap resolution
+- Resolves temporal overlaps using scoring: `detection_count * 10.0 + density * 20.0` (span excluded to prevent scattered detections from winning)
 - Filters noise based on detection count and density thresholds
 - Adds "Unknown Track" entries for unrecognized gaps (configurable via `MIN_UNKNOWN_GAP_SIZE`)
+
+Known false positives are only filtered during setlist building. Checkpoints remain raw and still store the original Shazam recognitions for resume/debug workflows.
 
 ### Checkpoint System (checkpoint_manager.py)
 Saves progress during long recognition runs. Checkpoints stored in `checkpoints/<mix_name>/`. Valid stages: `downloaded` → `recognizing` (updated after each batch) → `recognized` → `completed`.

@@ -1,0 +1,272 @@
+[
+  {
+    "id": "andy-compton-that-acid-track",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Andy Compton",
+    "title": "That Acid Track"
+  },
+  {
+    "id": "solee-shanti",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Solee",
+    "title": "Shanti"
+  },
+  {
+    "id": "elio-riso-lucio-spain-breaking-minds",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Elio Riso & Lucio Spain",
+    "title": "Breaking Minds"
+  },
+  {
+    "id": "tanya-louise-deep-in-you-robs-vibey-dub",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Tanya Louise",
+    "title": "Deep in You (Rob's Vibey Dub)"
+  },
+  {
+    "id": "fade-all-i-got-chris-fortier-20yr-dub",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Fade",
+    "title": "All I Got (Chris Fortier 20yr Dub)"
+  },
+  {
+    "id": "gigi-dagostino-bla-bla-bla",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Gigi D'Agostino",
+    "title": "Bla Bla Bla"
+  },
+  {
+    "id": "paperclip-people-throw-slams-rtm-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Paperclip People",
+    "title": "Throw (Slam's RTM Remix)"
+  },
+  {
+    "id": "luca-lozano-mr-ho-different-circles-nicson-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Luca Lozano & Mr. Ho",
+    "title": "Different Circles (Nicson Remix)"
+  },
+  {
+    "id": "solymar-megamen-all-i-need",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "SolyMar & Megamen",
+    "title": "All I Need"
+  },
+  {
+    "id": "todd-terry-jumpin-original",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Todd Terry",
+    "title": "Jumpin Original"
+  },
+  {
+    "id": "blaze-bicep-lovelee-dae-bicep-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Blaze & Bicep",
+    "title": "Lovelee Dae (Bicep Remix)"
+  },
+  {
+    "id": "distant-sun-machine-lernt",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Distant Sun",
+    "title": "Machine lernt"
+  },
+  {
+    "id": "stephan-crown-eizer-g-bouncing",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Stephan Crown & EiZer G",
+    "title": "Bouncing"
+  },
+  {
+    "id": "conejowhite-espacio-tiempo",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Conejowhite_",
+    "title": "Espacio Tiempo"
+  },
+  {
+    "id": "mark-knight-prok-fitch-into-my-life",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Mark Knight & Prok & Fitch",
+    "title": "Into My Life"
+  },
+  {
+    "id": "raw-unbe-erick-more-mix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "R.A.W.",
+    "title": "Unbe (Erick 'More' Mix)"
+  },
+  {
+    "id": "x-press-2-say-what-london-underground-mix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "X-Press 2",
+    "title": "Say What! (London Underground Mix)"
+  },
+  {
+    "id": "anti-slam-weapon-bang-live",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Anti-Slam & W.E.A.P.O.N.",
+    "title": "Bang (Live)"
+  },
+  {
+    "id": "robin-s-show-me-love-extended-mix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Robin S.",
+    "title": "Show Me Love (Extended Mix)"
+  },
+  {
+    "id": "robin-s-show-me-love",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Robin S.",
+    "title": "Show Me Love"
+  },
+  {
+    "id": "robin-s-love-for-love",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Robin S.",
+    "title": "Love for Love"
+  },
+  {
+    "id": "argento-red-light",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Argento",
+    "title": "Red Light"
+  },
+  {
+    "id": "bellini-samba-de-janeiro-vanity-frontroom-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Bellini",
+    "title": "Samba de Janeiro (Vanity Frontroom Remix)"
+  },
+  {
+    "id": "eddie-amador-house-music-message-mix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Eddie Amador",
+    "title": "House Music (Message Mix)"
+  },
+  {
+    "id": "gillette-short-short-man",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Gillette",
+    "title": "Short Short Man"
+  },
+  {
+    "id": "marc-marzenit-perron-wehbba-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Marc Marzenit",
+    "title": "Perron (Wehbba Remix)"
+  },
+  {
+    "id": "marcos-barrios-len-mora-joaquin-postigo-tribaile",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Marcos Barrios, Len Mora & Joaquin Postigo",
+    "title": "Tribaile (Len Mora & Joaquin Postigo)"
+  },
+  {
+    "id": "nick-curly-underground-dennis-ferrer-remix-mixed",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Nick Curly",
+    "title": "Underground (Dennis Ferrer Remix) [Mixed]"
+  },
+  {
+    "id": "robbie-rivera-its-midnight",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Robbie Rivera",
+    "title": "It's Midnight"
+  },
+  {
+    "id": "andrea-frisina-irregular-synth-dub-city",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Andrea Frisina & Irregular Synth",
+    "title": "Dub City"
+  },
+  {
+    "id": "christian-smith-traction-paride-saraceni-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Christian Smith",
+    "title": "Traction (Paride Saraceni Remix)"
+  },
+  {
+    "id": "hotn-juicy-mousse-t-horny-98-radio-edit",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Hot'n'Juicy & Mousse T.",
+    "title": "Horny ('98 Radio Edit)"
+  },
+  {
+    "id": "mousse-t-horny-98-extended-mix-feat-hotn-juicy",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Mousse T.",
+    "title": "Horny (98 Extended Mix) [feat. Hot'n'Juicy]"
+  },
+  {
+    "id": "mr-belt-wezol-nicola-fasano-steve-forest-new-millenium-topazz-extended-mix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Mr. Belt & Wezol, Nicola Fasano & Steve Forest",
+    "title": "New Millenium (feat. Topazz) [Extended Mix]"
+  },
+  {
+    "id": "bambook-give-it-up-audiofly-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Bambook",
+    "title": "Give It Up (Audiofly Remix)"
+  },
+  {
+    "id": "epic-hunters-boy-boy",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Epic Hunters",
+    "title": "Boy Boy"
+  },
+  {
+    "id": "gigi-dagostino-elisir",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Gigi D'Agostino",
+    "title": "Elisir"
+  },
+  {
+    "id": "marc-molina-more-than-physical-manuel-palmitesta-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Marc Molina",
+    "title": "More Than Physical (Manuel Palmitesta Remix)"
+  },
+  {
+    "id": "mood-ii-swing-closer-carole-sylvan-deepshakerz-extended-rework",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Mood II Swing",
+    "title": "Closer (feat. Carole Sylvan) [The Deepshakerz Extended Rework]"
+  },
+  {
+    "id": "rank-1-airwave-radio-vocal-edit",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Rank 1",
+    "title": "Airwave (Radio Vocal Edit)"
+  },
+  {
+    "id": "richard-ulh-bumping",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Richard Ulh",
+    "title": "Bumping"
+  },
+  {
+    "id": "seumas-norv-sweet-can-move",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Seumas Norv",
+    "title": "Sweet Can Move"
+  },
+  {
+    "id": "shit-robot-feels-real-luke-jenner-larse-remix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Shit Robot",
+    "title": "Feels Real (feat. Luke Jenner) [Larse Remix]"
+  },
+  {
+    "id": "sneaky-tim-planet-wall",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "Sneaky Tim",
+    "title": "Planet Wall"
+  },
+  {
+    "id": "the-blackout-allstars-sheila-e-tito-puente-dave-valentin-grover-washington-paquito-drivera-ray-barretto-tito-nieves-i-like-it-like-that-radio-mix",
+    "reason": "Known recurring false positive in setlist outputs",
+    "artist": "The Blackout Allstars, Sheila E., Tito Puente, Dave Valentin, Grover Washington, Paquito D'Rivera, Ray Barretto & Tito Nieves",
+    "title": "I Like It (Like That) [Radio Mix]"
+  }
+]

@@ -26,6 +26,8 @@ class Recognition:
     recognized: bool
     segment_index: int
     was_rate_limited: bool = False  # True if request failed due to 429 after exhausting retries
+    error_type: Optional[str] = None
+    error_details: Optional[str] = None
 
     @classmethod
     def from_checkpoint(cls, data: dict) -> 'Recognition':
@@ -159,8 +161,20 @@ class TrackRecognizer:
                 raw_data=None,
                 recognized=False,
                 segment_index=segment['index'],
-                was_rate_limited=was_rate_limited
+                was_rate_limited=was_rate_limited,
+                error_type=error_name,
+                error_details=error_details,
             )
+
+    async def recognize_segment_with_backoff(self, segment: dict) -> Recognition:
+        """Recognize a segment and keep retrying through quota cooldowns."""
+        while True:
+            await self._wait_for_cooldown()
+            await asyncio.sleep(random.uniform(0, Config.BASE_DELAY))
+            result = await self.recognize_segment(segment)
+            if not result.was_rate_limited:
+                return result
+            await self._trigger_quota_cooldown()
 
     async def recognize_segments_streaming(
         self,
@@ -241,13 +255,7 @@ class TrackRecognizer:
 
         async def _recognize_with_semaphore(segment: dict) -> Recognition:
             async with semaphore:
-                while True:
-                    await self._wait_for_cooldown()
-                    await asyncio.sleep(random.uniform(0, Config.BASE_DELAY))
-                    result = await self.recognize_segment(segment)
-                    if not result.was_rate_limited:
-                        return result
-                    await self._trigger_quota_cooldown()
+                return await self.recognize_segment_with_backoff(segment)
 
         # --- Batch loop (producer-consumer pipeline) --------------------------
         # The producer extracts FFmpeg segments for batch N+1 while the
@@ -338,6 +346,8 @@ class TrackRecognizer:
                             raw_data=None,
                             recognized=False,
                             segment_index=seg['index'],
+                            error_type=type(result).__name__,
+                            error_details=str(result),
                         )
 
                     if result.recognized:
@@ -376,4 +386,3 @@ class TrackRecognizer:
             self.checkpoint_manager.save_recognition_checkpoint(recognitions, stage='recognized')
 
         return recognitions
-
