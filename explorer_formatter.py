@@ -2404,6 +2404,28 @@ def _render_html(data: dict) -> str:
         .replace(/'/g, '&#39;');
     }
 
+    const EXTERNAL_HREF_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+    const FRAGMENT_ID_RE = /^[A-Za-z][\w:-]*$/;
+
+    function encodeLocalHref(value) {
+      const raw = String(value == null ? '' : value).trim();
+      if (!raw) return '';
+      if (EXTERNAL_HREF_RE.test(raw) || raw.startsWith('//')) return raw;
+
+      let base = raw;
+      let fragment = '';
+      const hashIdx = raw.lastIndexOf('#');
+      if (hashIdx >= 0) {
+        const tail = raw.slice(hashIdx + 1);
+        if (FRAGMENT_ID_RE.test(tail)) {
+          base = raw.slice(0, hashIdx);
+          fragment = `#${tail}`;
+        }
+      }
+
+      return encodeURI(base).replace(/#/g, '%23') + fragment;
+    }
+
     function extractSpotifyId(url) {
       if (!url) return '';
       const m = String(url).match(/track\/([A-Za-z0-9]+)/);
@@ -2873,8 +2895,7 @@ def _render_html(data: dict) -> str:
       `).join('');
 
       const renderHeroSetCard = (s, idx) => {
-        const setHrefRaw = (s.set_html_master_rel || '').trim();
-        const setHref = setHrefRaw ? encodeURI(setHrefRaw).replace(/#/g, '%23') : '';
+        const setHref = encodeLocalHref(s.set_html_master_rel || '');
         const cardInner = `
           <img src="${s.thumbnail_url || fallbackMedia(`hero:${s.artist_name || ''}:${s.title || ''}:${idx}`)}" alt="${escapeHtml(s.title || 'Set')}" loading="lazy" />
           <div class="hero-card-meta">
@@ -2977,7 +2998,7 @@ def _render_html(data: dict) -> str:
               <div class="artist-meta-row">
                 <div class="card-actions">
                   <button class="chip-btn ${selectedVisual ? 'active' : ''}" data-action="toggle-compare-artist" data-artist="${escapeHtml(artist.name)}">${compareLabel}</button>
-                  <a class="chip-btn" href="${artist.html_rel || '#'}" target="_blank" rel="noopener noreferrer">Artist Page</a>
+                  <a class="chip-btn" href="${encodeLocalHref(artist.html_rel || '') || '#'}" target="_blank" rel="noopener noreferrer">Artist Page</a>
                 </div>
               </div>
               <h3>${escapeHtml(artist.name)}</h3>
@@ -3302,7 +3323,7 @@ def _render_html(data: dict) -> str:
       return (track.selected_refs || []).map((ref) => {
         const artistHref = artistTrackQueryHref(ref.dir_name || '', track);
         const setLinks = (ref.set_refs || []).slice(0, 8).map((s) => {
-          const href = s.href || '';
+          const href = encodeLocalHref(s.href || '');
           if (href) {
             return `<li><a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || 'Set')}</a></li>`;
           }
@@ -3950,10 +3971,10 @@ def _render_html(data: dict) -> str:
           const setKey = `${start + idx}:${s.artist_name || ''}:${s.title || ''}`;
           const expanded = STATE.expandedSets.has(setKey);
           const thumb = s.thumbnail_url || fallbackMedia(`set:${s.artist_name || ''}:${s.title || ''}`);
-          const setHref = s.set_html_master_rel || '';
-          const artistHref = s.artist_html_rel || '';
+          const setHref = encodeLocalHref(s.set_html_master_rel || '');
+          const artistHref = encodeLocalHref(s.artist_html_rel || '');
           const trackRows = (s.tracks || []).map((t, tIdx) => {
-            const href = t.track_href || '';
+            const href = encodeLocalHref(t.track_href || '');
             const trackName = `${t.artist || 'Unknown'} - ${t.title || 'Unknown'}`;
             const conf = (t.confidence || 'UNCERTAIN').toUpperCase();
             const cc = CONF_COLOR[conf] || '#757575';
@@ -3986,7 +4007,7 @@ def _render_html(data: dict) -> str:
                   <span class="set-pill">${formatDuration(s.duration)}</span>
                 </div>
                 <div class="actions">
-                  ${s.set_html_master_rel ? `<a href="${s.set_html_master_rel}" target="_blank" rel="noopener noreferrer">Open Set Page</a>` : ''}
+                  ${setHref ? `<a href="${setHref}" target="_blank" rel="noopener noreferrer">Open Set Page</a>` : ''}
                   ${s.url ? `<a href="${s.url}" target="_blank" rel="noopener noreferrer">Source</a>` : ''}
                   <button data-action="toggle-set" data-key="${escapeHtml(setKey)}">${expanded ? 'Hide Tracklist' : 'Show Tracklist'}</button>
                 </div>

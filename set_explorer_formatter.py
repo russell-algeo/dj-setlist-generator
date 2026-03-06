@@ -448,12 +448,18 @@ def _set_css() -> str:
 }
 
 .source-player-frame.is-youtube {
+  margin: 6px auto 0;
   aspect-ratio: 16 / 9;
   max-height: 58vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .source-player-frame.is-youtube iframe {
+  width: 100%;
   height: 100%;
+  margin: 0 auto;
 }
 
 .source-player-frame.is-youtube-error,

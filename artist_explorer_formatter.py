@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
+from urllib.parse import quote
 
 from detail_explorer_common import (
     CONFIDENCE_COLORS,
@@ -34,6 +35,29 @@ def _fmt_duration(seconds: int) -> str:
     if h:
         return f"{h}h {m}m"
     return f"{m}m"
+
+
+_EXTERNAL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
+_FRAGMENT_ID_RE = re.compile(r"^[A-Za-z][\w:-]*$")
+
+
+def _encode_local_href(href: str | None) -> str:
+    raw = str(href or "").strip()
+    if not raw:
+        return ""
+    if _EXTERNAL_SCHEME_RE.match(raw) or raw.startswith("//"):
+        return raw
+
+    base = raw
+    fragment = ""
+    hash_index = raw.rfind("#")
+    if hash_index >= 0:
+        tail = raw[hash_index + 1 :]
+        if _FRAGMENT_ID_RE.fullmatch(tail):
+            base = raw[:hash_index]
+            fragment = f"#{tail}"
+
+    return quote(base, safe="/%") + fragment
 
 
 def _artist_css() -> str:
@@ -1824,7 +1848,9 @@ def save_artist_explorer_html(
         for app in appearances:
             set_html = app.get("set_html_rel") or ""
             track_position = app.get("track_position")
-            set_anchor = f"{set_html}#track-{track_position}" if set_html and track_position else set_html
+            set_anchor = _encode_local_href(
+                f"{set_html}#track-{track_position}" if set_html and track_position else set_html
+            )
             confidence = _normalize_confidence(app.get("confidence"))
             rec_conf_counts[confidence] = int(rec_conf_counts.get(confidence, 0)) + 1
             app_rows.append(
@@ -1868,9 +1894,10 @@ def save_artist_explorer_html(
     for idx, s in enumerate(set_summaries):
         title = s.get("title") or "Untitled Set"
         set_html_rel = s.get("set_html_rel") or ""
+        set_html_href = _encode_local_href(set_html_rel)
         source_url = s.get("url") or ""
-        set_href = set_html_rel or source_url or "#"
-        source_href = source_url or set_html_rel or "#"
+        set_href = set_html_href or source_url or "#"
+        source_href = source_url or set_html_href or "#"
         total_tracks = int(s.get("total_tracks") or 0)
         recognition_rate = float(s.get("recognition_rate") or 0.0)
         duration = int(s.get("duration") or 0)
@@ -1921,7 +1948,7 @@ def save_artist_explorer_html(
                 if app.get("track_position") == pos:
                     break
 
-            set_anchor = f"{set_html_rel}#track-{pos}" if set_html_rel else ""
+            set_anchor = _encode_local_href(f"{set_html_rel}#track-{pos}") if set_html_rel else ""
             track_href = set_anchor or source_deep_link or spotify_url or ""
             track_rows.append(
                 f"""
@@ -1978,7 +2005,7 @@ def save_artist_explorer_html(
       <span class="set-pill">H:{high} M:{medium} L:{low} U:{uncertain}</span>
     </div>
     <div class="actions">
-      {f'<a href="{esc(set_html_rel)}" target="_blank" rel="noopener">Open Set Page</a>' if set_html_rel else ''}
+      {f'<a href="{esc(set_html_href)}" target="_blank" rel="noopener">Open Set Page</a>' if set_html_href else ''}
       {f'<a href="{esc(source_url)}" target="_blank" rel="noopener">Source</a>' if source_url else ''}
       <button class="js-set-compare">Compare</button>
       <button class="js-tracklist-toggle">Show Tracklist</button>
