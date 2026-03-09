@@ -13,7 +13,14 @@ from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
 from set_explorer_formatter import save_set_explorer_html
 from checkpoint_manager import ArtistManager, CheckpointManager, sanitize_filename
-from detail_explorer_common import ARTIST_PROFILE_FIELDS
+from detail_explorer_common import (
+    ARTIST_PROFILE_FIELDS,
+    STAGE_AUDIO_ONLY,
+    STAGE_COMPLETED,
+    STAGE_DOWNLOADED,
+    STAGE_RECOGNIZED,
+    STAGE_RECOGNIZING,
+)
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
@@ -86,12 +93,12 @@ class SetlistGenerator:
 
         try:
             # Skip if already fully processed (including playlist creation)
-            if checkpoint and checkpoint['stage'] == 'completed':
+            if checkpoint and checkpoint['stage'] == STAGE_COMPLETED:
                 return mix_name, str(checkpoint_manager.output_dir), True
 
             # Check if we have complete recognition data from a previous run
             # but still need to process and create a playlist
-            if checkpoint and checkpoint['stage'] == 'recognized':
+            if checkpoint and checkpoint['stage'] == STAGE_RECOGNIZED:
                 print("\n✅ Found complete recognition data from previous run!")
                 print("   Skipping download, segmentation, and recognition...")
 
@@ -108,8 +115,8 @@ class SetlistGenerator:
                 audio_path = checkpoint_manager.audio_file
                 audio_file = downloader.download(url, output_path=audio_path)
 
-                if not checkpoint or checkpoint['stage'] in ['downloaded', 'audio_only']:
-                    checkpoint_manager.save_checkpoint('downloaded', {
+                if not checkpoint or checkpoint['stage'] in [STAGE_DOWNLOADED, STAGE_AUDIO_ONLY]:
+                    checkpoint_manager.save_checkpoint(STAGE_DOWNLOADED, {
                         'audio_file': str(audio_file),
                         'mix_info': mix_info
                     })
@@ -119,7 +126,7 @@ class SetlistGenerator:
                 # immediately after each batch.  This avoids writing all 250-400
                 # segment files to disk before recognition can begin.
                 print("\n[3/5] Streaming recognition (segment + recognize on-the-fly)...")
-                should_resume = bool(checkpoint and checkpoint['stage'] == 'recognizing')
+                should_resume = bool(checkpoint and checkpoint['stage'] == STAGE_RECOGNIZING)
                 recognitions = await recognizer.recognize_segments_streaming(
                     audio_file,
                     mix_duration=mix_info['duration'],
@@ -181,7 +188,7 @@ class SetlistGenerator:
                 )
 
             # Mark as fully completed (including playlist creation)
-            checkpoint_manager.save_recognition_checkpoint(recognitions, stage='completed')
+            checkpoint_manager.save_recognition_checkpoint(recognitions, stage=STAGE_COMPLETED)
 
             # Cleanup
             print("\nCleaning up...")
@@ -247,38 +254,28 @@ async def process_urls(urls: list[str], resume: bool, artist_name: str = None,
     return results
 
 
-async def process_artist(artist_name: str, resume: bool):
-    """Discover and process all DJ sets for an artist.
+async def _artist_post_processing(
+    artist_name: str,
+    urls: list[str],
+    resume: bool,
+    artist_mgr,
+    summarizer,
+    cleanup_discovery: bool = False,
+):
+    """Shared post-processing for artist discovery and curated artist modes.
+
+    Handles Spotify playlist setup, URL processing, artist/master summary
+    generation, result reporting, and notification.
 
     Args:
         artist_name: Name of the DJ/artist.
+        urls: List of YouTube/SoundCloud URLs to process.
         resume: Whether to resume from checkpoints.
+        artist_mgr: ArtistManager instance for the artist.
+        summarizer: ArtistSummarizer instance for the artist.
+        cleanup_discovery: If True, clean up discovery cache after processing.
     """
-    from dj_set_discovery import DjSetDiscoverer
-    from artist_summary import ArtistSummarizer
-
-    print("█" * 70)
-    print(f"█ DJ SET DISCOVERY MODE")
-    print("█" * 70)
-    print(f"█ Artist: {artist_name}")
-    print("█" * 70 + "\n")
-
-    artist_mgr = ArtistManager(artist_name)
-    discoverer = DjSetDiscoverer(artist_manager=artist_mgr)
-    summarizer = ArtistSummarizer(artist_manager=artist_mgr)
-
-    # Step 1: Discover sets (cached in checkpoints dir, limited by Config.MAX_SETS_PER_ARTIST)
-    print("[Discovery] Searching for DJ sets...\n")
-    sets = discoverer.discover()
-
-    if not sets:
-        print(f"\nNo DJ sets found for '{artist_name}'.")
-        print("Try using a direct URL instead:")
-        print(f'  python main.py "https://www.youtube.com/watch?v=xxxxx"')
-        artist_mgr.cleanup_discovery_cache()
-        return
-
-    # Step 2: Find or create artist-level Spotify playlist
+    # Find or create artist-level Spotify playlist
     artist_playlist_id = None
     if Config.ENABLE_SPOTIFY_PLAYLISTS:
         try:
@@ -288,29 +285,28 @@ async def process_artist(artist_name: str, resume: bool):
         except Exception as e:
             print(f"  (artist playlist setup skipped: {e})")
 
-    # Step 3: Process each discovered set
-    urls = [s.url for s in sets]
+    # Process URLs
     results = await process_urls(urls, resume=resume, artist_name=artist_name,
                                  artist_playlist_id=artist_playlist_id)
 
-    # Step 4: Generate artist summary
+    # Generate artist summary
     print("\n" + "█" * 70)
     print(f"█ GENERATING ARTIST SUMMARY")
     print("█" * 70 + "\n")
 
     summarizer.generate(results)
 
-    # Regenerate master summary (output/index.html) after each artist run
+    # Regenerate master summary (output/index.html)
     try:
         from master_summary import generate_master_summary
         generate_master_summary(Config.OUTPUT_DIR)
     except Exception as e:
         print(f"  (master summary skipped: {e})")
 
-    # Clean up discovery cache
-    artist_mgr.cleanup_discovery_cache()
+    if cleanup_discovery:
+        artist_mgr.cleanup_discovery_cache()
 
-    # Print final batch summary
+    # Print final summary
     print("\n" + "=" * 70)
     print(f"COMPLETE: {artist_name.upper()}")
     print("=" * 70)
@@ -340,6 +336,44 @@ async def process_artist(artist_name: str, resume: bool):
     Notifier.notify_artist_complete(artist_name, success_count, len(results))
 
 
+async def process_artist(artist_name: str, resume: bool):
+    """Discover and process all DJ sets for an artist.
+
+    Args:
+        artist_name: Name of the DJ/artist.
+        resume: Whether to resume from checkpoints.
+    """
+    from dj_set_discovery import DjSetDiscoverer
+    from artist_summary import ArtistSummarizer
+
+    print("█" * 70)
+    print(f"█ DJ SET DISCOVERY MODE")
+    print("█" * 70)
+    print(f"█ Artist: {artist_name}")
+    print("█" * 70 + "\n")
+
+    artist_mgr = ArtistManager(artist_name)
+    discoverer = DjSetDiscoverer(artist_manager=artist_mgr)
+    summarizer = ArtistSummarizer(artist_manager=artist_mgr)
+
+    # Discover sets (cached in checkpoints dir, limited by Config.MAX_SETS_PER_ARTIST)
+    print("[Discovery] Searching for DJ sets...\n")
+    sets = discoverer.discover()
+
+    if not sets:
+        print(f"\nNo DJ sets found for '{artist_name}'.")
+        print("Try using a direct URL instead:")
+        print(f'  python main.py "https://www.youtube.com/watch?v=xxxxx"')
+        artist_mgr.cleanup_discovery_cache()
+        return
+
+    urls = [s.url for s in sets]
+    await _artist_post_processing(
+        artist_name, urls, resume,
+        artist_mgr, summarizer, cleanup_discovery=True,
+    )
+
+
 async def process_curated_artist(artist_name: str, urls: list[str], resume: bool):
     """Process hand-picked URLs filed under an artist.
 
@@ -364,61 +398,10 @@ async def process_curated_artist(artist_name: str, urls: list[str], resume: bool
     artist_mgr = ArtistManager(artist_name)
     summarizer = ArtistSummarizer(artist_manager=artist_mgr)
 
-    # Find or create artist-level Spotify playlist
-    artist_playlist_id = None
-    if Config.ENABLE_SPOTIFY_PLAYLISTS:
-        try:
-            from spotify_playlist_creator import SpotifyPlaylistCreator
-            creator = SpotifyPlaylistCreator()
-            artist_playlist_id = creator.find_or_create_artist_playlist(artist_name)
-        except Exception as e:
-            print(f"  (artist playlist setup skipped: {e})")
-
-    # Process the curated URLs
-    results = await process_urls(urls, resume=resume, artist_name=artist_name,
-                                 artist_playlist_id=artist_playlist_id)
-
-    # Regenerate artist summary (includes all sets — old + new)
-    print("\n" + "█" * 70)
-    print(f"█ GENERATING ARTIST SUMMARY")
-    print("█" * 70 + "\n")
-
-    summarizer.generate(results)
-
-    # Regenerate master summary
-    try:
-        from master_summary import generate_master_summary
-        generate_master_summary(Config.OUTPUT_DIR)
-    except Exception as e:
-        print(f"  (master summary skipped: {e})")
-
-    # Print final summary
-    print("\n" + "=" * 70)
-    print(f"COMPLETE: {artist_name.upper()}")
-    print("=" * 70)
-
-    success_count = sum(1 for r in results if r["status"] == "SUCCESS")
-    fail_count = len(results) - success_count
-
-    for r in results:
-        icon = "✅" if r["status"] == "SUCCESS" else "❌"
-        name = r["mix_name"] or r["url"][:60]
-        print(f"  {icon} {name}")
-        if r["status"] == "SUCCESS" and r.get("output_dir"):
-            html_files = list(Path(r["output_dir"]).glob("*.html"))
-            if html_files:
-                print(f"     file://{html_files[0].resolve()}")
-        if r["status"] != "SUCCESS":
-            print(f"     {r['status']}")
-
-    print(f"\nResults: {success_count} successful, {fail_count} failed out of {len(results)} sets")
-    print(f"Output directory: {artist_mgr.output_dir}")
-    print(f"Artist summary: {artist_mgr.output_dir / 'artist_summary.md'}")
-    artist_html = artist_mgr.output_dir / 'artist_summary.html'
-    if artist_html.exists():
-        print(f"Artist summary HTML: file://{artist_html.resolve()}")
-
-    Notifier.notify_artist_complete(artist_name, success_count, len(results))
+    await _artist_post_processing(
+        artist_name, urls, resume,
+        artist_mgr, summarizer, cleanup_discovery=False,
+    )
 
 
 async def main():

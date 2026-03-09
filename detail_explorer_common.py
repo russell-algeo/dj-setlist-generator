@@ -21,6 +21,19 @@ EXCLUDED_GENRES = {"House"}
 CONFIDENCE_LEVELS = ("HIGH", "MEDIUM", "LOW", "UNCERTAIN")
 """Ordered confidence tiers for track recognition."""
 
+UNKNOWN_ARTIST = "Unknown"
+"""Sentinel artist name for unrecognized gaps."""
+
+UNKNOWN_TITLE = "Unknown Track"
+"""Sentinel title for unrecognized gaps."""
+
+# Checkpoint stage constants
+STAGE_DOWNLOADED = "downloaded"
+STAGE_RECOGNIZING = "recognizing"
+STAGE_RECOGNIZED = "recognized"
+STAGE_COMPLETED = "completed"
+STAGE_AUDIO_ONLY = "audio_only"
+
 CONFIDENCE_CSS_CLASSES = {
     "HIGH": "conf-high",
     "MEDIUM": "conf-medium",
@@ -236,6 +249,73 @@ def youtube_search_url(artist: str, title: str) -> str:
 def discogs_search_url(artist: str, title: str) -> str:
     query = quote(f"{artist} {title}".strip())
     return f"https://www.discogs.com/search/?q={query}&type=all"
+
+
+def youtube_thumbnail_url(video_id: str | None) -> str | None:
+    """Build a YouTube thumbnail URL from a video ID."""
+    if not video_id:
+        return None
+    return f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+
+
+def build_mini_timeline(tracks: list[dict], duration: float | int) -> list[dict]:
+    """Build mini-timeline entries from a track list and total duration."""
+    timeline = []
+    if not duration:
+        return timeline
+    for t in tracks:
+        if t.get("start_time") is not None:
+            start = t["start_time"]
+            end = t.get("end_time") or duration
+            timeline.append({
+                "start_pct": start / duration * 100,
+                "width_pct": max(0.5, (end - start) / duration * 100),
+                "confidence": t.get("confidence", "UNCERTAIN"),
+            })
+    return timeline
+
+
+def pick_spotify_image(images: list[dict], preferred_height: int = 300) -> str | None:
+    """Pick a Spotify image URL, preferring a specific height."""
+    if not images:
+        return None
+    return next(
+        (img.get("url") for img in images if img.get("height") == preferred_height),
+        images[0].get("url") if images else None,
+    )
+
+
+def build_track_search_text(tracks: list[dict]) -> str:
+    """Build a searchable text string from recognized tracks."""
+    return " ".join(
+        f"{t.get('artist', '')} {t.get('title', '')}".lower()
+        for t in tracks if t.get("title") != UNKNOWN_TITLE
+    )
+
+
+def merge_track_metadata(existing: dict, new_track: dict, fields: list[str]) -> None:
+    """Merge first-non-None values from new_track into existing for given fields."""
+    for field in fields:
+        if not existing.get(field) and new_track.get(field):
+            existing[field] = new_track[field]
+
+
+# ReccoBeats key/mode parsing
+_KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+RECCOBEATS_BASE = "https://api.reccobeats.com/v1"
+
+
+def parse_reccobeats_key(feat: dict) -> str | None:
+    """Parse a musical key string from ReccoBeats audio features."""
+    key_idx = feat.get('key')
+    mode = feat.get('mode')
+    if key_idx is None or int(key_idx) < 0:
+        return None
+    key_str = _KEY_NAMES[int(key_idx)]
+    if mode is not None and int(mode) == 0:
+        key_str += 'm'
+    return key_str
 
 
 MASTER_DETAIL_BASE_CSS = """

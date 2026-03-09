@@ -2,11 +2,11 @@
 
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional
 
 from config import Config
-from false_positive_policy import FalsePositivePolicy
+from detail_explorer_common import UNKNOWN_ARTIST, UNKNOWN_TITLE
+from false_positive_policy import get_policy
 
 CONFIDENCE_ICONS = {
     'HIGH': '🟢',
@@ -16,7 +16,6 @@ CONFIDENCE_ICONS = {
 }
 
 TRACK_ID_SEPARATOR = '|'
-FALSE_POSITIVE_RULES_PATH = Path("false_positive_rules.json")
 
 
 def make_track_id(artist: str, title: str, shazam_id: Optional[str]) -> str:
@@ -66,9 +65,7 @@ class SetlistBuilder:
     """Build deduplicated setlist from recognitions."""
 
     def __init__(self):
-        self._false_positive_policy = FalsePositivePolicy.load_from_path(
-            FALSE_POSITIVE_RULES_PATH
-        )
+        self._false_positive_policy = get_policy()
         self._last_suppressed_false_positives: list[SuppressedFalsePositive] = []
 
     def build_setlist(self, recognitions: list) -> list[Track]:
@@ -366,7 +363,7 @@ class SetlistBuilder:
     @staticmethod
     def _is_unknown_track(track: Track) -> bool:
         """Return True when a track is a generated unknown gap entry."""
-        return track.artist == "Unknown" and track.title == "Unknown Track"
+        return track.artist == UNKNOWN_ARTIST and track.title == UNKNOWN_TITLE
     
     def add_unknown_tracks(self, tracks: list[Track], recognitions: list) -> list[Track]:
         """Add Unknown Track entries for gaps outside known cluster spans."""
@@ -446,8 +443,8 @@ class SetlistBuilder:
                 continue
 
             unknown_tracks.append(Track(
-                title="Unknown Track",
-                artist="Unknown",
+                title=UNKNOWN_TITLE,
+                artist=UNKNOWN_ARTIST,
                 start_time=start_time,
                 end_time=end_time,
                 confidence="UNCERTAIN",

@@ -20,16 +20,6 @@ def format_time(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def _soundcloud_timestamp(t: int) -> str:
-    """Format seconds as H:MM:SS or M:SS for a SoundCloud #t= anchor."""
-    hours = t // 3600
-    minutes = (t % 3600) // 60
-    secs = t % 60
-    if hours:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes}:{secs:02d}"
-
-
 def make_source_url(source_url: str, timestamp_seconds: float) -> Optional[str]:
     """Generate a platform deep-link to a specific timestamp.
 
@@ -74,7 +64,7 @@ def make_source_url(source_url: str, timestamp_seconds: float) -> Optional[str]:
 
     if host == 'soundcloud.com':
         base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-        return f"{base_url}#t={_soundcloud_timestamp(t)}"
+        return f"{base_url}#t={format_time(t)}"
 
     return None
 

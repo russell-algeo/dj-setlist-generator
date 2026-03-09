@@ -12,9 +12,6 @@ from config import Config
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
-# ReccoBeats API base URL (free, no API key required)
-_RECCOBEATS_BASE = "https://api.reccobeats.com/v1"
-
 
 def _make_discogs_session() -> requests.Session:
     """Create a requests Session with retry logic for Discogs API calls.
@@ -36,13 +33,13 @@ def _make_discogs_session() -> requests.Session:
 
 _discogs_session = _make_discogs_session()
 
-# Spotify pitch class → note name (used by ReccoBeats key/mode mapping)
-_KEY_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-
-
 from detail_explorer_common import (
+    RECCOBEATS_BASE as _RECCOBEATS_BASE,
     normalize_name as _normalize_name,
     is_valid_artist_image_url as _is_valid_artist_image_url,
+    pick_spotify_image,
+    parse_reccobeats_key,
+    spotify_track_id as _spotify_track_id,
 )
 
 
@@ -482,7 +479,7 @@ class MetadataEnricher:
         for item in enriched_tracks:
             url = item['metadata'].get('spotify_url')
             if url:
-                tid = url.split('/')[-1].split('?')[0]
+                tid = _spotify_track_id(url)
                 track_ids.append(tid)
             else:
                 track_ids.append(None)
@@ -542,12 +539,8 @@ class MetadataEnricher:
                 meta['bpm'] = round(float(tempo), 1)
 
             # Key (integer 0-11 pitch class + mode 0/1)
-            key_idx = feat.get('key')
-            mode = feat.get('mode')
-            if key_idx is not None and int(key_idx) >= 0:
-                key_str = _KEY_NAMES[int(key_idx)]
-                if mode is not None and int(mode) == 0:
-                    key_str += 'm'
+            key_str = parse_reccobeats_key(feat)
+            if key_str:
                 meta['key'] = key_str
 
             # Energy and danceability
@@ -562,12 +555,6 @@ class MetadataEnricher:
             print(f"    [ReccoBeats] Applied audio features to {applied} tracks")
         else:
             print("    [ReccoBeats] No audio features returned")
-
-    @_platform_search("Spotify")
-    def _search_spotify(self, title: str, artist: str) -> Optional[str]:
-        """Search Spotify for track URL (delegates to _search_spotify_rich)."""
-        result = self._search_spotify_rich(title, artist)
-        return result['url'] if result else None
 
     def _search_spotify_rich(self, title: str, artist: str) -> Optional[dict]:
         """Search Spotify and return rich metadata dict with album art, preview URL, and artist ID.
@@ -613,10 +600,7 @@ class MetadataEnricher:
             best = scored_results[0][1]
 
             album_images = best.get('album', {}).get('images', [])
-            album_art = next(
-                (img['url'] for img in album_images if img.get('height') == 300),
-                album_images[0]['url'] if album_images else None
-            )
+            album_art = pick_spotify_image(album_images, preferred_height=300)
 
             primary_artist = (best.get('artists') or [{}])[0]
             return {
@@ -651,10 +635,7 @@ class MetadataEnricher:
         try:
             artist = self.spotify.artist(artist_id)
             images = artist.get('images', [])
-            image_url = next(
-                (img.get('url') for img in images if img.get('height') == 320),
-                images[0].get('url') if images else None,
-            )
+            image_url = pick_spotify_image(images, preferred_height=320)
             profile = {
                 'genres': artist.get('genres', [])[:3],
                 'image_url': image_url,
@@ -696,11 +677,7 @@ class MetadataEnricher:
                 return None
 
             def score(item: dict) -> tuple[int, int]:
-                images = item.get("images", [])
-                image_url = next(
-                    (img.get("url") for img in images if img.get("height") == 320),
-                    images[0].get("url") if images else None,
-                )
+                image_url = pick_spotify_image(item.get("images", []), preferred_height=320)
                 has_image = 1 if _is_valid_artist_image_url(image_url) else 0
                 popularity = int(item.get("popularity", 0) or 0)
                 return (has_image, popularity)
@@ -708,11 +685,7 @@ class MetadataEnricher:
             best = sorted(exact_items, key=score, reverse=True)[0]
             best_artist_id = best.get("id")
 
-            images = best.get("images", [])
-            image_url = next(
-                (img.get("url") for img in images if img.get("height") == 320),
-                images[0].get("url") if images else None,
-            )
+            image_url = pick_spotify_image(best.get("images", []), preferred_height=320)
             image_url = image_url if _is_valid_artist_image_url(image_url) else None
             genres = list(best.get("genres") or [])
             if not genres and best_artist_id:
@@ -727,13 +700,19 @@ class MetadataEnricher:
         except Exception:
             return None
 
+    @staticmethod
+    def _discogs_auth_header() -> str | None:
+        """Build the Discogs Authorization header value from config credentials."""
+        if Config.DISCOGS_TOKEN:
+            return f'Discogs token={Config.DISCOGS_TOKEN}'
+        if Config.DISCOGS_CONSUMER_KEY and Config.DISCOGS_CONSUMER_SECRET:
+            return f'Discogs key={Config.DISCOGS_CONSUMER_KEY}, secret={Config.DISCOGS_CONSUMER_SECRET}'
+        return None
+
     def _search_discogs_artist_profile(self, artist_name: str) -> Optional[dict]:
         """Search Discogs artist profiles and return a best-match profile dict."""
-        if Config.DISCOGS_TOKEN:
-            auth_header = f'Discogs token={Config.DISCOGS_TOKEN}'
-        elif Config.DISCOGS_CONSUMER_KEY and Config.DISCOGS_CONSUMER_SECRET:
-            auth_header = f'Discogs key={Config.DISCOGS_CONSUMER_KEY}, secret={Config.DISCOGS_CONSUMER_SECRET}'
-        else:
+        auth_header = self._discogs_auth_header()
+        if not auth_header:
             return None
 
         if not _normalize_name(artist_name):
@@ -846,23 +825,14 @@ class MetadataEnricher:
 
         return None
 
-    @_platform_search("Discogs")
-    def _search_discogs(self, title: str, artist: str) -> Optional[str]:
-        """Search Discogs for track URL (delegates to _search_discogs_rich)."""
-        result = self._search_discogs_rich(title, artist)
-        return result['url'] if result else None
-
     def _search_discogs_rich(self, title: str, artist: str) -> Optional[dict]:
         """Search Discogs and return rich metadata dict with URL, genres, styles, and label.
 
         Returns:
             Dict with 'url', 'genres', 'styles', 'label', or None on failure.
         """
-        if Config.DISCOGS_TOKEN:
-            auth_header = f'Discogs token={Config.DISCOGS_TOKEN}'
-        elif Config.DISCOGS_CONSUMER_KEY and Config.DISCOGS_CONSUMER_SECRET:
-            auth_header = f'Discogs key={Config.DISCOGS_CONSUMER_KEY}, secret={Config.DISCOGS_CONSUMER_SECRET}'
-        else:
+        auth_header = self._discogs_auth_header()
+        if not auth_header:
             return None
 
         try:

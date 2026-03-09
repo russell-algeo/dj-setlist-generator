@@ -148,3 +148,36 @@ class FalsePositivePolicy:
                 return FalsePositiveMatch(rule=rule, match_type="artist_title")
 
         return None
+
+
+# ---------------------------------------------------------------------------
+# Singleton + convenience helper
+# ---------------------------------------------------------------------------
+
+_RULES_PATH = Path(__file__).parent / "false_positive_rules.json"
+
+_singleton_policy: FalsePositivePolicy | None = None
+
+
+def get_policy() -> FalsePositivePolicy:
+    """Return a lazily-loaded singleton policy from the project rules file."""
+    global _singleton_policy
+    if _singleton_policy is None:
+        _singleton_policy = FalsePositivePolicy.load_from_path(_RULES_PATH)
+    return _singleton_policy
+
+
+def is_false_positive_track(track: dict) -> bool:
+    """Return True if an output track matches the false-positive policy.
+
+    Unknown/unrecognized tracks are never considered false positives.
+    """
+    if track.get("artist") == "Unknown" or track.get("title") == "Unknown Track":
+        return False
+    return bool(
+        get_policy().match(
+            track.get("artist", ""),
+            track.get("title", ""),
+            track.get("shazam_track_id"),
+        )
+    )

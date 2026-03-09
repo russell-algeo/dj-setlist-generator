@@ -38,6 +38,7 @@ if "aiohttp_retry" not in sys.modules:
 
 from config import Config
 import setlist_builder
+import false_positive_policy
 from setlist_builder import SetlistBuilder, Track
 
 from track_recognizer import Recognition
@@ -101,19 +102,23 @@ class SetlistBuilderFalsePositiveTests(unittest.TestCase):
     def setUp(self):
         self._tempdir = tempfile.TemporaryDirectory()
         self.rules_path = Path(self._tempdir.name) / "false_positive_rules.json"
-        self._original_rules_path = setlist_builder.FALSE_POSITIVE_RULES_PATH
+        self._original_rules_path = false_positive_policy._RULES_PATH
+        self._original_singleton = false_positive_policy._singleton_policy
         self._original_unknown_gap_size = Config.MIN_UNKNOWN_GAP_SIZE
-        setlist_builder.FALSE_POSITIVE_RULES_PATH = self.rules_path
+        false_positive_policy._RULES_PATH = self.rules_path
+        false_positive_policy._singleton_policy = None  # reset singleton so it reloads
         Config.MIN_UNKNOWN_GAP_SIZE = 3
         self._write_rules([])
 
     def tearDown(self):
-        setlist_builder.FALSE_POSITIVE_RULES_PATH = self._original_rules_path
+        false_positive_policy._RULES_PATH = self._original_rules_path
+        false_positive_policy._singleton_policy = self._original_singleton
         Config.MIN_UNKNOWN_GAP_SIZE = self._original_unknown_gap_size
         self._tempdir.cleanup()
 
     def _write_rules(self, rules):
         self.rules_path.write_text(json.dumps(rules), encoding="utf-8")
+        false_positive_policy._singleton_policy = None  # reset singleton to pick up new rules
 
     def test_suppresses_false_positive_before_overlap_resolution(self):
         self._write_rules(

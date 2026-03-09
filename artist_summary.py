@@ -7,28 +7,15 @@ from pathlib import Path
 from detail_explorer_common import (
     EXCLUDED_GENRES,
     SUMMARY_FILES as _SUMMARY_FILES,
+    build_mini_timeline,
+    build_track_search_text,
     extract_youtube_id as _extract_youtube_id,
+    merge_track_metadata,
+    youtube_thumbnail_url,
 )
-from false_positive_policy import FalsePositivePolicy
+from false_positive_policy import is_false_positive_track
 from output_formatter import OutputFormatter
 from artist_explorer_formatter import save_artist_explorer_html
-
-_FALSE_POSITIVE_POLICY = FalsePositivePolicy.load_from_path(
-    Path("false_positive_rules.json")
-)
-
-
-def _is_false_positive_track(track: dict) -> bool:
-    """Return True if an output track matches the false-positive policy."""
-    if track.get("artist") == "Unknown" or track.get("title") == "Unknown Track":
-        return False
-    return bool(
-        _FALSE_POSITIVE_POLICY.match(
-            track.get("artist", ""),
-            track.get("title", ""),
-            track.get("shazam_track_id"),
-        )
-    )
 
 
 def _process_set_json(
@@ -46,7 +33,7 @@ def _process_set_json(
     """
     tracks = [
         track for track in data.get("tracks", [])
-        if not _is_false_positive_track(track)
+        if not is_false_positive_track(track)
     ]
     mix_info = data.get("mix_info", {})
 
@@ -81,27 +68,12 @@ def _process_set_json(
         "LOW": confidence_counter.get("LOW", 0),
         "UNCERTAIN": confidence_counter.get("UNCERTAIN", 0),
     }
-    mini_timeline = []
-    for t in tracks:
-        if duration and t.get("start_time") is not None:
-            start = t["start_time"]
-            end = t.get("end_time") or duration
-            start_pct = start / duration * 100
-            width_pct = max(0.5, (end - start) / duration * 100)
-            mini_timeline.append({
-                "start_pct": start_pct,
-                "width_pct": width_pct,
-                "confidence": t.get("confidence", "UNCERTAIN"),
-            })
+    mini_timeline = build_mini_timeline(tracks, duration)
 
     set_url = url or mix_info.get("url", "")
     video_id = _extract_youtube_id(set_url)
-    thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
-    track_search_text = " ".join(
-        f"{t.get('artist', '')} {t.get('title', '')}".lower()
-        for t in tracks
-        if t.get("title") != "Unknown Track"
-    )
+    thumbnail_url = youtube_thumbnail_url(video_id)
+    track_search_text = build_track_search_text(tracks)
 
     set_summary = {
         "title": mix_info.get("title", title_fallback),
@@ -261,16 +233,12 @@ class ArtistSummarizer:
                 _genre_counters[key] = Counter()
             # Take first non-None label/art values encountered
             if not track_info[key]["discogs_label"] and t.get("discogs_label"):
-                track_info[key]["discogs_label"] = t["discogs_label"]
                 track_info[key]["discogs_label_url"] = t.get("discogs_label_url")
-            if not track_info[key]["spotify_album_art"] and t.get("spotify_album_art"):
-                track_info[key]["spotify_album_art"] = t["spotify_album_art"]
-            if not track_info[key]["spotify_artist_name"] and t.get("spotify_artist_name"):
-                track_info[key]["spotify_artist_name"] = t["spotify_artist_name"]
-            if not track_info[key]["spotify_artist_url"] and t.get("spotify_artist_url"):
-                track_info[key]["spotify_artist_url"] = t["spotify_artist_url"]
-            if not track_info[key]["spotify_artist_profile_image"] and t.get("spotify_artist_profile_image"):
-                track_info[key]["spotify_artist_profile_image"] = t["spotify_artist_profile_image"]
+            merge_track_metadata(track_info[key], t, [
+                "spotify_album_art", "spotify_artist_name",
+                "spotify_artist_url", "spotify_artist_profile_image",
+                "discogs_label",
+            ])
             track_info[key]["appearances"].append({
                 "set_title": t["from_set"],
                 "time_range": t.get("time_range", ""),

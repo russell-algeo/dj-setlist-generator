@@ -4,6 +4,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from typing import List, Optional
 from config import Config
+from detail_explorer_common import spotify_track_id
 
 
 class SpotifyPlaylistCreator:
@@ -167,8 +168,7 @@ class SpotifyPlaylistCreator:
             https://open.spotify.com/track/7a5BhcKkPKTRcIF5i6QeUa
             -> spotify:track:7a5BhcKkPKTRcIF5i6QeUa
         """
-        # Extract track ID from URL
-        track_id = spotify_url.split('/')[-1].split('?')[0]
+        track_id = spotify_track_id(spotify_url) or spotify_url.split('/')[-1].split('?')[0]
         return f"spotify:track:{track_id}"
 
     def add_tracks_to_artist_playlist(self, enriched_tracks: List[dict], artist_playlist_id: str):

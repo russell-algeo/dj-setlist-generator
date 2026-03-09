@@ -15,36 +15,21 @@ from detail_explorer_common import (
     CONFIDENCE_LEVELS,
     EXCLUDED_GENRES,
     SUMMARY_FILES as _SUMMARY_FILES,
+    build_mini_timeline,
+    build_track_search_text,
+    blank_confidence_counts,
     extract_youtube_id as _extract_youtube_id,
-    is_valid_artist_image_url as _is_valid_artist_image_url,
-    normalize_name as _normalize_name,
+    merge_track_metadata,
+    normalize_confidence,
+    normalize_track_key,
+    primary_confidence,
     select_artist_hero_image,
+    youtube_thumbnail_url,
 )
 from explorer_formatter import save_master_explorer_html
-from false_positive_policy import FalsePositivePolicy
+from false_positive_policy import is_false_positive_track
 
 _EXCLUDED_GENRES_TITLED = {g.title() for g in EXCLUDED_GENRES}
-_FALSE_POSITIVE_POLICY = FalsePositivePolicy.load_from_path(
-    Path("false_positive_rules.json")
-)
-
-
-def _normalize_key(artist: str, title: str) -> str:
-    """Normalized lowercase track key for cross-artist matching."""
-    return f"{artist.strip().lower()} - {title.strip().lower()}"
-
-
-def _is_false_positive_track(track: dict) -> bool:
-    """Return True if an output track matches the false-positive policy."""
-    if track.get("artist") == "Unknown" or track.get("title") == "Unknown Track":
-        return False
-    return bool(
-        _FALSE_POSITIVE_POLICY.match(
-            track.get("artist", ""),
-            track.get("title", ""),
-            track.get("shazam_track_id"),
-        )
-    )
 
 
 def _enrich_sets(track: dict) -> list[dict]:
@@ -55,42 +40,13 @@ def _enrich_sets(track: dict) -> list[dict]:
         info = link_map.get(title, {})
         href = info.get("html_master_rel", "")
         pos = info.get("track_position")
-        conf = _normalize_confidence(info.get("confidence"))
+        conf = normalize_confidence(info.get("confidence"))
         if href and pos:
             href = quote(href, safe="/") + f"#track-{pos}"
         elif href:
             href = quote(href, safe="/")
         result.append({"title": title, "href": href, "confidence": conf})
     return result
-
-
-def _normalize_confidence(value: str | None) -> str:
-    """Normalize confidence labels to supported tiers."""
-    conf = str(value or "UNCERTAIN").upper()
-    return conf if conf in CONFIDENCE_LEVELS else "UNCERTAIN"
-
-
-def _blank_confidence_counts() -> dict[str, int]:
-    """Create a zeroed confidence-count map."""
-    return {level: 0 for level in CONFIDENCE_LEVELS}
-
-
-def _primary_confidence(conf_counts: dict[str, int]) -> str:
-    """Pick a representative confidence tier from counts.
-
-    Priority:
-    1) highest count
-    2) strongest tier precedence (HIGH > MEDIUM > LOW > UNCERTAIN)
-    """
-    best = "UNCERTAIN"
-    best_count = -1
-    for level in CONFIDENCE_LEVELS:
-        count = int(conf_counts.get(level, 0))
-        if count > best_count:
-            best = level
-            best_count = count
-    return best
-
 
 
 
@@ -161,7 +117,7 @@ class MasterSummarizer:
             mix_info = set_data.get("mix_info", {})
             raw_tracks = [
                 track for track in set_data.get("tracks", [])
-                if not _is_false_positive_track(track)
+                if not is_false_positive_track(track)
             ]
             set_title = mix_info.get("title", set_dir.name)
             set_url = mix_info.get("url", "")
@@ -169,9 +125,9 @@ class MasterSummarizer:
             total_tracks = len(raw_tracks)
             recognized = sum(1 for t in raw_tracks if t.get("title") != "Unknown Track")
             recognition_rate = (recognized / total_tracks * 100) if total_tracks else 0
-            confidence_counts = _blank_confidence_counts()
+            confidence_counts = blank_confidence_counts()
             for track in raw_tracks:
-                level = _normalize_confidence(track.get("confidence"))
+                level = normalize_confidence(track.get("confidence"))
                 confidence_counts[level] += 1
 
             # HTML path relative to artist dir (for artist page links)
@@ -188,21 +144,9 @@ class MasterSummarizer:
                 except ValueError:
                     pass
 
-            mini_timeline = []
-            for t in raw_tracks:
-                if duration and t.get("start_time") is not None:
-                    start = t["start_time"]
-                    end = t.get("end_time") or duration
-                    mini_timeline.append({
-                        "start_pct": start / duration * 100,
-                        "width_pct": max(0.5, (end - start) / duration * 100),
-                        "confidence": t.get("confidence", "UNCERTAIN"),
-                    })
+            mini_timeline = build_mini_timeline(raw_tracks, duration)
 
-            video_id = _extract_youtube_id(set_url)
-            thumbnail_url = (
-                f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
-            )
+            thumbnail_url = youtube_thumbnail_url(_extract_youtube_id(set_url))
 
             set_tracks_list = [
                 {
@@ -241,10 +185,7 @@ class MasterSummarizer:
                 "confidence_counts": confidence_counts,
                 "mini_timeline": mini_timeline,
                 "thumbnail_url": thumbnail_url,
-                "track_search_text": " ".join(
-                    f"{t.get('artist', '')} {t.get('title', '')}".lower()
-                    for t in raw_tracks if t.get("title") != "Unknown Track"
-                ),
+                "track_search_text": build_track_search_text(raw_tracks),
                 "artist_name": artist_name,
             })
 
@@ -254,7 +195,7 @@ class MasterSummarizer:
                     continue
                 t_artist = t.get("artist", "Unknown")
                 t_title = t.get("title", "Unknown")
-                key = _normalize_key(t_artist, t_title)
+                key = normalize_track_key(t_artist, t_title)
 
                 genres = list(dict.fromkeys(
                     (t.get("discogs_styles") or [])
@@ -276,27 +217,23 @@ class MasterSummarizer:
                         "discogs_label_url": t.get("discogs_label_url"),
                         "genres": genres,
                         "appearances": 0,
-                        "confidence_counts": _blank_confidence_counts(),
+                        "confidence_counts": blank_confidence_counts(),
                         "sets": [],
                         "set_link_map": {},  # set_title → {html_master_rel, track_position}
                     }
                 else:
-                    if not tracks[key]["spotify_album_art"] and t.get("spotify_album_art"):
-                        tracks[key]["spotify_album_art"] = t["spotify_album_art"]
-                    if not tracks[key].get("spotify_artist_name") and t.get("spotify_artist_name"):
-                        tracks[key]["spotify_artist_name"] = t["spotify_artist_name"]
-                    if not tracks[key].get("spotify_artist_url") and t.get("spotify_artist_url"):
-                        tracks[key]["spotify_artist_url"] = t["spotify_artist_url"]
-                    if not tracks[key].get("spotify_artist_profile_image") and t.get("spotify_artist_profile_image"):
-                        tracks[key]["spotify_artist_profile_image"] = t["spotify_artist_profile_image"]
-                    if not tracks[key]["discogs_label"] and t.get("discogs_label"):
-                        tracks[key]["discogs_label"] = t["discogs_label"]
-                        tracks[key]["discogs_label_url"] = t.get("discogs_label_url")
+                    merge_track_metadata(tracks[key], t, [
+                        "spotify_album_art", "spotify_artist_name",
+                        "spotify_artist_url", "spotify_artist_profile_image",
+                        "discogs_label",
+                    ])
+                    if not tracks[key]["discogs_label_url"] and t.get("discogs_label_url"):
+                        tracks[key]["discogs_label_url"] = t["discogs_label_url"]
                     if not tracks[key]["genres"] and genres:
                         tracks[key]["genres"] = genres
 
                 tracks[key]["appearances"] += 1
-                conf_norm = _normalize_confidence(t.get("confidence"))
+                conf_norm = normalize_confidence(t.get("confidence"))
                 tracks[key]["confidence_counts"][conf_norm] = int(
                     tracks[key]["confidence_counts"].get(conf_norm, 0)
                 ) + 1
@@ -466,7 +403,7 @@ class MasterSummarizer:
                         level: int(a_conf_counts.get(level, 0)) + int(b_conf_counts.get(level, 0))
                         for level in CONFIDENCE_LEVELS
                     }
-                    shared_confidence = _primary_confidence(merged_conf_counts)
+                    shared_confidence = primary_confidence(merged_conf_counts)
                     shared_tracks.append({
                         "track_key": k,
                         "display_artist": a_t.get("display_artist", ""),

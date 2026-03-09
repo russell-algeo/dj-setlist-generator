@@ -29,11 +29,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import Config
 from detail_explorer_common import (
     ARTIST_PROFILE_FIELDS,
+    RECCOBEATS_BASE as _RECCOBEATS_BASE,
     SUMMARY_FILES as _SUMMARY_FILES,
     is_valid_artist_image_url as _is_valid_artist_image_url,
     normalize_name as _normalize_name,
+    parse_reccobeats_key,
+    pick_spotify_image,
+    spotify_track_id,
 )
-from metadata_enricher import MetadataEnricher, _RECCOBEATS_BASE, _KEY_NAMES
+from metadata_enricher import MetadataEnricher
 
 
 def _needs_enrichment(track: dict) -> bool:
@@ -238,8 +242,7 @@ def _enrich_json(
     for t in needs_update:
         url = t.get("spotify_url", "")
         if url:
-            tid = url.split("/")[-1].split("?")[0]
-            spotify_track_ids.append(tid)
+            spotify_track_ids.append(spotify_track_id(url))
         else:
             spotify_track_ids.append(None)
 
@@ -309,10 +312,7 @@ def _enrich_json(
 
             if obj and not t.get("spotify_album_art"):
                 images = obj.get("album", {}).get("images", [])
-                art_url = next(
-                    (img["url"] for img in images if img.get("height") == 300),
-                    images[0]["url"] if images else None
-                )
+                art_url = pick_spotify_image(images, preferred_height=300)
                 if art_url:
                     t["spotify_album_art"] = art_url
                     changed = True
@@ -344,10 +344,7 @@ def _enrich_json(
                     changed = True
                 if not t.get("spotify_artist_profile_image") and not t.get("spotify_artist_image"):
                     images = artist_obj.get("images", [])
-                    image_url = next(
-                        (img.get("url") for img in images if img.get("height") == 320),
-                        images[0].get("url") if images else None
-                    )
+                    image_url = pick_spotify_image(images, preferred_height=320)
                     if image_url:
                         t["spotify_artist_profile_image"] = image_url
                         t["spotify_artist_image"] = image_url
@@ -364,12 +361,8 @@ def _enrich_json(
                     changed = True
 
             if not t.get("key") and not t.get("spotify_key"):
-                key_idx = feat.get("key")
-                mode = feat.get("mode")
-                if key_idx is not None and int(key_idx) >= 0:
-                    key_str = _KEY_NAMES[int(key_idx)]
-                    if mode is not None and int(mode) == 0:
-                        key_str += 'm'
+                key_str = parse_reccobeats_key(feat)
+                if key_str:
                     t["key"] = key_str
                     changed = True
 
@@ -523,6 +516,7 @@ def scan_and_enrich(
                     set_artist_profiles_only=set_artist_profiles_only,
                     force_set_artist_profile=force_set_artist_profile,
                     expected_genres=expected_genres,
+                    preloaded_data=payload,
                 ):
                     total_updated += 1
 
