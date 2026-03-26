@@ -160,7 +160,7 @@ def update_set_run_metadata(
         set
           set_title = coalesce(%s, set_title),
           source_platform = coalesce(%s, source_platform),
-          source_metadata = coalesce(source_metadata, '{}'::jsonb) || %s,
+          source_metadata = coalesce(source_metadata, '{}'::jsonb) || %s::jsonb,
           heartbeat_at = now(),
           updated_at = now()
         where id = %s
