@@ -16,6 +16,9 @@ on:
           - development
           - production
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
