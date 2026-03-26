@@ -25,7 +25,25 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      slot_matrix: ${{ steps.build.outputs.slot_matrix }}
+    steps:
+      - id: build
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+
+          slot_count = max(1, int(os.environ["RECOGNITION_SLOT_COUNT_INPUT"]))
+          print(f"slot_matrix={json.dumps(list(range(slot_count)))}")
+          PY
+        env:
+          RECOGNITION_SLOT_COUNT_INPUT: ${{ github.event.inputs.recognition_slot_count }}
+
   bootstrap:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -65,13 +83,15 @@ jobs:
           retention-days: 1
 
   recognize:
-    needs: bootstrap
+    needs:
+      - plan
+      - bootstrap
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        slot_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        slot_index: ${{ fromJSON(needs.plan.outputs.slot_matrix) }}
     env:
       DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
       APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
@@ -98,18 +118,12 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Download prepared audio
-        if: ${{ matrix.slot_index < fromJSON(github.event.inputs.recognition_slot_count) }}
         uses: actions/download-artifact@v4
         with:
           name: set-assets-${{ github.event.inputs.set_run_id }}
           path: assets
 
-      - name: Skip disabled slot
-        if: ${{ matrix.slot_index >= fromJSON(github.event.inputs.recognition_slot_count) }}
-        run: echo "Skipping slot ${{ matrix.slot_index }} because recognition_slot_count=${{ github.event.inputs.recognition_slot_count }}"
-
       - name: Recognize lease slot
-        if: ${{ matrix.slot_index < fromJSON(github.event.inputs.recognition_slot_count) }}
         run: python -m worker.jobs.process_set --phase recognize --set-run-id "${{ github.event.inputs.set_run_id }}" --slot-index "${{ matrix.slot_index }}"
 
   publish:
