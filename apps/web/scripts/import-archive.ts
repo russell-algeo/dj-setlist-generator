@@ -31,14 +31,20 @@ type SetJson = {
   tracks: Array<Record<string, unknown>>;
 };
 
-const OUTPUT_ROOT = path.resolve(process.cwd(), "..", "..", "output");
+const WORKSPACE_ROOT = path.resolve(process.cwd(), "..", "..");
+const OUTPUT_ROOT = path.resolve(WORKSPACE_ROOT, "output");
 
 const readJson = async <T>(filePath: string) =>
   JSON.parse(await fs.readFile(filePath, "utf8")) as T;
 
 const readHtml = async (filePath: string) => fs.readFile(filePath, "utf8");
-const optionalResolvedPath = (value: string | undefined) =>
-  value ? path.resolve(value) : undefined;
+const optionalResolvedPath = (value: string | undefined) => {
+  if (!value) {
+    return undefined;
+  }
+
+  return path.isAbsolute(value) ? value : path.resolve(WORKSPACE_ROOT, value);
+};
 
 const upsertArtist = async (
   db: ReturnType<typeof getDb>,

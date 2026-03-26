@@ -31,6 +31,7 @@ Set these in Vercel before production use.
 ### Required for the app
 - `APP_BASE_URL`
   - Production: `https://<project>.vercel.app` or your final custom domain
+  - Use the public alias or final custom domain, not a raw deployment URL like `https://<deployment>-<scope>.vercel.app`
 - `DATABASE_URL`
   - Production: Neon `production` pooled URL
   - Preview / development: Neon `development` pooled URL
@@ -81,6 +82,7 @@ Add these repository secrets:
 - `PRODUCTION_DATABASE_URL_POOLED`
 - `PRODUCTION_DATABASE_URL_DIRECT`
 - `PRODUCTION_APP_BASE_URL`
+- Both app base URL secrets must use the public alias or final custom domain, not a protected deployment URL
 - `INTERNAL_WORKER_SHARED_SECRET`
 - `SPOTIFY_CLIENT_ID`
 - `SPOTIFY_CLIENT_SECRET`
