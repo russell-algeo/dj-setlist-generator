@@ -375,6 +375,12 @@ export const dispatchQueuedArtistSubmission = async () => {
       })
       .where(eq(submissions.id, submission.id));
 
+    await createWorkerEvent({
+      submissionId: submission.id,
+      eventType: "submission.dispatch_failed",
+      message: error instanceof Error ? error.message : "Discover artist dispatch failed",
+    });
+
     throw error;
   }
 };
@@ -448,6 +454,21 @@ export const dispatchNextQueuedSetRun = async () => {
         updatedAt: new Date(),
       })
       .where(eq(setRuns.id, queuedRun.id));
+
+    await db
+      .update(submissions)
+      .set({
+        status: "queued",
+        updatedAt: new Date(),
+      })
+      .where(eq(submissions.id, queuedRun.submissionId));
+
+    await createWorkerEvent({
+      submissionId: queuedRun.submissionId,
+      setRunId: queuedRun.id,
+      eventType: "set_run.dispatch_failed",
+      message: error instanceof Error ? error.message : "Set run dispatch failed",
+    });
 
     throw error;
   }

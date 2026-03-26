@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 import time
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from typing import Any
 
 from worker.config import clear_auth, get_settings, save_auth
@@ -54,20 +57,52 @@ def _print_submission(detail: dict[str, Any]) -> None:
             print(f"  - {event['eventType']}: {event['message']}")
 
 
-def _poll_submission(submission_id: str, *, base_url: str | None, interval: int) -> dict[str, Any]:
-    import requests
+def _request_json(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    body: dict[str, Any] | None = None,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    payload = None
+    request_headers = dict(headers)
+    if body is not None:
+      payload = json.dumps(body).encode("utf8")
+      request_headers.setdefault("Content-Type", "application/json")
 
+    request = urllib_request.Request(
+        url,
+        data=payload,
+        headers=request_headers,
+        method=method,
+    )
+
+    try:
+        with urllib_request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib_error.HTTPError as exc:
+        details = exc.read().decode("utf8", errors="replace")
+        raise RuntimeError(f"{method} {url} failed: {exc.code} {details}") from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
+
+    if not raw:
+        return {}
+
+    return json.loads(raw.decode("utf8"))
+
+
+def _poll_submission(submission_id: str, *, base_url: str | None, interval: int) -> dict[str, Any]:
     api_base_url, headers = _auth_headers(base_url)
     terminal_states = {"completed", "failed", "cancelled"}
 
     while True:
-        response = requests.get(
+        detail = _request_json(
+            "GET",
             f"{api_base_url}/api/jobs/{submission_id}",
             headers=headers,
-            timeout=60,
         )
-        response.raise_for_status()
-        detail = response.json()
         _print_submission(detail)
         if detail["submission"]["status"] in terminal_states:
             return detail
@@ -75,17 +110,13 @@ def _poll_submission(submission_id: str, *, base_url: str | None, interval: int)
 
 
 def _submit_remote(payload: dict[str, Any], *, wait: bool, base_url: str | None, interval: int) -> dict[str, Any]:
-    import requests
-
     api_base_url, headers = _auth_headers(base_url)
-    response = requests.post(
+    detail = _request_json(
+        "POST",
         f"{api_base_url}/api/jobs",
         headers=headers,
-        json=payload,
-        timeout=60,
+        body=payload,
     )
-    response.raise_for_status()
-    detail = response.json()
     submission_id = detail["submissionId"]
     print(f"Queued submission {submission_id}")
     if wait:
@@ -94,19 +125,15 @@ def _submit_remote(payload: dict[str, Any], *, wait: bool, base_url: str | None,
 
 
 def _status_remote(submission_id: str, *, wait: bool, base_url: str | None, interval: int) -> dict[str, Any]:
-    import requests
-
     if wait:
         return _poll_submission(submission_id, base_url=base_url, interval=interval)
 
     api_base_url, headers = _auth_headers(base_url)
-    response = requests.get(
+    detail = _request_json(
+        "GET",
         f"{api_base_url}/api/jobs/{submission_id}",
         headers=headers,
-        timeout=60,
     )
-    response.raise_for_status()
-    detail = response.json()
     _print_submission(detail)
     return detail
 
@@ -134,19 +161,22 @@ async def _run_local(args: argparse.Namespace) -> None:
     raise RuntimeError("No local targets were provided")
 
 
-def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Remote-first CLI for the DJ set deployment")
-    subparsers = parser.add_subparsers(dest="subcommand")
+def _build_auth_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Manage saved CLI auth")
+    parser.set_defaults(subcommand="auth")
+    subparsers = parser.add_subparsers(dest="auth_command", required=True)
 
-    auth_parser = subparsers.add_parser("auth", help="Manage saved CLI auth")
-    auth_subparsers = auth_parser.add_subparsers(dest="auth_command", required=True)
-
-    login_parser = auth_subparsers.add_parser("login", help="Save an API token locally")
+    login_parser = subparsers.add_parser("login", help="Save an API token locally")
     login_parser.add_argument("--token", required=True)
     login_parser.add_argument("--base-url")
 
-    auth_subparsers.add_parser("logout", help="Remove the saved API token")
+    subparsers.add_parser("logout", help="Remove the saved API token")
+    return parser
 
+
+def _build_main_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Remote-first CLI for the DJ set deployment")
+    parser.set_defaults(subcommand=None)
     parser.add_argument("targets", nargs="*")
     parser.add_argument("--artist")
     parser.add_argument("--sets", nargs="+")
@@ -156,8 +186,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--base-url")
+    return parser
 
-    return parser.parse_args(argv)
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    if argv and argv[0] == "auth":
+        return _build_auth_parser().parse_args(argv[1:])
+
+    return _build_main_parser().parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
