@@ -34,6 +34,7 @@ from worker.pipeline.recognize import (
     restore_set_context,
     serialize_prepared_context,
 )
+from worker.scheduler import build_scheduler_plan
 
 
 def _dispatch_pending() -> None:
@@ -188,12 +189,14 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
             str(run_row["source_url"]),
             artist_name=str(run_row["artist_name"]) if run_row.get("artist_name") else None,
         )
+        scheduler_plan = build_scheduler_plan(context.total_segments)
 
         metadata_patch = serialize_prepared_context(
             context,
-            slot_count=Config.RECOGNITION_SLOT_COUNT,
-            lease_size=Config.LEASE_SIZE,
+            slot_count=scheduler_plan.slot_count,
+            lease_size=scheduler_plan.lease_size,
         )
+        metadata_patch["scheduler_plan"] = scheduler_plan.as_metadata()
         update_set_run_metadata(
             set_run_id,
             metadata_patch,
@@ -204,8 +207,8 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
         lease_count = initialize_set_run_leases(
             set_run_id,
             total_segments=context.total_segments,
-            slot_count=Config.RECOGNITION_SLOT_COUNT,
-            lease_size=Config.LEASE_SIZE,
+            slot_count=scheduler_plan.slot_count,
+            lease_size=scheduler_plan.lease_size,
         )
 
         _record_stage_change(
@@ -217,6 +220,8 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
             details={
                 "segment_count": context.total_segments,
                 "lease_count": lease_count,
+                "slot_count": scheduler_plan.slot_count,
+                "lease_size": scheduler_plan.lease_size,
                 "audio_file": str(context.audio_file),
             },
         )
@@ -224,6 +229,8 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
         return {
             "segment_count": context.total_segments,
             "lease_count": lease_count,
+            "slot_count": scheduler_plan.slot_count,
+            "lease_size": scheduler_plan.lease_size,
             "audio_file": context.audio_file,
         }
     except Exception as error:
@@ -496,8 +503,9 @@ def finalize_phase(
 
 
 async def run_phase(set_run_id: str) -> str | None:
-    await bootstrap_phase(set_run_id)
-    for slot_index in range(Config.RECOGNITION_SLOT_COUNT):
+    bootstrap_result = await bootstrap_phase(set_run_id)
+    slot_count = int(bootstrap_result.get("slot_count") or 1)
+    for slot_index in range(slot_count):
         await recognize_phase(set_run_id, slot_index=slot_index)
     published_set_id = await publish_phase(set_run_id)
     finalize_phase(

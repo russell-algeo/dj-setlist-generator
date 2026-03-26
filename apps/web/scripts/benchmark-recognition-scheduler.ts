@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { neon } from "@neondatabase/serverless";
@@ -49,6 +49,7 @@ const defaultSourceUrl =
 const defaultEmail = "russellalgeo@gmail.com";
 const defaultSlotCounts = [8, 10, 12, 16];
 const defaultLeaseSizes = [10, 8, 6, 5, 4];
+const defaultRetries = 2;
 
 const sleep = (ms: number) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 
@@ -72,6 +73,18 @@ const parseStringArg = (flag: string, fallback: string) => {
 
   return process.argv[index + 1];
 };
+
+const parseNumberArg = (flag: string, fallback: number) => {
+  const index = process.argv.indexOf(flag);
+  if (index === -1 || index === process.argv.length - 1) {
+    return fallback;
+  }
+
+  const value = Number.parseInt(process.argv[index + 1], 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+const resolveOutputPath = (value: string) => (isAbsolute(value) ? value : resolve(repoRoot, value));
 
 const buildConfigs = (slotCounts: number[], leaseSizes: number[]) => {
   const pairs: BenchmarkConfig[] = [];
@@ -385,35 +398,57 @@ const main = async () => {
   const leaseSizes = parseListArg("--lease-sizes", defaultLeaseSizes);
   const sourceUrl = parseStringArg("--source-url", defaultSourceUrl);
   const email = parseStringArg("--email", defaultEmail);
-  const jsonPath = parseStringArg("--json-out", defaultJsonPath);
-  const markdownPath = parseStringArg("--markdown-out", defaultMarkdownPath);
+  const jsonPath = resolveOutputPath(parseStringArg("--json-out", defaultJsonPath));
+  const markdownPath = resolveOutputPath(parseStringArg("--markdown-out", defaultMarkdownPath));
+  const retries = parseNumberArg("--retries", defaultRetries);
 
   const configs = buildConfigs(slotCounts, leaseSizes);
   const results: BenchmarkResult[] = [];
 
   for (const config of configs) {
-    console.log(
-      `\n=== Benchmark: slots=${config.slotCount}, lease_size=${config.leaseSize} ===`,
-    );
-    const run = await createBenchmarkRun(email, sourceUrl);
-    console.log(
-      `Created submission ${run.submissionId} and set run ${run.setRunId} for ${sourceUrl}`,
-    );
+    let successfulResult: BenchmarkResult | null = null;
 
-    const workflowRunId = await dispatchBenchmark(run.setRunId, config);
-    console.log(`Dispatched workflow run ${workflowRunId}`);
+    for (let attempt = 1; attempt <= retries; attempt += 1) {
+      console.log(
+        `\n=== Benchmark: slots=${config.slotCount}, lease_size=${config.leaseSize}, attempt=${attempt}/${retries} ===`,
+      );
+      const run = await createBenchmarkRun(email, sourceUrl);
+      console.log(
+        `Created submission ${run.submissionId} and set run ${run.setRunId} for ${sourceUrl}`,
+      );
 
-    const result = await summarizeResult(
-      config,
-      run.submissionId,
-      run.setRunId,
-      workflowRunId,
-    );
-    results.push(result);
+      const workflowRunId = await dispatchBenchmark(run.setRunId, config);
+      console.log(`Dispatched workflow run ${workflowRunId}`);
+
+      const result = await summarizeResult(
+        config,
+        run.submissionId,
+        run.setRunId,
+        workflowRunId,
+      );
+
+      if (result.conclusion === "success") {
+        successfulResult = result;
+        break;
+      }
+
+      console.warn(
+        `Workflow ${workflowRunId} finished with conclusion=${result.conclusion}; retrying config`,
+      );
+      await sleep(5000);
+    }
+
+    if (!successfulResult) {
+      throw new Error(
+        `Benchmark failed for slots=${config.slotCount}, lease_size=${config.leaseSize} after ${retries} attempt(s)`,
+      );
+    }
+
+    results.push(successfulResult);
     writeArtifacts(results, jsonPath, markdownPath);
 
     console.log(
-      `Completed run ${workflowRunId}: total=${result.totalSeconds}s, longest_recognize=${result.longestRecognizeSeconds}s, leases_per_slot=${result.leasesPerSlot}`,
+      `Completed run ${successfulResult.workflowRunId}: total=${successfulResult.totalSeconds}s, longest_recognize=${successfulResult.longestRecognizeSeconds}s, leases_per_slot=${successfulResult.leasesPerSlot}`,
     );
   }
 
@@ -421,4 +456,7 @@ const main = async () => {
   console.log(`Wrote Markdown results to ${markdownPath}`);
 };
 
-await main();
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

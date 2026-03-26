@@ -16,49 +16,35 @@ on:
           - development
           - production
       recognition_slot_count:
-        description: Number of recognition slots to fan out across
+        description: Number of recognition slots to fan out across, or auto
         required: false
-        default: "10"
+        default: "auto"
         type: string
       lease_size:
-        description: Number of segments bundled into each lease
+        description: Number of segments bundled into each lease, or auto
         required: false
-        default: "10"
+        default: "auto"
         type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      slot_matrix: ${{ steps.build.outputs.slot_matrix }}
-    steps:
-      - id: build
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          import os
-
-          slot_count = max(1, int(os.environ["RECOGNITION_SLOT_COUNT_INPUT"]))
-          print(f"slot_matrix={json.dumps(list(range(slot_count)))}")
-          PY
-        env:
-          RECOGNITION_SLOT_COUNT_INPUT: ${{ github.event.inputs.recognition_slot_count }}
-
   bootstrap:
-    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      slot_matrix: ${{ steps.scheduler.outputs.slot_matrix }}
+      effective_slot_count: ${{ steps.scheduler.outputs.effective_slot_count }}
+      effective_lease_size: ${{ steps.scheduler.outputs.effective_lease_size }}
     env:
       DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
       APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
       ENABLE_CHECKPOINTS: "false"
       CONCURRENT_RECOGNITIONS: "2"
-      RECOGNITION_SLOT_COUNT: ${{ github.event.inputs.recognition_slot_count }}
-      LEASE_SIZE: ${{ github.event.inputs.lease_size }}
+      RECOGNITION_SLOT_COUNT_REQUESTED: ${{ github.event.inputs.recognition_slot_count }}
+      LEASE_SIZE_REQUESTED: ${{ github.event.inputs.lease_size }}
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
     steps:
@@ -79,6 +65,40 @@ jobs:
       - name: Bootstrap set run
         run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
 
+      - id: scheduler
+        name: Emit scheduler outputs
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          from psycopg import connect
+          from psycopg.rows import dict_row
+
+          with connect(os.environ["DATABASE_URL_DIRECT"], autocommit=True, row_factory=dict_row) as conn, conn.cursor() as cur:
+              cur.execute(
+                  """
+                  select
+                    source_metadata->>'recognition_slot_count' as recognition_slot_count,
+                    source_metadata->>'lease_size' as lease_size
+                  from ops.set_runs
+                  where id = %s
+                  """,
+                  (os.environ["SET_RUN_ID"],),
+              )
+              row = cur.fetchone()
+
+          if not row:
+              raise SystemExit("Failed to load scheduler outputs from ops.set_runs")
+
+          slot_count = max(1, int(row["recognition_slot_count"]))
+          lease_size = max(1, int(row["lease_size"]))
+          print(f"effective_slot_count={slot_count}")
+          print(f"effective_lease_size={lease_size}")
+          print(f"slot_matrix={json.dumps(list(range(slot_count)))}")
+          PY
+        env:
+          SET_RUN_ID: ${{ github.event.inputs.set_run_id }}
+
       - name: Upload prepared audio
         uses: actions/upload-artifact@v4
         with:
@@ -89,22 +109,21 @@ jobs:
 
   recognize:
     needs:
-      - plan
       - bootstrap
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        slot_index: ${{ fromJSON(needs.plan.outputs.slot_matrix) }}
+        slot_index: ${{ fromJSON(needs.bootstrap.outputs.slot_matrix) }}
     env:
       DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
       APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
       ENABLE_CHECKPOINTS: "false"
       CONCURRENT_RECOGNITIONS: "2"
-      RECOGNITION_SLOT_COUNT: ${{ github.event.inputs.recognition_slot_count }}
-      LEASE_SIZE: ${{ github.event.inputs.lease_size }}
+      RECOGNITION_SLOT_COUNT: ${{ needs.bootstrap.outputs.effective_slot_count }}
+      LEASE_SIZE: ${{ needs.bootstrap.outputs.effective_lease_size }}
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
     steps:

@@ -2,7 +2,12 @@
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional in lean test environments
+    def load_dotenv():
+        return False
 
 # Load environment variables
 load_dotenv()
@@ -57,6 +62,10 @@ class Config:
     BATCH_SIZE = int(os.getenv('BATCH_SIZE', '10'))  # Segments per batch for checkpointing
     RECOGNITION_SLOT_COUNT = int(os.getenv('RECOGNITION_SLOT_COUNT', '10'))
     LEASE_SIZE = int(os.getenv('LEASE_SIZE', '10'))
+    AUTO_MAX_RECOGNITION_SLOTS = int(os.getenv('AUTO_MAX_RECOGNITION_SLOTS', '12'))
+    AUTO_TARGET_SEGMENTS_PER_SLOT = int(os.getenv('AUTO_TARGET_SEGMENTS_PER_SLOT', '20'))
+    AUTO_TARGET_LEASES_PER_SLOT = float(os.getenv('AUTO_TARGET_LEASES_PER_SLOT', '2'))
+    AUTO_MIN_LEASE_SIZE = int(os.getenv('AUTO_MIN_LEASE_SIZE', '10'))
 
     # Quota-Aware Throttling Settings
     QUOTA_COOLDOWN_DURATION = int(os.getenv('QUOTA_COOLDOWN_DURATION', '60'))  # Seconds to wait when quota exhausted
