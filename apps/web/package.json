@@ -1,0 +1,44 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate --config ../../drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config ../../drizzle.config.ts",
+    "db:push": "drizzle-kit push --config ../../drizzle.config.ts",
+    "import:archive": "DOTENV_CONFIG_PATH=.env.local tsx -r dotenv/config scripts/import-archive.ts"
+  },
+  "dependencies": {
+    "@auth/drizzle-adapter": "^1.11.1",
+    "@neondatabase/serverless": "^1.0.2",
+    "drizzle-orm": "^0.45.1",
+    "next": "15.3.0",
+    "next-auth": "^4.24.13",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "server-only": "^0.0.1",
+    "slugify": "^1.6.8",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.3.1",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.1.1"
+  }
+}

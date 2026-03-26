@@ -1,0 +1,23 @@
+{
+  "name": "dj-setlist-generator",
+  "private": true,
+  "packageManager": "pnpm@10.8.0",
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint",
+    "test:web": "pnpm --filter web test",
+    "db:generate": "pnpm --filter web db:generate",
+    "db:migrate": "pnpm --filter web db:migrate",
+    "db:push": "pnpm --filter web db:push",
+    "import:archive": "pnpm --filter web import:archive"
+  },
+  "devDependencies": {
+    "dotenv": "^17.3.1",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.1"
+  }
+}

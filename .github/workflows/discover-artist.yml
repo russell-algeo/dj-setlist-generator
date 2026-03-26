@@ -1,0 +1,53 @@
+name: discover-artist
+
+on:
+  workflow_dispatch:
+    inputs:
+      submission_id:
+        description: Submission UUID to discover
+        required: true
+        type: string
+      deployment_target:
+        description: Secrets target for this dispatch
+        required: false
+        default: development
+        type: choice
+        options:
+          - development
+          - production
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL_MIGRATIONS: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+      SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+      SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
+      DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.8.0
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run discovery job
+        run: python -m worker.jobs.discover_artist --submission-id "${{ github.event.inputs.submission_id }}"

@@ -1,0 +1,30 @@
+name: scheduler
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_target:
+        description: App environment to schedule
+        required: false
+        default: development
+        type: choice
+        options:
+          - development
+          - production
+  schedule:
+    - cron: "*/15 * * * *"
+
+jobs:
+  scheduler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger internal scheduler
+        env:
+          APP_BASE_URL: ${{ (github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
+          INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+        run: |
+          curl --fail --show-error --silent \
+            -X POST \
+            -H "x-internal-secret: ${INTERNAL_WORKER_SHARED_SECRET}" \
+            "${APP_BASE_URL}/api/internal/scheduler"

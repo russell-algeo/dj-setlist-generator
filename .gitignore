@@ -15,6 +15,16 @@ __pycache__/
 *.so
 .Python
 
+# Node / web
+node_modules/
+.pnpm-store/
+.next/
+dist/
+coverage/
+apps/web/.next/
+apps/web/.env.local
+apps/web/.env.*.local
+
 # Virtual environments
 .venv/
 venv/
