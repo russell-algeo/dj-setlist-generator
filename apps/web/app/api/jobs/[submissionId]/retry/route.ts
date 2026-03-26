@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { assertAllowlisted, canAccessSubmission, getRequestActor } from "@/lib/auth/session";
-import { dispatchNextQueuedSetRun, dispatchQueuedArtistSubmission, getSubmissionDetail, retrySubmission } from "@/lib/jobs/service";
+import { dispatchPendingWork, retrySubmission } from "@/lib/jobs/service";
 
 type Params = {
   params: Promise<{
@@ -23,13 +23,7 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   await retrySubmission(submissionId);
-  const detail = await getSubmissionDetail(submissionId);
-
-  if (detail?.submission.mode === "artist") {
-    await dispatchQueuedArtistSubmission();
-  } else {
-    await dispatchNextQueuedSetRun();
-  }
+  await dispatchPendingWork();
 
   if ((request.headers.get("content-type") ?? "").includes("application/json")) {
     return NextResponse.json({ ok: true });

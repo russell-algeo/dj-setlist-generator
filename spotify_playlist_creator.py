@@ -1,8 +1,12 @@
 """Create Spotify playlists from setlists."""
 
+import os
+from typing import List, Optional
+
+import requests
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
-from typing import List, Optional
+
 from config import Config
 from detail_explorer_common import spotify_track_id
 
@@ -19,15 +23,19 @@ class SpotifyPlaylistCreator:
             return
 
         try:
-            # Initialize OAuth with user permissions
-            scope = "playlist-modify-public playlist-modify-private"
-            self.spotify = spotipy.Spotify(auth_manager=SpotifyOAuth(
-                client_id=Config.SPOTIFY_CLIENT_ID,
-                client_secret=Config.SPOTIFY_CLIENT_SECRET,
-                redirect_uri=Config.SPOTIFY_REDIRECT_URI,
-                scope=scope,
-                cache_path=".spotify_cache"
-            ))
+            managed_token = self._fetch_managed_access_token()
+            if managed_token:
+                self.spotify = spotipy.Spotify(auth=managed_token)
+            else:
+                # Local mode still uses the legacy OAuth cache flow.
+                scope = "playlist-modify-public playlist-modify-private"
+                self.spotify = spotipy.Spotify(auth_manager=SpotifyOAuth(
+                    client_id=Config.SPOTIFY_CLIENT_ID,
+                    client_secret=Config.SPOTIFY_CLIENT_SECRET,
+                    redirect_uri=Config.SPOTIFY_REDIRECT_URI,
+                    scope=scope,
+                    cache_path=".spotify_cache"
+                ))
 
             # Get current user ID
             user_info = self.spotify.me()
@@ -36,6 +44,30 @@ class SpotifyPlaylistCreator:
         except Exception as e:
             print(f"Failed to initialize Spotify playlist creator: {e}")
             self.spotify = None
+
+    def _fetch_managed_access_token(self) -> Optional[str]:
+        """Fetch a short-lived Spotify access token from the web app in remote mode."""
+        api_base_url = os.getenv("SET_LIST_API_BASE_URL") or os.getenv("APP_BASE_URL")
+        internal_secret = os.getenv("INTERNAL_WORKER_SHARED_SECRET")
+        set_run_id = os.getenv("SET_LIST_ACTIVE_SET_RUN_ID")
+
+        if not api_base_url or not internal_secret or not set_run_id:
+            return None
+
+        response = requests.post(
+            f"{api_base_url.rstrip('/')}/api/internal/spotify-token",
+            headers={"x-internal-secret": internal_secret},
+            json={"setRunId": set_run_id},
+            timeout=30,
+        )
+
+        if response.status_code == 404:
+            print("Spotify connection not found for this run; skipping managed playlist auth")
+            return None
+
+        response.raise_for_status()
+        payload = response.json()
+        return payload.get("access_token")
 
     def find_or_create_artist_playlist(self, artist_name: str) -> Optional[str]:
         """Find existing artist playlist by name or create a new one.

@@ -17,11 +17,96 @@ on:
           - production
 
 jobs:
-  process:
+  bootstrap:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 45
     env:
-      DATABASE_URL_MIGRATIONS: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      ENABLE_CHECKPOINTS: "false"
+      CONCURRENT_RECOGNITIONS: "2"
+      RECOGNITION_SLOT_COUNT: "2"
+      LEASE_SIZE: "10"
+      BATCH_SIZE: "10"
+      QUOTA_COOLDOWN_DURATION: "60"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          ffmpeg-version: release
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Bootstrap set run
+        run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
+
+      - name: Upload prepared audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: set-assets-${{ github.event.inputs.set_run_id }}
+          path: assets
+          if-no-files-found: error
+          retention-days: 1
+
+  recognize:
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        slot_index: [0, 1]
+    env:
+      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      ENABLE_CHECKPOINTS: "false"
+      CONCURRENT_RECOGNITIONS: "2"
+      RECOGNITION_SLOT_COUNT: "2"
+      LEASE_SIZE: "10"
+      BATCH_SIZE: "10"
+      QUOTA_COOLDOWN_DURATION: "60"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          ffmpeg-version: release
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download prepared audio
+        uses: actions/download-artifact@v4
+        with:
+          name: set-assets-${{ github.event.inputs.set_run_id }}
+          path: .
+
+      - name: Recognize lease slot
+        run: python -m worker.jobs.process_set --phase recognize --set-run-id "${{ github.event.inputs.set_run_id }}" --slot-index "${{ matrix.slot_index }}"
+
+  publish:
+    if: ${{ always() && needs.bootstrap.result == 'success' && needs.recognize.result == 'success' }}
+    needs:
+      - bootstrap
+      - recognize
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
       DATABASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_POOLED || secrets.DEVELOPMENT_DATABASE_URL_POOLED }}
       APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
@@ -34,7 +119,7 @@ jobs:
       AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
       TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
       ENABLE_DISCOGS: "true"
-      AUTO_CREATE_SPOTIFY_PLAYLIST: "true"
+      ENABLE_CHECKPOINTS: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -53,13 +138,39 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install ffmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Publish set run
+        run: python -m worker.jobs.process_set --phase publish --set-run-id "${{ github.event.inputs.set_run_id }}"
+
+  finalize:
+    if: ${{ always() }}
+    needs:
+      - bootstrap
+      - recognize
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
-          ffmpeg-version: release
+          python-version: "3.11"
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Run set processor
-        run: python -m worker.jobs.process_set --set-run-id "${{ github.event.inputs.set_run_id }}"
+      - name: Finalize run and dispatch next work
+        run: |
+          python -m worker.jobs.process_set \
+            --phase finalize \
+            --set-run-id "${{ github.event.inputs.set_run_id }}" \
+            --bootstrap-result "${{ needs.bootstrap.result }}" \
+            --recognize-result "${{ needs.recognize.result }}" \
+            --publish-result "${{ needs.publish.result }}"

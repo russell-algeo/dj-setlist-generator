@@ -53,11 +53,13 @@ class Config:
     JITTER_INTERVAL_SIZE = float(os.getenv('JITTER_INTERVAL_SIZE', '4.0'))  # Random jitter range is (0, size^2)
 
     # Concurrency Settings
-    CONCURRENT_RECOGNITIONS = int(os.getenv('CONCURRENT_RECOGNITIONS', '5'))  # Number of parallel requests
-    BATCH_SIZE = int(os.getenv('BATCH_SIZE', '20'))  # Segments per batch for checkpointing
+    CONCURRENT_RECOGNITIONS = int(os.getenv('CONCURRENT_RECOGNITIONS', '2'))  # Number of parallel requests
+    BATCH_SIZE = int(os.getenv('BATCH_SIZE', '10'))  # Segments per batch for checkpointing
+    RECOGNITION_SLOT_COUNT = int(os.getenv('RECOGNITION_SLOT_COUNT', '2'))
+    LEASE_SIZE = int(os.getenv('LEASE_SIZE', '10'))
 
     # Quota-Aware Throttling Settings
-    QUOTA_COOLDOWN_DURATION = int(os.getenv('QUOTA_COOLDOWN_DURATION', '180'))  # Seconds to wait when quota exhausted
+    QUOTA_COOLDOWN_DURATION = int(os.getenv('QUOTA_COOLDOWN_DURATION', '60'))  # Seconds to wait when quota exhausted
 
     # Artist image validation settings
     ARTIST_IMAGE_MIN_GENRE_OVERLAP = float(os.getenv('ARTIST_IMAGE_MIN_GENRE_OVERLAP', '0.2'))

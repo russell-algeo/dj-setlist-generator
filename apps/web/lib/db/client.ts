@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/neon-http";
 import { env, requireEnv } from "@/lib/env";
 import * as schema from "@/lib/db/schema";
 
-neonConfig.fetchConnectionCache = true;
+neonConfig.poolQueryViaFetch = true;
 
 export const getDb = () => {
   const connectionString = env.databaseUrl ?? requireEnv("databaseUrl");

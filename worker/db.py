@@ -11,6 +11,17 @@ from psycopg.types.json import Json
 
 from worker.config import get_settings
 
+ACTIVE_SET_RUN_STATUSES = (
+    "dispatched",
+    "resolving",
+    "recognizing",
+    "aggregating",
+    "enriching",
+    "publishing",
+    "running",
+    "cancelling",
+)
+
 
 def _database_url() -> str:
     settings = get_settings()
@@ -93,6 +104,24 @@ def touch_set_run(set_run_id: str, stage: str | None = None, status: str | None 
     )
 
 
+def mark_run_stage(
+    set_run_id: str,
+    *,
+    status: str,
+    stage: str,
+    error_summary: str | None = None,
+    published_set_id: str | None = None,
+) -> dict[str, Any] | None:
+    return fetch_one(
+        """
+        select *
+        from ops.mark_run_stage(%s, %s, %s, %s, %s)
+        limit 1
+        """,
+        (set_run_id, status, stage, error_summary, published_set_id),
+    )
+
+
 def mark_set_run(
     set_run_id: str,
     *,
@@ -115,6 +144,148 @@ def mark_set_run(
         where id = %s
         """,
         (status, stage, error_summary, published_set_id, status, set_run_id),
+    )
+
+
+def update_set_run_metadata(
+    set_run_id: str,
+    metadata: dict[str, Any],
+    *,
+    set_title: str | None = None,
+    source_platform: str | None = None,
+) -> None:
+    execute(
+        """
+        update ops.set_runs
+        set
+          set_title = coalesce(%s, set_title),
+          source_platform = coalesce(%s, source_platform),
+          source_metadata = coalesce(source_metadata, '{}'::jsonb) || %s,
+          heartbeat_at = now(),
+          updated_at = now()
+        where id = %s
+        """,
+        (
+            set_title,
+            source_platform,
+            json_value(metadata),
+            set_run_id,
+        ),
+    )
+
+
+def initialize_set_run_leases(
+    set_run_id: str,
+    *,
+    total_segments: int,
+    slot_count: int,
+    lease_size: int,
+) -> int:
+    row = fetch_one(
+        """
+        select ops.initialize_set_run_leases(%s, %s, %s, %s) as lease_count
+        """,
+        (set_run_id, total_segments, slot_count, lease_size),
+    )
+    return int(row["lease_count"]) if row else 0
+
+
+def claim_next_lease(set_run_id: str, *, slot_index: int, worker_name: str) -> dict[str, Any] | None:
+    return fetch_one(
+        """
+        select *
+        from ops.claim_next_lease(%s, %s, %s)
+        limit 1
+        """,
+        (set_run_id, slot_index, worker_name),
+    )
+
+
+def complete_lease(lease_id: str, *, success: bool, error_text: str | None = None) -> None:
+    execute(
+        """
+        select ops.complete_lease(%s, %s, %s)
+        """,
+        (lease_id, success, error_text),
+    )
+
+
+def upsert_segment_hit(
+    *,
+    set_run_id: str,
+    lease_id: str | None,
+    segment_index: int,
+    timestamp_seconds: float,
+    track_title: str | None,
+    artist: str | None,
+    shazam_track_id: str | None,
+    recognized: bool,
+    raw_data: dict[str, Any] | None,
+) -> None:
+    execute(
+        """
+        insert into ops.segment_hits (
+          set_run_id,
+          lease_id,
+          segment_index,
+          timestamp_seconds,
+          track_title,
+          artist,
+          shazam_track_id,
+          recognized,
+          raw_data
+        )
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        on conflict (set_run_id, segment_index)
+        do update
+        set
+          lease_id = excluded.lease_id,
+          timestamp_seconds = excluded.timestamp_seconds,
+          track_title = excluded.track_title,
+          artist = excluded.artist,
+          shazam_track_id = excluded.shazam_track_id,
+          recognized = excluded.recognized,
+          raw_data = excluded.raw_data
+        """,
+        (
+            set_run_id,
+            lease_id,
+            segment_index,
+            timestamp_seconds,
+            track_title,
+            artist,
+            shazam_track_id,
+            recognized,
+            json_value(raw_data) if raw_data is not None else None,
+        ),
+    )
+
+
+def list_segment_hits(set_run_id: str) -> list[dict[str, Any]]:
+    return fetch_all(
+        """
+        select *
+        from ops.segment_hits
+        where set_run_id = %s
+        order by segment_index asc
+        """,
+        (set_run_id,),
+    )
+
+
+def get_lease_rollup(set_run_id: str) -> dict[str, Any] | None:
+    return fetch_one(
+        """
+        select
+          count(*) filter (where status = 'pending') as pending_count,
+          count(*) filter (where status = 'claimed') as claimed_count,
+          count(*) filter (where status = 'completed') as completed_count,
+          count(*) filter (where status = 'failed') as failed_count,
+          count(*) as total_count
+        from ops.set_run_leases
+        where set_run_id = %s
+        """,
+        (set_run_id,),
     )
 
 
@@ -142,14 +313,14 @@ def finalize_submission_from_runs(submission_id: str) -> None:
     rollup = fetch_one(
         """
         select
-          count(*) filter (where status in ('queued', 'running', 'cancelling')) as active_count,
+          count(*) filter (where status = 'queued' or status = any(%s)) as active_count,
           count(*) filter (where status = 'failed') as failed_count,
           count(*) filter (where status = 'cancelled') as cancelled_count,
           count(*) as total_count
         from ops.set_runs
         where submission_id = %s
         """,
-        (submission_id,),
+        (list(ACTIVE_SET_RUN_STATUSES), submission_id),
     )
 
     if not rollup or int(rollup["total_count"] or 0) == 0:
@@ -168,4 +339,3 @@ def finalize_submission_from_runs(submission_id: str) -> None:
         return
 
     mark_submission(submission_id, status="completed")
-

@@ -8,6 +8,13 @@
       "when": 1774445272740,
       "tag": "0000_natural_mockingbird",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774494000000,
+      "tag": "0001_phase_claims",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,8 @@ import { getDb } from "@/lib/db/client";
 import {
   apiTokens,
   discoveryCandidates,
+  segmentHits,
+  setRunLeases,
   setRuns,
   submissions,
   workerEvents,
@@ -13,6 +15,16 @@ import {
 import type { SessionActor } from "@/lib/auth/session";
 
 const db = getDb();
+const activeSetRunStatuses = [
+  "dispatched",
+  "resolving",
+  "recognizing",
+  "aggregating",
+  "enriching",
+  "publishing",
+  "running",
+  "cancelling",
+] as const;
 
 const submissionSchema = z
   .object({
@@ -285,7 +297,12 @@ export const markSubmissionCancelled = async (submissionId: string) => {
       updatedAt: now,
       completedAt: sql`case when ${setRuns.status} = 'queued' then now() else ${setRuns.completedAt} end`,
     })
-    .where(and(eq(setRuns.submissionId, submissionId), inArray(setRuns.status, ["queued", "running"])));
+    .where(
+      and(
+        eq(setRuns.submissionId, submissionId),
+        inArray(setRuns.status, ["queued", ...activeSetRunStatuses]),
+      ),
+    );
 
   await createWorkerEvent({
     submissionId,
@@ -296,6 +313,18 @@ export const markSubmissionCancelled = async (submissionId: string) => {
 
 export const retrySubmission = async (submissionId: string) => {
   const now = new Date();
+
+  const runIds = await db
+    .select({ id: setRuns.id })
+    .from(setRuns)
+    .where(eq(setRuns.submissionId, submissionId));
+
+  if (runIds.length > 0) {
+    const ids = runIds.map((row) => row.id);
+    await db.delete(discoveryCandidates).where(eq(discoveryCandidates.submissionId, submissionId));
+    await db.delete(segmentHits).where(inArray(segmentHits.setRunId, ids));
+    await db.delete(setRunLeases).where(inArray(setRunLeases.setRunId, ids));
+  }
 
   await db
     .update(submissions)
@@ -330,30 +359,16 @@ export const retrySubmission = async (submissionId: string) => {
 };
 
 export const dispatchQueuedArtistSubmission = async () => {
-  const [submission] = await db
-    .select()
-    .from(submissions)
-    .where(
-      and(
-        eq(submissions.mode, "artist"),
-        eq(submissions.status, "queued"),
-        isNull(submissions.cancelRequestedAt),
-      ),
-    )
-    .orderBy(asc(submissions.createdAt))
-    .limit(1);
+  const claimed = await db.execute(sql`select * from ops.claim_next_artist_submission() limit 1`);
+  const claimedSubmissionId = claimed.rows[0]?.id ? String(claimed.rows[0].id) : null;
+
+  const [submission] = claimedSubmissionId
+    ? await db.select().from(submissions).where(eq(submissions.id, claimedSubmissionId)).limit(1)
+    : [];
 
   if (!submission) {
     return null;
   }
-
-  await db
-    .update(submissions)
-    .set({
-      status: "running",
-      updatedAt: new Date(),
-    })
-    .where(eq(submissions.id, submission.id));
 
   try {
     const result = await dispatchDiscoverArtistWorkflow(submission.id);
@@ -386,42 +401,28 @@ export const dispatchQueuedArtistSubmission = async () => {
 };
 
 export const dispatchNextQueuedSetRun = async () => {
-  const [activeRun] = await db
-    .select({ id: setRuns.id })
-    .from(setRuns)
-    .where(eq(setRuns.status, "running"))
-    .limit(1);
+  const claimed = await db.execute(sql`select * from ops.claim_next_dispatchable_set_run(1) limit 1`);
+  const claimedSetRunId = claimed.rows[0]?.id ? String(claimed.rows[0].id) : null;
 
-  if (activeRun) {
-    return {
-      setRun: null,
-      result: { dispatched: false, reason: "active_run_present" } as const,
-    };
-  }
-
-  const [queuedRun] = await db
-    .select()
-    .from(setRuns)
-    .where(and(eq(setRuns.status, "queued"), isNull(setRuns.cancelRequestedAt)))
-    .orderBy(asc(setRuns.createdAt))
-    .limit(1);
+  const [queuedRun] = claimedSetRunId
+    ? await db.select().from(setRuns).where(eq(setRuns.id, claimedSetRunId)).limit(1)
+    : [];
 
   if (!queuedRun) {
+    const [activeRun] = await db
+      .select({ id: setRuns.id })
+      .from(setRuns)
+      .where(inArray(setRuns.status, [...activeSetRunStatuses]))
+      .limit(1);
+
     return {
       setRun: null,
-      result: { dispatched: false, reason: "queue_empty" } as const,
+      result: {
+        dispatched: false,
+        reason: activeRun ? "active_run_present" : "queue_empty",
+      } as const,
     };
   }
-
-  await db
-    .update(setRuns)
-    .set({
-      status: "running",
-      stage: "dispatched",
-      heartbeatAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(setRuns.id, queuedRun.id));
 
   await db
     .update(submissions)
@@ -474,6 +475,18 @@ export const dispatchNextQueuedSetRun = async () => {
   }
 };
 
+export const dispatchPendingWork = async () => {
+  const [artistDispatch, setDispatch] = await Promise.all([
+    dispatchQueuedArtistSubmission(),
+    dispatchNextQueuedSetRun(),
+  ]);
+
+  return {
+    artistDispatch,
+    setDispatch,
+  };
+};
+
 export const runSchedulerRecovery = async () => {
   const leaseRecovery = await db.execute(
     sql`select ops.recover_stale_leases(interval '15 minutes') as recovered`,
@@ -482,10 +495,7 @@ export const runSchedulerRecovery = async () => {
     sql`select ops.recover_stale_set_runs(interval '30 minutes') as recovered`,
   );
 
-  const [artistDispatch, setDispatch] = await Promise.all([
-    dispatchQueuedArtistSubmission(),
-    dispatchNextQueuedSetRun(),
-  ]);
+  const { artistDispatch, setDispatch } = await dispatchPendingWork();
 
   return {
     recoveredLeases: Number(leaseRecovery.rows[0]?.recovered ?? 0),

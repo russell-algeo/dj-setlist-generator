@@ -4,8 +4,7 @@ import { assertAllowlisted, getRequestActor } from "@/lib/auth/session";
 import { isJsonRequest, readRequestBody } from "@/lib/http/request-body";
 import {
   createSubmission,
-  dispatchNextQueuedSetRun,
-  dispatchQueuedArtistSubmission,
+  dispatchPendingWork,
   parseSubmissionInput,
 } from "@/lib/jobs/service";
 
@@ -41,12 +40,7 @@ export async function POST(request: Request) {
   });
 
   const submission = await createSubmission(actor!, input);
-
-  if (input.mode === "artist") {
-    await dispatchQueuedArtistSubmission();
-  } else {
-    await dispatchNextQueuedSetRun();
-  }
+  await dispatchPendingWork();
 
   if (isJsonRequest(request) || actor?.authType === "api_token") {
     return NextResponse.json({ submissionId: submission.id }, { status: 201 });

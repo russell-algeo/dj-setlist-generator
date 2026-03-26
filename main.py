@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from typing import Callable
 from pathlib import Path
 from config import Config
 from notifier import Notifier
@@ -30,7 +31,8 @@ class SetlistGenerator:
         self.enricher = MetadataEnricher()
 
     async def generate(self, url: str, output_name: str = None, resume: bool = True,
-                       artist_name: str = None, artist_playlist_id: str = None):
+                       artist_name: str = None, artist_playlist_id: str = None,
+                       progress_callback: Callable[[str], None] | None = None):
         """
         Generate setlist from URL.
 
@@ -48,6 +50,10 @@ class SetlistGenerator:
         print("=" * 70)
         print("DJ SET SETLIST GENERATOR")
         print("=" * 70)
+
+        def emit_progress(stage: str):
+            if progress_callback:
+                progress_callback(stage)
 
         # Step 1: Get video info first to get mix name
         print("\n[1/5] Fetching video information...")
@@ -112,6 +118,7 @@ class SetlistGenerator:
 
                 # Step 2: Download audio (or skip if exists)
                 print("\n[2/5] Downloading audio...")
+                emit_progress("downloading")
                 audio_path = checkpoint_manager.audio_file
                 audio_file = downloader.download(url, output_path=audio_path)
 
@@ -126,6 +133,7 @@ class SetlistGenerator:
                 # immediately after each batch.  This avoids writing all 250-400
                 # segment files to disk before recognition can begin.
                 print("\n[3/5] Streaming recognition (segment + recognize on-the-fly)...")
+                emit_progress("recognizing")
                 should_resume = bool(checkpoint and checkpoint['stage'] == STAGE_RECOGNIZING)
                 recognitions = await recognizer.recognize_segments_streaming(
                     audio_file,
@@ -136,6 +144,7 @@ class SetlistGenerator:
 
             # Step 4: Build setlist
             print("\n[4/5] Building setlist...")
+            emit_progress("aggregating")
             tracks = self.builder.build_setlist(recognitions)
             tracks = self.builder.add_unknown_tracks(tracks, recognitions)
 
@@ -149,6 +158,7 @@ class SetlistGenerator:
 
             # Step 5: Enrich and save
             print("\n[5/5] Enriching metadata and saving...")
+            emit_progress("enriching")
             enriched_tracks = self.enricher.enrich_all_tracks(tracks)
 
             if artist_name:

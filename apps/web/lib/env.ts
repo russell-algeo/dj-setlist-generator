@@ -13,8 +13,15 @@ export const env = {
   deploymentTarget: getDeploymentTarget(),
   nextAuthUrl: get("NEXTAUTH_URL") ?? get("APP_BASE_URL"),
   databaseUrl: get("DATABASE_URL") ?? get("DEVELOPMENT_DATABASE_URL_POOLED"),
+  databaseUrlDirect:
+    get("DATABASE_URL_DIRECT") ??
+    get("DATABASE_URL_MIGRATIONS") ??
+    get("DEVELOPMENT_DATABASE_URL_DIRECT"),
   databaseUrlMigrations:
-    get("DATABASE_URL_MIGRATIONS") ?? get("DEVELOPMENT_DATABASE_URL_DIRECT"),
+    get("DATABASE_URL_MIGRATIONS") ??
+    get("DATABASE_URL_DIRECT") ??
+    get("DEVELOPMENT_DATABASE_URL_MIGRATIONS") ??
+    get("DEVELOPMENT_DATABASE_URL_DIRECT"),
   authSecret: get("AUTH_SECRET") ?? get("NEXTAUTH_SECRET"),
   authGoogleId: get("AUTH_GOOGLE_ID"),
   authGoogleSecret: get("AUTH_GOOGLE_SECRET"),

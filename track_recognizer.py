@@ -9,7 +9,7 @@ from pathlib import Path
 from shazamio import Shazam, HTTPClient
 from aiohttp_retry import JitterRetry
 from dataclasses import dataclass, fields
-from typing import Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 from config import Config
 
 if TYPE_CHECKING:
@@ -176,6 +176,70 @@ class TrackRecognizer:
                 return result
             await self._trigger_quota_cooldown()
 
+    async def recognize_batch(
+        self,
+        batch_segments: list[dict],
+        *,
+        total_segments: int | None = None,
+        batch_start: int = 0,
+        on_result: Callable[[Recognition], None] | None = None,
+        cleanup_files: bool = True,
+    ) -> list[Recognition]:
+        """Recognize a prepared batch of extracted segment files."""
+        semaphore = asyncio.Semaphore(Config.CONCURRENT_RECOGNITIONS)
+
+        async def _recognize_with_semaphore(segment: dict) -> Recognition:
+            async with semaphore:
+                return await self.recognize_segment_with_backoff(segment)
+
+        batch_results = await asyncio.gather(
+            *[_recognize_with_semaphore(segment) for segment in batch_segments],
+            return_exceptions=True,
+        )
+
+        recognitions: list[Recognition] = []
+        total = total_segments or len(batch_segments)
+
+        for index, (segment, result) in enumerate(zip(batch_segments, batch_results)):
+            global_idx = batch_start + index + 1
+
+            if isinstance(result, Exception):
+                print(
+                    f"  ⚠️  [{global_idx}/{total}] "
+                    f"Unexpected exception: {type(result).__name__}: {result}"
+                )
+                result = Recognition(
+                    timestamp=segment["timestamp"],
+                    track_title=None,
+                    artist=None,
+                    shazam_track_id=None,
+                    raw_data=None,
+                    recognized=False,
+                    segment_index=segment["index"],
+                    error_type=type(result).__name__,
+                    error_details=str(result),
+                )
+
+            recognitions.append(result)
+            if on_result:
+                on_result(result)
+
+            status = "✓" if result.recognized else "✗"
+            track_info = (
+                f"{result.artist} - {result.track_title}"
+                if result.recognized
+                else "Not recognized"
+            )
+            print(f"  [{global_idx}/{total}] {segment['timestamp'] / 60:.1f}min {status} {track_info}")
+
+            if cleanup_files:
+                try:
+                    segment["file"].unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        return recognitions
+
     async def recognize_segments_streaming(
         self,
         audio_file: Path,
@@ -251,12 +315,6 @@ class TrackRecognizer:
             )
 
         # --- Semaphore + per-segment recognize helper ------------------------
-        semaphore = asyncio.Semaphore(Config.CONCURRENT_RECOGNITIONS)
-
-        async def _recognize_with_semaphore(segment: dict) -> Recognition:
-            async with semaphore:
-                return await self.recognize_segment_with_backoff(segment)
-
         # --- Batch loop (producer-consumer pipeline) --------------------------
         # The producer extracts FFmpeg segments for batch N+1 while the
         # consumer is recognising batch N with Shazam, hiding the FFmpeg
@@ -324,49 +382,13 @@ class TrackRecognizer:
 
                 batch_segments = payload
 
-                # Recognize all segments in the batch concurrently.
-                tasks = [_recognize_with_semaphore(seg) for seg in batch_segments]
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # Record results, print progress, delete segment files.
-                batch_recognized = 0
-                for i, (seg, result) in enumerate(zip(batch_segments, batch_results)):
-                    global_idx = batch_start + i + 1
-
-                    if isinstance(result, Exception):
-                        print(
-                            f"  ⚠️  [{global_idx}/{total}] "
-                            f"Unexpected exception: {type(result).__name__}: {result}"
-                        )
-                        result = Recognition(
-                            timestamp=seg['timestamp'],
-                            track_title=None,
-                            artist=None,
-                            shazam_track_id=None,
-                            raw_data=None,
-                            recognized=False,
-                            segment_index=seg['index'],
-                            error_type=type(result).__name__,
-                            error_details=str(result),
-                        )
-
-                    if result.recognized:
-                        batch_recognized += 1
-                    recognitions.append(result)
-
-                    status = "✓" if result.recognized else "✗"
-                    track_info = (
-                        f"{result.artist} - {result.track_title}"
-                        if result.recognized
-                        else "Not recognized"
-                    )
-                    print(f"  [{global_idx}/{total}] {seg['timestamp'] / 60:.1f}min {status} {track_info}")
-
-                    # Delete segment file immediately — no longer needed.
-                    try:
-                        seg['file'].unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                batch_results = await self.recognize_batch(
+                    batch_segments,
+                    total_segments=total,
+                    batch_start=batch_start,
+                )
+                batch_recognized = sum(1 for result in batch_results if result.recognized)
+                recognitions.extend(batch_results)
 
                 # Save incremental checkpoint.
                 if self.checkpoint_manager:

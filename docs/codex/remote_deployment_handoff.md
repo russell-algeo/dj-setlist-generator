@@ -17,6 +17,9 @@
   - `python3 -m compileall worker`
   - `python3 -m worker.cli --help`
   - Browser validation for `/artists`, `/artists/[slug]`, and `/sets/[slug]`
+- Supporting scripts:
+  - `scripts/manage_neon_roles.py`
+  - `scripts/apply_drizzle_sql_migrations.py`
 
 ## Vercel Project Setup
 1. Create a new Vercel project from this GitHub repository.
@@ -35,9 +38,12 @@ Set these in Vercel before production use.
 - `DATABASE_URL`
   - Production: Neon `production` pooled URL
   - Preview / development: Neon `development` pooled URL
+- `DATABASE_URL_DIRECT`
+  - Production: Neon `production` worker direct URL
+  - Preview / development: Neon `development` worker direct URL
 - `DATABASE_URL_MIGRATIONS`
-  - Production: Neon `production` direct URL
-  - Preview / development: Neon `development` direct URL
+  - Production: Neon `production` migrator direct URL
+  - Preview / development: Neon `development` migrator direct URL
 - `AUTH_SECRET`
   - Generate with `openssl rand -base64 32`
 - `TOKEN_ENCRYPTION_KEY`
@@ -78,9 +84,11 @@ The workflows now support both development and production dispatch targets.
 Add these repository secrets:
 - `DEVELOPMENT_DATABASE_URL_POOLED`
 - `DEVELOPMENT_DATABASE_URL_DIRECT`
+- `DEVELOPMENT_DATABASE_URL_MIGRATIONS`
 - `DEVELOPMENT_APP_BASE_URL`
 - `PRODUCTION_DATABASE_URL_POOLED`
 - `PRODUCTION_DATABASE_URL_DIRECT`
+- `PRODUCTION_DATABASE_URL_MIGRATIONS`
 - `PRODUCTION_APP_BASE_URL`
 - Both app base URL secrets must use the public alias or final custom domain, not a protected deployment URL
 - `INTERNAL_WORKER_SHARED_SECRET`
@@ -112,6 +120,15 @@ Redirect URI:
 - Production Vercel deployments dispatch with `production`.
 - Local, preview, and development environments dispatch with `development`.
 - The scheduled GitHub workflow defaults to `production`.
+- `process-set.yml` now runs in four phases:
+  - bootstrap
+  - matrix recognition (`slot_index: 0, 1`)
+  - publish
+  - finalize
+- The Python worker now uses:
+  - pooled app credentials for archive import
+  - direct worker credentials for queue/runtime updates
+  - direct migrator credentials for schema changes
 
 ## Recommended Post-Deploy Checks
 1. Sign in with `russellalgeo@gmail.com`.
