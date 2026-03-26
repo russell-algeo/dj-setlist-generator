@@ -93,7 +93,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: set-assets-${{ github.event.inputs.set_run_id }}
-          path: .
+          path: assets
 
       - name: Recognize lease slot
         run: python -m worker.jobs.process_set --phase recognize --set-run-id "${{ github.event.inputs.set_run_id }}" --slot-index "${{ matrix.slot_index }}"
