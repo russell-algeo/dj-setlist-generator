@@ -174,6 +174,22 @@ def update_set_run_metadata(
     )
 
 
+def get_active_workflow_run_id(set_run_id: str) -> str | None:
+    row = fetch_one(
+        """
+        select source_metadata->>'active_workflow_run_id' as active_workflow_run_id
+        from ops.set_runs
+        where id = %s
+        """,
+        (set_run_id,),
+    )
+    if not row:
+        return None
+
+    value = row.get("active_workflow_run_id")
+    return str(value) if value else None
+
+
 def initialize_set_run_leases(
     set_run_id: str,
     *,

@@ -8,6 +8,8 @@ import os
 import socket
 from pathlib import Path
 
+from psycopg.errors import ForeignKeyViolation
+
 from config import Config
 from worker.config import get_settings
 from worker.db import (
@@ -15,6 +17,7 @@ from worker.db import (
     complete_lease,
     fetch_one,
     finalize_submission_from_runs,
+    get_active_workflow_run_id,
     get_lease_rollup,
     insert_worker_event,
     initialize_set_run_leases,
@@ -25,6 +28,10 @@ from worker.db import (
     update_set_run_metadata,
 )
 from worker.scheduler import build_scheduler_plan
+
+
+class WorkflowSupersededError(RuntimeError):
+    """Raised when a newer workflow run takes ownership of the set run."""
 
 
 def _dispatch_pending() -> None:
@@ -134,6 +141,27 @@ def _load_run(set_run_id: str) -> dict[str, object]:
     return run_row
 
 
+def _workflow_run_id() -> str | None:
+    value = os.getenv("GITHUB_RUN_ID")
+    return value.strip() if value else None
+
+
+def _workflow_superseded(set_run_id: str) -> bool:
+    workflow_run_id = _workflow_run_id()
+    if not workflow_run_id:
+        return False
+
+    active_workflow_run_id = get_active_workflow_run_id(set_run_id)
+    return bool(active_workflow_run_id and active_workflow_run_id != workflow_run_id)
+
+
+def _assert_workflow_ownership(set_run_id: str) -> None:
+    if _workflow_superseded(set_run_id):
+        raise WorkflowSupersededError(
+            f"Workflow run {_workflow_run_id()} is no longer the active owner for {set_run_id}",
+        )
+
+
 def _record_stage_change(
     run_row: dict[str, object],
     *,
@@ -174,6 +202,12 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
     from worker.pipeline.recognize import prepare_set_context, serialize_prepared_context
 
     run_row = _load_run(set_run_id)
+    workflow_run_id = _workflow_run_id()
+    if workflow_run_id:
+        update_set_run_metadata(
+            set_run_id,
+            {"active_workflow_run_id": workflow_run_id},
+        )
     _record_stage_change(
         run_row,
         status="resolving",
@@ -240,6 +274,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
     from worker.pipeline.recognize import recognize_segment_range, restore_set_context
 
     run_row = _load_run(set_run_id)
+    _assert_workflow_ownership(set_run_id)
     source_metadata = dict(run_row.get("source_metadata") or {})
     context = restore_set_context(
         str(run_row["source_url"]),
@@ -264,6 +299,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
 
     try:
         while True:
+            _assert_workflow_ownership(set_run_id)
             lease = claim_next_lease(set_run_id, slot_index=slot_index, worker_name=worker_name)
             if not lease:
                 break
@@ -283,19 +319,27 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
 
             def persist_result(result) -> None:
                 nonlocal recognized
+                _assert_workflow_ownership(set_run_id)
                 if result.recognized:
                     recognized += 1
-                upsert_segment_hit(
-                    set_run_id=set_run_id,
-                    lease_id=lease_id,
-                    segment_index=result.segment_index,
-                    timestamp_seconds=result.timestamp,
-                    track_title=result.track_title,
-                    artist=result.artist,
-                    shazam_track_id=result.shazam_track_id,
-                    recognized=result.recognized,
-                    raw_data=result.raw_data,
-                )
+                try:
+                    upsert_segment_hit(
+                        set_run_id=set_run_id,
+                        lease_id=lease_id,
+                        segment_index=result.segment_index,
+                        timestamp_seconds=result.timestamp,
+                        track_title=result.track_title,
+                        artist=result.artist,
+                        shazam_track_id=result.shazam_track_id,
+                        recognized=result.recognized,
+                        raw_data=result.raw_data,
+                    )
+                except ForeignKeyViolation as error:
+                    if _workflow_superseded(set_run_id):
+                        raise WorkflowSupersededError(
+                            f"Lease {lease_id} was superseded by a newer workflow run",
+                        ) from error
+                    raise
 
             try:
                 await recognize_segment_range(
@@ -304,6 +348,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
                     end_index=end_index,
                     on_result=persist_result,
                 )
+                _assert_workflow_ownership(set_run_id)
                 complete_lease(lease_id, success=True)
                 insert_worker_event(
                     submission_id=str(run_row["submission_id"]),
@@ -317,6 +362,8 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
                     status="recognizing",
                     stage=f"slot_{slot_index}_recognizing",
                 )
+            except WorkflowSupersededError:
+                raise
             except Exception as error:
                 complete_lease(lease_id, success=False, error_text=str(error))
                 insert_worker_event(
@@ -336,6 +383,15 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
             details={"slot_index": slot_index, "lease_count": claimed, "recognized_count": recognized},
         )
         return {"lease_count": claimed, "recognized_count": recognized}
+    except WorkflowSupersededError as error:
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.workflow_superseded",
+            message=str(error),
+            details={"slot_index": slot_index, "lease_count": claimed, "recognized_count": recognized},
+        )
+        return {"lease_count": claimed, "recognized_count": recognized}
     except Exception:
         # Let the finalize phase decide the terminal run state after the workflow result is known.
         raise
@@ -347,6 +403,7 @@ async def publish_phase(set_run_id: str) -> str | None:
     from worker.pipeline.recognize import restore_set_context
 
     run_row = _load_run(set_run_id)
+    _assert_workflow_ownership(set_run_id)
     source_metadata = dict(run_row.get("source_metadata") or {})
     rollup = get_lease_rollup(set_run_id)
 
@@ -445,6 +502,7 @@ async def publish_phase(set_run_id: str) -> str | None:
             message="Publishing canonical set data and legacy page",
         )
 
+        _assert_workflow_ownership(set_run_id)
         set_payload = build_set_payload(
             enriched_tracks=enriched_tracks,
             mix_info=mix_info,
@@ -497,6 +555,15 @@ async def publish_phase(set_run_id: str) -> str | None:
         _revalidate(revalidate_paths)
 
         return published_set_id
+    except WorkflowSupersededError as error:
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.workflow_superseded",
+            message=str(error),
+            details={"phase": "publish"},
+        )
+        return None
     except Exception as error:
         _mark_failed(run_row, error, stage="publish_failed")
         raise

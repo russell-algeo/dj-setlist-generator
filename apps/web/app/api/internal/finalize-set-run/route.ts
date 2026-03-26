@@ -7,6 +7,7 @@ import { finalizeSetRunWorkflow } from "@/lib/jobs/service";
 
 const finalizePayloadSchema = z.object({
   setRunId: z.string().uuid(),
+  workflowRunId: z.string().optional(),
   bootstrapResult: z.string().default("success"),
   recognizeResult: z.string().default("success"),
   publishResult: z.string().default("success"),

@@ -767,6 +767,7 @@ export const dispatchPendingWork = async () => {
 
 export const finalizeSetRunWorkflow = async (values: {
   setRunId: string;
+  workflowRunId?: string;
   bootstrapResult: string;
   recognizeResult: string;
   publishResult: string;
@@ -780,7 +781,14 @@ export const finalizeSetRunWorkflow = async (values: {
   }
 
   const { run, recognitionComplete, leaseRollup, hitCount, segmentCount } = state;
+  const sourceMetadata = (run.sourceMetadata ?? {}) as Record<string, unknown>;
+  const activeWorkflowRunId =
+    typeof sourceMetadata.active_workflow_run_id === "string"
+      ? sourceMetadata.active_workflow_run_id
+      : null;
   const details = {
+    workflowRunId: values.workflowRunId ?? null,
+    activeWorkflowRunId,
     bootstrapResult: values.bootstrapResult,
     recognizeResult: values.recognizeResult,
     publishResult: values.publishResult,
@@ -789,6 +797,19 @@ export const finalizeSetRunWorkflow = async (values: {
     segmentCount,
     attemptCount: run.attemptCount,
   };
+
+  if (values.workflowRunId && activeWorkflowRunId && values.workflowRunId !== activeWorkflowRunId) {
+    await createWorkerEvent({
+      submissionId: run.submissionId,
+      setRunId: run.id,
+      eventType: "set_run.finalize_superseded",
+      message: `Ignoring finalize from superseded workflow ${values.workflowRunId}`,
+      details,
+    });
+    return {
+      action: "superseded_workflow_finalize_ignored" as const,
+    };
+  }
 
   if (terminalSetRunStatuses.includes(run.status as (typeof terminalSetRunStatuses)[number])) {
     await syncSubmissionStatusFromRuns(run.submissionId);
