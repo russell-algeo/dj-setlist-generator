@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from track_recognizer import Recognition
 from setlist_builder import SetlistBuilder, Track
+from worker.pipeline.models import Recognition
 
 
 def recognitions_from_segment_hits(segment_hits: list[dict[str, object]]) -> list[Recognition]:

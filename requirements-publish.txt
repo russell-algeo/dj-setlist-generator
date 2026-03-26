@@ -1,0 +1,4 @@
+-r requirements-base.txt
+yt-dlp>=2024.1.0
+spotipy>=2.23.0
+requests>=2.31.0

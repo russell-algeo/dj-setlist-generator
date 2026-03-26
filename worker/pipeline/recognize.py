@@ -10,7 +10,7 @@ from typing import Callable
 from audio_downloader import AudioDownloader
 from audio_segmenter import AudioSegmenter
 from checkpoint_manager import CheckpointManager
-from track_recognizer import Recognition, TrackRecognizer
+from worker.pipeline.models import Recognition
 
 
 @dataclass(slots=True)
@@ -117,6 +117,8 @@ async def recognize_segment_range(
     end_index: int,
     on_result: Callable[[Recognition], None] | None = None,
 ) -> list[Recognition]:
+    from track_recognizer import TrackRecognizer
+
     segmenter = AudioSegmenter(checkpoint_manager=context.checkpoint_manager)
     recognizer = TrackRecognizer()
     max_workers = max(1, min(end_index - start_index + 1, 4))
@@ -140,7 +142,6 @@ async def recognize_segment_range(
 __all__ = [
     "PreparedSetContext",
     "Recognition",
-    "TrackRecognizer",
     "build_checkpoint_manager",
     "prepare_set_context",
     "recognize_segment_range",

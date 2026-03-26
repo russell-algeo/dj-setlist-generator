@@ -6,34 +6,16 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from shazamio import Shazam, HTTPClient
-from aiohttp_retry import JitterRetry
-from dataclasses import dataclass, fields
 from typing import Callable, Optional, TYPE_CHECKING
+
+from aiohttp_retry import JitterRetry
+from shazamio import HTTPClient, Shazam
+
 from config import Config
+from worker.pipeline.models import Recognition
 
 if TYPE_CHECKING:
     from audio_segmenter import AudioSegmenter
-
-@dataclass
-class Recognition:
-    """Recognition result from Shazam."""
-    timestamp: float
-    track_title: Optional[str]
-    artist: Optional[str]
-    shazam_track_id: Optional[str]
-    raw_data: Optional[dict]
-    recognized: bool
-    segment_index: int
-    was_rate_limited: bool = False  # True if request failed due to 429 after exhausting retries
-    error_type: Optional[str] = None
-    error_details: Optional[str] = None
-
-    @classmethod
-    def from_checkpoint(cls, data: dict) -> 'Recognition':
-        """Create a Recognition from checkpoint data, ignoring unknown fields."""
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class TrackRecognizer:

@@ -8,8 +8,6 @@ import os
 import socket
 from pathlib import Path
 
-import requests
-
 from config import Config
 from worker.config import get_settings
 from worker.db import (
@@ -26,18 +24,12 @@ from worker.db import (
     upsert_segment_hit,
     update_set_run_metadata,
 )
-from worker.pipeline.aggregate import build_tracks_from_recognitions, recognitions_from_segment_hits
-from worker.pipeline.enrich import build_set_payload, enrich_tracks, render_set_page_html
-from worker.pipeline.recognize import (
-    prepare_set_context,
-    recognize_segment_range,
-    restore_set_context,
-    serialize_prepared_context,
-)
 from worker.scheduler import build_scheduler_plan
 
 
 def _dispatch_pending() -> None:
+    import requests
+
     settings = get_settings()
     if not settings.api_base_url or not settings.internal_secret:
         return
@@ -50,6 +42,8 @@ def _dispatch_pending() -> None:
 
 
 def _revalidate(paths: list[str]) -> None:
+    import requests
+
     settings = get_settings()
     if not settings.api_base_url or not settings.internal_secret:
         return
@@ -69,6 +63,8 @@ def _publish_set_run_payload(
     html: str,
     legacy_path: str,
 ) -> dict[str, object]:
+    import requests
+
     settings = get_settings()
     if not settings.api_base_url or not settings.internal_secret:
         raise RuntimeError("APP_BASE_URL and INTERNAL_WORKER_SHARED_SECRET are required for publish")
@@ -175,6 +171,8 @@ def _mark_failed(run_row: dict[str, object], error: Exception | str, *, stage: s
 
 
 async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
+    from worker.pipeline.recognize import prepare_set_context, serialize_prepared_context
+
     run_row = _load_run(set_run_id)
     _record_stage_change(
         run_row,
@@ -239,6 +237,8 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
 
 
 async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]:
+    from worker.pipeline.recognize import recognize_segment_range, restore_set_context
+
     run_row = _load_run(set_run_id)
     source_metadata = dict(run_row.get("source_metadata") or {})
     context = restore_set_context(
@@ -342,23 +342,58 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
 
 
 async def publish_phase(set_run_id: str) -> str | None:
+    from worker.pipeline.aggregate import build_tracks_from_recognitions, recognitions_from_segment_hits
+    from worker.pipeline.enrich import build_set_payload, enrich_tracks, render_set_page_html
+    from worker.pipeline.recognize import restore_set_context
+
     run_row = _load_run(set_run_id)
     source_metadata = dict(run_row.get("source_metadata") or {})
     rollup = get_lease_rollup(set_run_id)
 
     if not rollup or int(rollup["total_count"] or 0) == 0:
-        raise RuntimeError("No segment leases found for publish phase")
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.publish.deferred",
+            message="Publish skipped because no segment leases were available",
+        )
+        return None
     if int(rollup["pending_count"] or 0) > 0 or int(rollup["claimed_count"] or 0) > 0:
-        raise RuntimeError("Recognition is incomplete; not all leases are finished")
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.publish.deferred",
+            message="Publish skipped because recognition leases are still incomplete",
+            details={
+                "pending_count": int(rollup["pending_count"] or 0),
+                "claimed_count": int(rollup["claimed_count"] or 0),
+            },
+        )
+        return None
     if int(rollup["failed_count"] or 0) > 0:
-        raise RuntimeError("One or more recognition leases failed")
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.publish.deferred",
+            message="Publish skipped because one or more recognition leases failed",
+            details={"failed_count": int(rollup["failed_count"] or 0)},
+        )
+        return None
 
     total_segments = int(source_metadata.get("segment_count") or 0)
     segment_hits = list_segment_hits(set_run_id)
     if total_segments > 0 and len(segment_hits) != total_segments:
-        raise RuntimeError(
-            f"Expected {total_segments} segment hits before publish, found {len(segment_hits)}"
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.publish.deferred",
+            message="Publish skipped because segment hit coverage is incomplete",
+            details={
+                "segment_count": total_segments,
+                "segment_hit_count": len(segment_hits),
+            },
         )
+        return None
 
     _record_stage_change(
         run_row,

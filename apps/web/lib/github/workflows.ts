@@ -45,8 +45,18 @@ const dispatchWorkflow = async (workflowId: string | undefined, inputs: Record<s
   } as const;
 };
 
-export const dispatchProcessSetWorkflow = async (setRunId: string) =>
-  dispatchWorkflow(env.githubWorkflowProcessSet, { set_run_id: setRunId });
+type ProcessSetWorkflowInputs = {
+  resume_mode?: "full" | "publish_only";
+};
+
+export const dispatchProcessSetWorkflow = async (
+  setRunId: string,
+  inputs: ProcessSetWorkflowInputs = {},
+) =>
+  dispatchWorkflow(env.githubWorkflowProcessSet, {
+    set_run_id: setRunId,
+    ...inputs,
+  });
 
 export const dispatchDiscoverArtistWorkflow = async (submissionId: string) =>
   dispatchWorkflow(env.githubWorkflowDiscoverArtist, { submission_id: submissionId });

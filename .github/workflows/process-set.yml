@@ -7,6 +7,14 @@ on:
         description: Set run UUID to process
         required: true
         type: string
+      resume_mode:
+        description: Whether to run the full pipeline or only the publish/finalize tail
+        required: false
+        default: full
+        type: choice
+        options:
+          - full
+          - publish_only
       deployment_target:
         description: Secrets target for this dispatch
         required: false
@@ -28,9 +36,11 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
   bootstrap:
+    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -53,14 +63,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-bootstrap.txt
 
-      - name: Install ffmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          ffmpeg-version: release
+      - name: Ensure ffmpeg
+        run: ./.github/scripts/ensure-ffmpeg.sh
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: python -m pip install -r requirements-bootstrap.txt
 
       - name: Bootstrap set run
         run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
@@ -105,11 +115,13 @@ jobs:
           name: set-assets-${{ github.event.inputs.set_run_id }}
           path: assets
           if-no-files-found: error
+          compression-level: 0
           retention-days: 1
 
   recognize:
     needs:
       - bootstrap
+    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -132,14 +144,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-recognize.txt
 
-      - name: Install ffmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          ffmpeg-version: release
+      - name: Ensure ffmpeg
+        run: ./.github/scripts/ensure-ffmpeg.sh
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: python -m pip install -r requirements-recognize.txt
 
       - name: Download prepared audio
         uses: actions/download-artifact@v4
@@ -151,7 +163,7 @@ jobs:
         run: python -m worker.jobs.process_set --phase recognize --set-run-id "${{ github.event.inputs.set_run_id }}" --slot-index "${{ matrix.slot_index }}"
 
   publish:
-    if: ${{ always() && needs.bootstrap.result == 'success' && needs.recognize.result == 'success' }}
+    if: ${{ always() && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
     needs:
       - bootstrap
       - recognize
@@ -175,9 +187,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-publish.txt
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: python -m pip install -r requirements-publish.txt
 
       - name: Publish set run
         run: python -m worker.jobs.process_set --phase publish --set-run-id "${{ github.event.inputs.set_run_id }}"
@@ -191,24 +205,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
       APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
-
       - name: Finalize run and dispatch next work
         run: |
-          python -m worker.jobs.process_set \
-            --phase finalize \
-            --set-run-id "${{ github.event.inputs.set_run_id }}" \
-            --bootstrap-result "${{ needs.bootstrap.result }}" \
-            --recognize-result "${{ needs.recognize.result }}" \
-            --publish-result "${{ needs.publish.result }}"
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            -X POST \
+            "${APP_BASE_URL}/api/internal/finalize-set-run" \
+            -H "content-type: application/json" \
+            -H "x-internal-secret: ${INTERNAL_WORKER_SHARED_SECRET}" \
+            -d @- <<'JSON'
+          {
+            "setRunId": "${{ github.event.inputs.set_run_id }}",
+            "bootstrapResult": "${{ needs.bootstrap.result }}",
+            "recognizeResult": "${{ needs.recognize.result }}",
+            "publishResult": "${{ needs.publish.result }}"
+          }
+          JSON
