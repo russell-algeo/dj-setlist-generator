@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from audio_downloader import AudioDownloader
 from audio_segmenter import AudioSegmenter
 from checkpoint_manager import CheckpointManager
 from worker.pipeline.models import Recognition
@@ -34,6 +33,8 @@ def prepare_set_context(
     artist_name: str | None,
     mix_info: dict[str, object] | None = None,
 ) -> PreparedSetContext:
+    from audio_downloader import AudioDownloader
+
     downloader = AudioDownloader()
     resolved_mix_info = dict(mix_info or downloader.get_video_info(source_url))
     resolved_mix_info["url"] = source_url
