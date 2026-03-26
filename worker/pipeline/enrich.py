@@ -6,8 +6,8 @@ from pathlib import Path
 
 from checkpoint_manager import sanitize_filename
 from metadata_enricher import MetadataEnricher
-from output_formatter import OutputFormatter
-from set_explorer_formatter import save_set_explorer_html
+from output_formatter import OutputFormatter, build_setlist_payload
+from set_explorer_formatter import render_set_explorer_html, save_set_explorer_html
 
 
 def enrich_tracks(
@@ -54,8 +54,29 @@ def write_set_outputs(
     }
 
 
+def build_set_payload(
+    *,
+    enriched_tracks: list[dict],
+    mix_info: dict[str, object],
+) -> dict[str, object]:
+    return build_setlist_payload(enriched_tracks, mix_info)
+
+
+def render_set_page_html(
+    *,
+    output_dir: Path,
+    enriched_tracks: list[dict],
+    mix_info: dict[str, object],
+) -> tuple[str, str]:
+    filename = sanitize_filename(str(mix_info.get("title") or "untitled_mix"))
+    html = render_set_explorer_html(output_dir, enriched_tracks, mix_info, filename)
+    return html, filename
+
+
 __all__ = [
     "MetadataEnricher",
+    "build_set_payload",
     "enrich_tracks",
+    "render_set_page_html",
     "write_set_outputs",
 ]

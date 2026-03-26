@@ -18,7 +18,7 @@ export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
     <AppShell
       title="Artist index"
       eyebrow="Public archive"
-      description="Canonical routes for the imported archive. Each artist resolves back to the exact legacy explorer page stored in Neon."
+      description="Each artist has a stable app-owned alias and a stored legacy explorer page. Today the alias resolves to that stored page."
     >
       <section className="panel-grid panel-grid--three">
         <article className="panel">
@@ -65,11 +65,11 @@ export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
                   </div>
                   <div className="inline-actions">
                     <Link className="pill-link" href={`/artists/${artist.slug}`}>
-                      Canonical route
+                      Stable alias
                     </Link>
                     {artist.legacyPath ? (
                       <Link className="pill-link" href={artist.legacyPath}>
-                        Legacy page
+                        Stored page
                       </Link>
                     ) : null}
                   </div>

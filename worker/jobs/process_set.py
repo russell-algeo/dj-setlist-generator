@@ -6,13 +6,12 @@ import argparse
 import asyncio
 import os
 import socket
-import subprocess
 from pathlib import Path
 
 import requests
 
 from config import Config
-from worker.config import REPO_ROOT, get_settings
+from worker.config import get_settings
 from worker.db import (
     claim_next_lease,
     complete_lease,
@@ -28,7 +27,7 @@ from worker.db import (
     update_set_run_metadata,
 )
 from worker.pipeline.aggregate import build_tracks_from_recognitions, recognitions_from_segment_hits
-from worker.pipeline.enrich import enrich_tracks, write_set_outputs
+from worker.pipeline.enrich import build_set_payload, enrich_tracks, render_set_page_html
 from worker.pipeline.recognize import (
     prepare_set_context,
     recognize_segment_range,
@@ -62,16 +61,30 @@ def _revalidate(paths: list[str]) -> None:
     ).raise_for_status()
 
 
-def _publish_generated_outputs(*, set_json_path: Path) -> None:
-    env = os.environ.copy()
-    env["IMPORT_SET_JSON"] = str(set_json_path)
+def _publish_set_run_payload(
+    *,
+    set_run_id: str,
+    payload: dict[str, object],
+    html: str,
+    legacy_path: str,
+) -> dict[str, object]:
+    settings = get_settings()
+    if not settings.api_base_url or not settings.internal_secret:
+        raise RuntimeError("APP_BASE_URL and INTERNAL_WORKER_SHARED_SECRET are required for publish")
 
-    subprocess.run(
-        ["pnpm", "--filter", "web", "import:archive"],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
+    response = requests.post(
+        f"{settings.api_base_url}/api/internal/publish-set-run",
+        headers={"x-internal-secret": settings.internal_secret},
+        json={
+            "setRunId": set_run_id,
+            "payload": payload,
+            "html": html,
+            "legacyPath": legacy_path,
+        },
+        timeout=120,
     )
+    response.raise_for_status()
+    return dict(response.json())
 
 
 def _detect_source_platform(source_url: str) -> str:
@@ -80,6 +93,22 @@ def _detect_source_platform(source_url: str) -> str:
     if "youtu" in source_url:
         return "youtube"
     return "unknown"
+
+
+def _output_legacy_path(output_dir: Path, filename: str) -> str:
+    html_path = output_dir / f"{filename}.html"
+    output_root = Path(Config.OUTPUT_DIR)
+
+    try:
+        relative_path = html_path.relative_to(output_root)
+    except ValueError:
+        if html_path.is_absolute() and output_root.is_absolute():
+            relative_path = html_path.resolve().relative_to(output_root.resolve())
+        else:
+            relative_path = html_path
+
+    relative_string = relative_path.as_posix().lstrip("/")
+    return "/" if relative_string == "index.html" else f"/{relative_string}"
 
 
 def _load_run(set_run_id: str) -> dict[str, object]:
@@ -188,7 +217,7 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
             details={
                 "segment_count": context.total_segments,
                 "lease_count": lease_count,
-                "audio_file": str(context.audio_file.relative_to(REPO_ROOT)),
+                "audio_file": str(context.audio_file),
             },
         )
 
@@ -330,6 +359,13 @@ async def publish_phase(set_run_id: str) -> str | None:
         stage="aggregating",
         event_type="set_run.aggregate.started",
         message="Building setlist from segment hits",
+        details={
+            "segment_hits": len(segment_hits),
+            "lease_rollup": {
+                "total_count": int(rollup["total_count"] or 0),
+                "completed_count": int(rollup["completed_count"] or 0),
+            },
+        },
     )
 
     recognitions = recognitions_from_segment_hits(segment_hits)
@@ -364,37 +400,41 @@ async def publish_phase(set_run_id: str) -> str | None:
             status="publishing",
             stage="publishing",
             event_type="set_run.publish.started",
-            message="Writing outputs and importing archive artifacts",
+            message="Publishing canonical set data and legacy page",
         )
 
-        outputs = write_set_outputs(
+        set_payload = build_set_payload(
+            enriched_tracks=enriched_tracks,
+            mix_info=mix_info,
+        )
+        set_html, filename = render_set_page_html(
             output_dir=context.checkpoint_manager.output_dir,
             enriched_tracks=enriched_tracks,
             mix_info=mix_info,
         )
-        set_json_path = outputs["json"]
-        if not isinstance(set_json_path, Path):
-            raise RuntimeError("Publish phase did not produce a JSON set output")
-
-        _publish_generated_outputs(set_json_path=set_json_path)
-
-        published_row = fetch_one(
-            """
-            select id, legacy_path
-            from app.sets
-            where source_url = %s
-            order by updated_at desc
-            limit 1
-            """,
-            (str(run_row["source_url"]),),
+        published_row = _publish_set_run_payload(
+            set_run_id=set_run_id,
+            payload=set_payload,
+            html=set_html,
+            legacy_path=_output_legacy_path(context.checkpoint_manager.output_dir, filename),
         )
 
-        published_set_id = str(published_row["id"]) if published_row else None
+        published_set_id = str(published_row["setId"]) if published_row.get("setId") else None
         mark_set_run(
             set_run_id,
             status="completed",
             stage="published",
             published_set_id=published_set_id,
+        )
+        update_set_run_metadata(
+            set_run_id,
+            {
+                "published": {
+                    "set_id": published_row.get("setId"),
+                    "slug": published_row.get("slug"),
+                    "legacy_path": published_row.get("legacyPath"),
+                }
+            },
         )
         finalize_submission_from_runs(str(run_row["submission_id"]))
         insert_worker_event(
@@ -402,12 +442,16 @@ async def publish_phase(set_run_id: str) -> str | None:
             set_run_id=set_run_id,
             event_type="set_run.completed",
             message=f"Published {mix_info.get('title') or run_row['source_url']}",
-            details={"published_set_id": published_set_id},
+            details={
+                "published_set_id": published_set_id,
+                "slug": published_row.get("slug"),
+                "legacy_path": published_row.get("legacyPath"),
+            },
         )
 
         revalidate_paths = ["/", "/artists", "/sets"]
-        if published_row and published_row.get("legacy_path"):
-            revalidate_paths.append(str(published_row["legacy_path"]))
+        if published_row.get("legacyPath"):
+            revalidate_paths.append(str(published_row["legacyPath"]))
         _revalidate(revalidate_paths)
 
         return published_set_id

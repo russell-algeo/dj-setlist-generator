@@ -181,9 +181,48 @@ export const getSubmissionDetail = async (submissionId: string) => {
       .limit(50),
   ]);
 
+  const runIds = runs.map((run) => run.id);
+  const [leaseRollups, segmentHitCounts] = runIds.length
+    ? await Promise.all([
+        db
+          .select({
+            setRunId: setRunLeases.setRunId,
+            totalCount: sql<number>`count(*)`,
+            pendingCount: sql<number>`count(*) filter (where ${setRunLeases.status} = 'pending')`,
+            claimedCount: sql<number>`count(*) filter (where ${setRunLeases.status} = 'claimed')`,
+            completedCount: sql<number>`count(*) filter (where ${setRunLeases.status} = 'completed')`,
+            failedCount: sql<number>`count(*) filter (where ${setRunLeases.status} = 'failed')`,
+          })
+          .from(setRunLeases)
+          .where(inArray(setRunLeases.setRunId, runIds))
+          .groupBy(setRunLeases.setRunId),
+        db
+          .select({
+            setRunId: segmentHits.setRunId,
+            hitCount: sql<number>`count(*)`,
+            recognizedCount:
+              sql<number>`count(*) filter (where ${segmentHits.recognized} = true)`,
+          })
+          .from(segmentHits)
+          .where(inArray(segmentHits.setRunId, runIds))
+          .groupBy(segmentHits.setRunId),
+      ])
+    : [[], []];
+
+  const leaseRollupsByRun = new Map(
+    leaseRollups.map((rollup) => [rollup.setRunId, rollup] as const),
+  );
+  const segmentHitsByRun = new Map(
+    segmentHitCounts.map((rollup) => [rollup.setRunId, rollup] as const),
+  );
+
   return {
     submission,
-    runs,
+    runs: runs.map((run) => ({
+      ...run,
+      leaseRollup: leaseRollupsByRun.get(run.id) ?? null,
+      segmentHitRollup: segmentHitsByRun.get(run.id) ?? null,
+    })),
     events,
     discoveryCandidates: candidates,
   };

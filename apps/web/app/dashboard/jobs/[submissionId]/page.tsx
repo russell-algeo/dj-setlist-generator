@@ -11,6 +11,22 @@ type DashboardJobDetailPageProps = {
   }>;
 };
 
+const getPublishedDetails = (sourceMetadata: unknown) => {
+  const metadata =
+    sourceMetadata && typeof sourceMetadata === "object"
+      ? (sourceMetadata as Record<string, unknown>)
+      : null;
+  const published =
+    metadata?.published && typeof metadata.published === "object"
+      ? (metadata.published as Record<string, unknown>)
+      : null;
+
+  return {
+    slug: typeof published?.slug === "string" ? published.slug : null,
+    legacyPath: typeof published?.legacy_path === "string" ? published.legacy_path : null,
+  };
+};
+
 export default async function DashboardJobDetailPage({ params }: DashboardJobDetailPageProps) {
   const actor = await requireSessionActor("/dashboard/jobs");
   const { submissionId } = await params;
@@ -88,18 +104,52 @@ export default async function DashboardJobDetailPage({ params }: DashboardJobDet
                 <th>Run</th>
                 <th>Status</th>
                 <th>Stage</th>
+                <th>Progress</th>
+                <th>Heartbeat</th>
                 <th>Source</th>
               </tr>
             </thead>
             <tbody>
-              {detail.runs.map((run) => (
-                <tr key={run.id}>
-                  <td className="mono">{run.id}</td>
-                  <td>{run.status}</td>
-                  <td>{run.stage ?? "queued"}</td>
-                  <td>{run.sourceUrl}</td>
-                </tr>
-              ))}
+              {detail.runs.map((run) => {
+                const published = getPublishedDetails(run.sourceMetadata);
+
+                return (
+                  <tr key={run.id}>
+                    <td>
+                      <div className="mono">{run.id}</div>
+                      <div className="muted">attempt {run.attemptCount}</div>
+                    </td>
+                    <td>{run.status}</td>
+                    <td>{run.stage ?? "queued"}</td>
+                    <td>
+                      {run.leaseRollup ? (
+                        <div className="muted">
+                          {Number(run.leaseRollup.completedCount ?? 0)}/{Number(run.leaseRollup.totalCount ?? 0)} leases
+                          · {Number(run.segmentHitRollup?.recognizedCount ?? 0)} recognized
+                        </div>
+                      ) : (
+                        <span className="muted">No leases yet</span>
+                      )}
+                    </td>
+                    <td>{formatTimestamp(run.heartbeatAt ?? run.updatedAt)}</td>
+                    <td>
+                      <div>{run.sourceUrl}</div>
+                      {published.slug ? (
+                        <div className="inline-actions" style={{ marginTop: 8 }}>
+                          <a className="pill-link" href={`/sets/${published.slug}`}>
+                            Stable alias
+                          </a>
+                          {published.legacyPath ? (
+                            <a className="pill-link" href={published.legacyPath}>
+                              Stored page
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         ) : (
@@ -116,6 +166,11 @@ export default async function DashboardJobDetailPage({ params }: DashboardJobDet
                 <li className="card-list__item" key={event.id}>
                   <strong>{event.eventType}</strong>
                   <p>{event.message}</p>
+                  {event.details && Object.keys(event.details).length > 0 ? (
+                    <pre className="muted mono" style={{ whiteSpace: "pre-wrap" }}>
+                      {JSON.stringify(event.details, null, 2)}
+                    </pre>
+                  ) : null}
                   <p className="muted mono">{formatTimestamp(event.createdAt)}</p>
                 </li>
               ))}

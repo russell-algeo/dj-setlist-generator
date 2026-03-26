@@ -116,6 +116,37 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
     }
 
 
+def count_by_confidence(enriched_tracks: list) -> Counter:
+    """Count tracks by confidence level."""
+    return Counter(item['track'].confidence for item in enriched_tracks)
+
+
+def build_metadata(enriched_tracks: list) -> dict:
+    """Build metadata summary dict with confidence counts."""
+    counts = count_by_confidence(enriched_tracks)
+    return {
+        'generated_at': datetime.now().isoformat(),
+        'total_tracks': len(enriched_tracks),
+        'high_confidence_tracks': counts.get('HIGH', 0),
+        'medium_confidence_tracks': counts.get('MEDIUM', 0),
+        'low_confidence_tracks': counts.get('LOW', 0),
+        'uncertain_tracks': counts.get('UNCERTAIN', 0),
+    }
+
+
+def build_setlist_payload(enriched_tracks: list, mix_info: dict) -> dict:
+    """Build the canonical set payload without writing it to disk."""
+    source_url = mix_info.get('url', '')
+    return {
+        'mix_info': mix_info,
+        'tracks': [
+            serialize_track(item, i + 1, source_url)
+            for i, item in enumerate(enriched_tracks)
+        ],
+        'metadata': build_metadata(enriched_tracks)
+    }
+
+
 class OutputFormatter:
     """Format and save setlist output."""
 
@@ -139,36 +170,24 @@ class OutputFormatter:
     @staticmethod
     def _count_by_confidence(enriched_tracks: list) -> Counter:
         """Count tracks by confidence level."""
-        return Counter(item['track'].confidence for item in enriched_tracks)
+        return count_by_confidence(enriched_tracks)
 
     def _build_metadata(self, enriched_tracks: list) -> dict:
         """Build metadata summary dict with confidence counts."""
-        counts = self._count_by_confidence(enriched_tracks)
-        return {
-            'generated_at': datetime.now().isoformat(),
-            'total_tracks': len(enriched_tracks),
-            'high_confidence_tracks': counts.get('HIGH', 0),
-            'medium_confidence_tracks': counts.get('MEDIUM', 0),
-            'low_confidence_tracks': counts.get('LOW', 0),
-            'uncertain_tracks': counts.get('UNCERTAIN', 0),
-        }
+        return build_metadata(enriched_tracks)
+
+    def build_setlist_payload(self, enriched_tracks: list, mix_info: dict) -> dict:
+        """Build the canonical set payload without writing it to disk."""
+        return build_setlist_payload(enriched_tracks, mix_info)
 
     def save_setlist_json(self, enriched_tracks: list, mix_info: dict, filename: str = None) -> Path:
         """Save setlist as JSON."""
         if not filename:
             filename = f"setlist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
+
         output_path = self.output_dir / f"{filename}.json"
-        
-        source_url = mix_info.get('url', '')
-        output_data = {
-            'mix_info': mix_info,
-            'tracks': [
-                serialize_track(item, i + 1, source_url)
-                for i, item in enumerate(enriched_tracks)
-            ],
-            'metadata': self._build_metadata(enriched_tracks)
-        }
+
+        output_data = self.build_setlist_payload(enriched_tracks, mix_info)
         
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=2, ensure_ascii=False)

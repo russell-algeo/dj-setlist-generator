@@ -1486,16 +1486,15 @@ body.yt-embed-blocked .js-track-play:hover {
     )
 
 
-def save_set_explorer_html(
+def render_set_explorer_html(
     output_dir: Path,
     enriched_tracks: list,
     mix_info: dict,
     filename: str | None = None,
-) -> Path:
-    """Render and save the set-level explorer page."""
+) -> str:
+    """Render the set-level explorer page as an HTML string."""
     if not filename:
         filename = f"setlist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    output_path = output_dir / f"{filename}.html"
 
     source_url = str(mix_info.get("url") or "")
     total_duration = float(mix_info.get("duration") or 0.0)
@@ -3189,6 +3188,20 @@ def save_set_explorer_html(
 </html>
 """
 
+    return html
+
+
+def save_set_explorer_html(
+    output_dir: Path,
+    enriched_tracks: list,
+    mix_info: dict,
+    filename: str | None = None,
+) -> Path:
+    """Render and save the set-level explorer page."""
+    if not filename:
+        filename = f"setlist_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    output_path = output_dir / f"{filename}.html"
+    html = render_set_explorer_html(output_dir, enriched_tracks, mix_info, filename)
     output_path.write_text(html, encoding="utf-8")
     print(f"Saved set explorer HTML: {output_path}")
     return output_path

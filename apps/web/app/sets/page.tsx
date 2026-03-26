@@ -36,7 +36,7 @@ export default async function SetsPage({ searchParams }: SetsPageProps) {
     <AppShell
       title="Set library"
       eyebrow="Public archive"
-      description="Canonical set routes resolve to the imported explorer HTML. This index is the operational catalog for the remote archive."
+      description="Each set has a stable app-owned alias and a stored legacy explorer page. Today the alias resolves to that stored page."
     >
       <section className="panel">
         <div className="list-toolbar">
@@ -78,11 +78,11 @@ export default async function SetsPage({ searchParams }: SetsPageProps) {
                   </div>
                   <div className="inline-actions">
                     <Link className="pill-link" href={`/sets/${item.slug}`}>
-                      Canonical route
+                      Stable alias
                     </Link>
                     {item.legacyPath ? (
                       <Link className="pill-link" href={item.legacyPath}>
-                        Legacy page
+                        Stored page
                       </Link>
                     ) : null}
                     {item.sourceUrl ? (
