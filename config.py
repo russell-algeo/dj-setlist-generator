@@ -55,7 +55,7 @@ class Config:
     # Concurrency Settings
     CONCURRENT_RECOGNITIONS = int(os.getenv('CONCURRENT_RECOGNITIONS', '2'))  # Number of parallel requests
     BATCH_SIZE = int(os.getenv('BATCH_SIZE', '10'))  # Segments per batch for checkpointing
-    RECOGNITION_SLOT_COUNT = int(os.getenv('RECOGNITION_SLOT_COUNT', '2'))
+    RECOGNITION_SLOT_COUNT = int(os.getenv('RECOGNITION_SLOT_COUNT', '10'))
     LEASE_SIZE = int(os.getenv('LEASE_SIZE', '10'))
 
     # Quota-Aware Throttling Settings

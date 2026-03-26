@@ -15,6 +15,11 @@ on:
         options:
           - development
           - production
+      recognition_slot_count:
+        description: Number of recognition slots to fan out across
+        required: false
+        default: "10"
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -29,7 +34,7 @@ jobs:
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
       ENABLE_CHECKPOINTS: "false"
       CONCURRENT_RECOGNITIONS: "2"
-      RECOGNITION_SLOT_COUNT: "2"
+      RECOGNITION_SLOT_COUNT: ${{ github.event.inputs.recognition_slot_count }}
       LEASE_SIZE: "10"
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
@@ -60,20 +65,21 @@ jobs:
           retention-days: 1
 
   recognize:
+    if: ${{ matrix.slot_index < fromJSON(github.event.inputs.recognition_slot_count) }}
     needs: bootstrap
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        slot_index: [0, 1]
+        slot_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     env:
       DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
       APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
       ENABLE_CHECKPOINTS: "false"
       CONCURRENT_RECOGNITIONS: "2"
-      RECOGNITION_SLOT_COUNT: "2"
+      RECOGNITION_SLOT_COUNT: ${{ github.event.inputs.recognition_slot_count }}
       LEASE_SIZE: "10"
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
