@@ -94,15 +94,9 @@ export const authOptions: NextAuthOptions = {
       return session;
     },
     async signIn({ user }) {
-      if (!user.id || !user.email) {
+      if (!user.email) {
         return false;
       }
-
-      await bootstrapUserProfile({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-      });
 
       return true;
     },
@@ -119,6 +113,17 @@ export const authOptions: NextAuthOptions = {
           updatedAt: new Date(),
         })
         .where(eq(users.id, user.id));
+    },
+    async signIn({ user }) {
+      if (!user.id || !user.email) {
+        return;
+      }
+
+      await bootstrapUserProfile({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      });
     },
   },
 };
