@@ -6,6 +6,7 @@
 - Worker package: `worker`
 - Database:
   - Neon `development` branch is migrated and seeded with the historical archive
+  - Vercel production currently targets Neon `development` intentionally for validation
   - Imported data shape in development:
     - `475` canonical sets
     - `478` set-artist relationships
@@ -17,6 +18,9 @@
   - `python3 -m compileall worker`
   - `python3 -m worker.cli --help`
   - Browser validation for `/artists`, `/artists/[slug]`, and `/sets/[slug]`
+  - Live GitHub Actions validation for `process-set.yml`
+    - successful phased run with matrix recognition: `23575723864`
+    - successful follow-up validation after Node 24 opt-in env change: `23575816185`
 - Supporting scripts:
   - `scripts/manage_neon_roles.py`
   - `scripts/apply_drizzle_sql_migrations.py`
@@ -125,10 +129,25 @@ Redirect URI:
   - matrix recognition (`slot_index: 0, 1`)
   - publish
   - finalize
+- Matrix recognition now persists work through:
+  - `ops.set_run_leases`
+  - `ops.segment_hits`
+- Publish now goes through the app-owned internal API:
+  - `POST /api/internal/publish-set-run`
+  - no remote `pnpm import:archive` step
 - The Python worker now uses:
-  - pooled app credentials for archive import
+  - pooled app credentials for web reads and writes
   - direct worker credentials for queue/runtime updates
   - direct migrator credentials for schema changes
+
+## Residual Operational Warning
+- GitHub Actions still emits a Node 20 deprecation warning for several third-party actions:
+  - `actions/checkout@v4`
+  - `actions/setup-python@v5`
+  - `actions/upload-artifact@v4`
+  - `FedericoCarboni/setup-ffmpeg@v3`
+- The workflows now set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`, but GitHub still reports the warning.
+- Treat this as an upstream action-version cleanup item, not a blocker for the current remote pipeline.
 
 ## Recommended Post-Deploy Checks
 1. Sign in with `russellalgeo@gmail.com`.
