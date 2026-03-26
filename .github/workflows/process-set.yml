@@ -54,9 +54,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install ffmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          ffmpeg-version: release
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
