@@ -20,6 +20,11 @@ on:
         required: false
         default: "10"
         type: string
+      lease_size:
+        description: Number of segments bundled into each lease
+        required: false
+        default: "10"
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -53,7 +58,7 @@ jobs:
       ENABLE_CHECKPOINTS: "false"
       CONCURRENT_RECOGNITIONS: "2"
       RECOGNITION_SLOT_COUNT: ${{ github.event.inputs.recognition_slot_count }}
-      LEASE_SIZE: "10"
+      LEASE_SIZE: ${{ github.event.inputs.lease_size }}
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
     steps:
@@ -99,7 +104,7 @@ jobs:
       ENABLE_CHECKPOINTS: "false"
       CONCURRENT_RECOGNITIONS: "2"
       RECOGNITION_SLOT_COUNT: ${{ github.event.inputs.recognition_slot_count }}
-      LEASE_SIZE: "10"
+      LEASE_SIZE: ${{ github.event.inputs.lease_size }}
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
     steps:

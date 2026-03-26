@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate --config ../../drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config ../../drizzle.config.ts",
     "db:push": "drizzle-kit push --config ../../drizzle.config.ts",
-    "import:archive": "DOTENV_CONFIG_PATH=.env.local tsx -r dotenv/config scripts/import-archive.ts"
+    "import:archive": "DOTENV_CONFIG_PATH=.env.local tsx -r dotenv/config scripts/import-archive.ts",
+    "benchmark:scheduler": "tsx scripts/benchmark-recognition-scheduler.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",

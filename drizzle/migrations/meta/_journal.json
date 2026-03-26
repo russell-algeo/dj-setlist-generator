@@ -15,6 +15,13 @@
       "when": 1774494000000,
       "tag": "0001_phase_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774497600000,
+      "tag": "0002_global_work_stealing",
+      "breakpoints": true
     }
   ]
 }
