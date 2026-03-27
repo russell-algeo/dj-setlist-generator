@@ -93,9 +93,18 @@ def _request_json(
     return json.loads(raw.decode("utf8"))
 
 
+def _exit_code_for_status(status: str) -> int:
+    """0 = completed, 1 = failed/cancelled, 2 = partial."""
+    if status == "completed":
+        return 0
+    if status == "partial":
+        return 2
+    return 1
+
+
 def _poll_submission(submission_id: str, *, base_url: str | None, interval: int) -> dict[str, Any]:
     api_base_url, headers = _auth_headers(base_url)
-    terminal_states = {"completed", "failed", "cancelled"}
+    terminal_states = {"completed", "partial", "failed", "cancelled"}
 
     while True:
         detail = _request_json(
@@ -109,7 +118,7 @@ def _poll_submission(submission_id: str, *, base_url: str | None, interval: int)
         time.sleep(interval)
 
 
-def _submit_remote(payload: dict[str, Any], *, wait: bool, base_url: str | None, interval: int) -> dict[str, Any]:
+def _submit_remote(payload: dict[str, Any], *, wait: bool, base_url: str | None, interval: int) -> int:
     api_base_url, headers = _auth_headers(base_url)
     detail = _request_json(
         "POST",
@@ -120,13 +129,15 @@ def _submit_remote(payload: dict[str, Any], *, wait: bool, base_url: str | None,
     submission_id = detail["submissionId"]
     print(f"Queued submission {submission_id}")
     if wait:
-        return _poll_submission(submission_id, base_url=base_url, interval=interval)
-    return detail
+        final = _poll_submission(submission_id, base_url=base_url, interval=interval)
+        return _exit_code_for_status(final["submission"]["status"])
+    return 0
 
 
-def _status_remote(submission_id: str, *, wait: bool, base_url: str | None, interval: int) -> dict[str, Any]:
+def _status_remote(submission_id: str, *, wait: bool, base_url: str | None, interval: int) -> int:
     if wait:
-        return _poll_submission(submission_id, base_url=base_url, interval=interval)
+        final = _poll_submission(submission_id, base_url=base_url, interval=interval)
+        return _exit_code_for_status(final["submission"]["status"])
 
     api_base_url, headers = _auth_headers(base_url)
     detail = _request_json(
@@ -135,7 +146,7 @@ def _status_remote(submission_id: str, *, wait: bool, base_url: str | None, inte
         headers=headers,
     )
     _print_submission(detail)
-    return detail
+    return _exit_code_for_status(detail["submission"]["status"])
 
 
 async def _run_local(args: argparse.Namespace) -> None:
@@ -210,15 +221,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     if args.status:
-        _status_remote(args.status, wait=args.wait, base_url=args.base_url, interval=args.interval)
-        return 0
+        return _status_remote(args.status, wait=args.wait, base_url=args.base_url, interval=args.interval)
 
     if args.local:
         asyncio.run(_run_local(args))
         return 0
 
     if args.artist and args.sets:
-        _submit_remote(
+        return _submit_remote(
             {
                 "mode": "curated_artist",
                 "artistName": args.artist,
@@ -228,7 +238,6 @@ def main(argv: list[str] | None = None) -> int:
             base_url=args.base_url,
             interval=args.interval,
         )
-        return 0
 
     if not args.targets:
         raise RuntimeError("Provide a URL, artist name, --artist with --sets, or --status")
@@ -240,29 +249,29 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("Do not mix URLs and artist names in the same command")
 
     if urls:
+        exit_code = 0
         for url in urls:
-            _submit_remote(
-                {
-                    "mode": "url",
-                    "sourceUrl": url,
-                },
+            code = _submit_remote(
+                {"mode": "url", "sourceUrl": url},
                 wait=args.wait,
                 base_url=args.base_url,
                 interval=args.interval,
             )
-        return 0
+            if code > exit_code:
+                exit_code = code
+        return exit_code
 
+    exit_code = 0
     for artist_name in artists:
-        _submit_remote(
-            {
-                "mode": "artist",
-                "artistName": artist_name,
-            },
+        code = _submit_remote(
+            {"mode": "artist", "artistName": artist_name},
             wait=args.wait,
             base_url=args.base_url,
             interval=args.interval,
         )
-    return 0
+        if code > exit_code:
+            exit_code = code
+    return exit_code
 
 
 if __name__ == "__main__":

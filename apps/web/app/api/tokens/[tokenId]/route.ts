@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { assertAllowlisted, getSessionActor } from "@/lib/auth/session";
-import { revokeApiTokenForUser } from "@/lib/jobs/service";
+import { revokeApiTokenForUser } from "@/lib/jobs/tokens";
 
 type Params = {
   params: Promise<{

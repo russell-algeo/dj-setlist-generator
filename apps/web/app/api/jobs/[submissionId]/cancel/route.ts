@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { assertAllowlisted, canAccessSubmission, getRequestActor } from "@/lib/auth/session";
-import { markSubmissionCancelled } from "@/lib/jobs/service";
+import { markSubmissionCancelled } from "@/lib/jobs/submissions";
 
 type Params = {
   params: Promise<{

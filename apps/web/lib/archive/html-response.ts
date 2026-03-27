@@ -1,11 +1,12 @@
 import { getSitePageHtml } from "@/lib/archive/repository";
+import { injectArchiveSocialMetadata } from "@/lib/social-preview";
 
 export const htmlHeaders = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "public, max-age=60, stale-while-revalidate=300",
 };
 
-export const buildArchiveHtmlResponse = async (pagePath: string) => {
+export const buildArchiveHtmlResponse = async (pagePath: string, requestUrl?: string) => {
   const html = await getSitePageHtml(pagePath);
 
   if (!html) {
@@ -17,8 +18,15 @@ export const buildArchiveHtmlResponse = async (pagePath: string) => {
     });
   }
 
-  return new Response(html, {
-    status: 200,
-    headers: htmlHeaders,
-  });
+  return new Response(
+    injectArchiveSocialMetadata({
+      html,
+      pagePath,
+      requestUrl,
+    }),
+    {
+      status: 200,
+      headers: htmlHeaders,
+    },
+  );
 };

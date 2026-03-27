@@ -64,7 +64,7 @@ def get_settings(explicit_base_url: str | None = None) -> WorkerSettings:
 
     return WorkerSettings(
         api_base_url=api_base_url.rstrip("/") if api_base_url else None,
-        api_token=_first_env("SET_LIST_API_TOKEN") or saved.get("token"),
+        api_token=_first_env("DJSET_API_TOKEN") or saved.get("token"),
         internal_secret=_first_env("INTERNAL_WORKER_SHARED_SECRET"),
         database_url=_first_env(
             "DATABASE_URL_DIRECT",

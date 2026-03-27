@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { assertAllowlisted, canAccessSubmission, getRequestActor } from "@/lib/auth/session";
-import { dispatchPendingWork, retrySubmission } from "@/lib/jobs/service";
+import { retryFailedSetRuns } from "@/lib/jobs/submissions";
+import { dispatchPendingWork } from "@/lib/jobs/dispatch";
 
 type Params = {
   params: Promise<{
@@ -22,7 +23,15 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  await retrySubmission(submissionId);
+  const result = await retryFailedSetRuns(submissionId);
+
+  if (result === "nothing_to_retry") {
+    return NextResponse.json(
+      { error: "No failed or cancelled runs to retry" },
+      { status: 409 },
+    );
+  }
+
   await dispatchPendingWork();
 
   if ((request.headers.get("content-type") ?? "").includes("application/json")) {

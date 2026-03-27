@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import { Manrope, Space_Mono } from "next/font/google";
+
+import { env } from "@/lib/env";
+import { socialPreview } from "@/lib/social-preview";
+
 import "./globals.css";
 
 const manrope = Manrope({
@@ -13,9 +17,48 @@ const spaceMono = Space_Mono({
   subsets: ["latin"],
 });
 
+const metadataBase = (() => {
+  const candidateUrl =
+    env.appBaseUrl || (env.deploymentTarget === "development" ? "http://localhost:3000" : undefined);
+
+  if (!candidateUrl) {
+    return undefined;
+  }
+
+  try {
+    return new URL(candidateUrl);
+  } catch {
+    return undefined;
+  }
+})();
+
 export const metadata: Metadata = {
-  title: "Set Signal Control Plane",
-  description: "Remote archive, operator dashboard, and deployment control plane",
+  metadataBase,
+  title: socialPreview.title,
+  description: socialPreview.description,
+  icons: {
+    icon: [{ url: socialPreview.iconPath, type: "image/svg+xml" }],
+  },
+  openGraph: {
+    title: socialPreview.title,
+    description: socialPreview.description,
+    siteName: socialPreview.siteName,
+    type: "website",
+    images: [
+      {
+        alt: socialPreview.imageAlt,
+        height: socialPreview.imageHeight,
+        url: socialPreview.imagePath,
+        width: socialPreview.imageWidth,
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: socialPreview.title,
+    description: socialPreview.description,
+    images: [socialPreview.imagePath],
+  },
 };
 
 export default function RootLayout({

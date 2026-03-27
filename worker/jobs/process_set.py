@@ -601,7 +601,6 @@ def finalize_phase(
             )
 
     finalize_submission_from_runs(str(run_row["submission_id"]))
-    _dispatch_pending()
 
 
 async def run_phase(set_run_id: str) -> str | None:

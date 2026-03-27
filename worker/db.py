@@ -18,7 +18,6 @@ ACTIVE_SET_RUN_STATUSES = (
     "aggregating",
     "enriching",
     "publishing",
-    "running",
     "cancelling",
 )
 
@@ -207,6 +206,9 @@ def initialize_set_run_leases(
 
 
 def claim_next_lease(set_run_id: str, *, slot_index: int, worker_name: str) -> dict[str, Any] | None:
+    # ops.claim_next_lease accepts slot_index for API clarity (callers can reason about "slot N
+    # is claiming") but since migration 0002 (global work stealing) the SQL function ignores the
+    # slot_index filter so any slot may claim any pending lease.
     return fetch_one(
         """
         select *
@@ -317,7 +319,7 @@ def mark_submission(
         set
           status = %s,
           error_summary = %s,
-          completed_at = case when %s in ('completed', 'failed', 'cancelled') then now() else completed_at end,
+          completed_at = case when %s in ('completed', 'partial', 'failed', 'cancelled') then now() else completed_at end,
           updated_at = now()
         where id = %s
         """,
@@ -330,6 +332,7 @@ def finalize_submission_from_runs(submission_id: str) -> None:
         """
         select
           count(*) filter (where status = 'queued' or status = any(%s)) as active_count,
+          count(*) filter (where status = 'completed') as completed_count,
           count(*) filter (where status = 'failed') as failed_count,
           count(*) filter (where status = 'cancelled') as cancelled_count,
           count(*) as total_count
@@ -346,11 +349,20 @@ def finalize_submission_from_runs(submission_id: str) -> None:
         mark_submission(submission_id, status="running")
         return
 
-    if int(rollup["failed_count"] or 0) > 0:
+    completed = int(rollup["completed_count"] or 0)
+    failed = int(rollup["failed_count"] or 0)
+    cancelled = int(rollup["cancelled_count"] or 0)
+    total = int(rollup["total_count"] or 0)
+
+    if failed > 0 and completed > 0:
+        mark_submission(submission_id, status="partial")
+        return
+
+    if failed > 0:
         mark_submission(submission_id, status="failed")
         return
 
-    if int(rollup["cancelled_count"] or 0) == int(rollup["total_count"] or 0):
+    if cancelled == total:
         mark_submission(submission_id, status="cancelled")
         return
 

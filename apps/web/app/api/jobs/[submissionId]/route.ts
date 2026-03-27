@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { canAccessSubmission, getRequestActor } from "@/lib/auth/session";
-import { getSubmissionDetail } from "@/lib/jobs/service";
+import { getSubmissionDetail } from "@/lib/jobs/submissions";
 
 type Params = {
   params: Promise<{

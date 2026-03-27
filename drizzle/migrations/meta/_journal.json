@@ -22,6 +22,34 @@
       "when": 1774497600000,
       "tag": "0002_global_work_stealing",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774570800000,
+      "tag": "0003_runtime_ops_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774659600000,
+      "tag": "0004_parallel_dispatch",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774663200000,
+      "tag": "0005_drop_dispatchable_set_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774666800000,
+      "tag": "0006_fix_stale_cancelling_recovery",
+      "breakpoints": true
     }
   ]
 }

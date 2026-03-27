@@ -43,6 +43,11 @@ export default async function DashboardPage() {
             <Link className="pill-link" href="/dashboard/jobs">
               View jobs
             </Link>
+            {actor.isAdmin && (
+              <Link className="pill-link" href="/dashboard/admin">
+                Admin
+              </Link>
+            )}
             <SignOutButton />
           </div>
         </article>

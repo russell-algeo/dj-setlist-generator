@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { assertInternalRequest } from "@/lib/auth/session";
-import { dispatchPendingWork } from "@/lib/jobs/service";
+import { dispatchPendingWork } from "@/lib/jobs/dispatch";
 
 export async function POST(request: Request) {
   const denial = assertInternalRequest(request);

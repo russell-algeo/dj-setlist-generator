@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { assertInternalRequest } from "@/lib/auth/session";
-import { runSchedulerRecovery } from "@/lib/jobs/service";
+import { runSchedulerRecovery } from "@/lib/jobs/scheduler";
 
 export async function POST(request: Request) {
   const denial = assertInternalRequest(request);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { assertAllowlisted, getSessionActor } from "@/lib/auth/session";
 import { readRequestBody } from "@/lib/http/request-body";
-import { createApiTokenForUser } from "@/lib/jobs/service";
+import { createApiTokenForUser } from "@/lib/jobs/tokens";
 import { issueApiToken } from "@/lib/security/api-tokens";
 
 export async function POST(request: Request) {

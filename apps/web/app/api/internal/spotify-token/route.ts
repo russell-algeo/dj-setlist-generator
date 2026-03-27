@@ -59,6 +59,11 @@ export async function POST(request: Request) {
   });
 
   if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text().catch(() => "unknown error");
+    await db
+      .update(spotifyConnections)
+      .set({ lastError: `${tokenResponse.status}: ${errorText}`, updatedAt: new Date() })
+      .where(eq(spotifyConnections.userId, targetUserId));
     return NextResponse.json({ error: "Spotify token refresh failed" }, { status: 502 });
   }
 
@@ -76,5 +81,9 @@ export async function POST(request: Request) {
     })
     .where(eq(spotifyConnections.userId, targetUserId));
 
-  return NextResponse.json(tokenPayload);
+  return NextResponse.json({
+    access_token: tokenPayload.access_token,
+    expires_in: tokenPayload.expires_in,
+    spotify_user_id: connection.spotifyUserId,
+  });
 }

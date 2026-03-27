@@ -2,11 +2,8 @@ import { NextResponse } from "next/server";
 
 import { assertAllowlisted, getRequestActor } from "@/lib/auth/session";
 import { isJsonRequest, readRequestBody } from "@/lib/http/request-body";
-import {
-  createSubmission,
-  dispatchPendingWork,
-  parseSubmissionInput,
-} from "@/lib/jobs/service";
+import { createSubmission, parseSubmissionInput } from "@/lib/jobs/submissions";
+import { dispatchPendingWork } from "@/lib/jobs/dispatch";
 
 const parseSourceUrls = (value: FormDataEntryValue | FormDataEntryValue[] | undefined) => {
   if (!value) {
@@ -39,11 +36,14 @@ export async function POST(request: Request) {
     maxSetsOverride: body.maxSetsOverride ? Number(body.maxSetsOverride) : undefined,
   });
 
-  const submission = await createSubmission(actor!, input);
+  const { submission, warnings } = await createSubmission(actor!, input);
   await dispatchPendingWork();
 
   if (isJsonRequest(request) || actor?.authType === "api_token") {
-    return NextResponse.json({ submissionId: submission.id }, { status: 201 });
+    return NextResponse.json(
+      { submissionId: submission.id, warnings: warnings.length > 0 ? warnings : undefined },
+      { status: warnings.length > 0 ? 202 : 201 },
+    );
   }
 
   return NextResponse.redirect(new URL(`/dashboard/jobs/${submission.id}`, request.url), {

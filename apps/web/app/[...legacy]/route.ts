@@ -11,5 +11,5 @@ type Params = {
 export async function GET(_request: Request, { params }: Params) {
   const { legacy } = await params;
   const pagePath = `/${legacy.join("/")}`;
-  return buildArchiveHtmlResponse(pagePath);
+  return buildArchiveHtmlResponse(pagePath, _request.url);
 }
