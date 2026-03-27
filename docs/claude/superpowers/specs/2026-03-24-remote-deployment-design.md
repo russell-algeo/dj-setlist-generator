@@ -5,6 +5,23 @@
 
 ---
 
+## Implementation Notes (as-built corrections)
+
+The following details differ from the original spec. The as-built behavior is correct; this section records what changed.
+
+| Topic | Original Spec | As Built |
+|---|---|---|
+| Submission mode names | `single_set`, `artist_discovery`, `curated_artist` | `url`, `artist`, `curated_artist` |
+| CLI polling default | 5 s | 15 s (`--interval` flag, adjustable) |
+| CLI auth env var | `SET_LIST_API_TOKEN` | `DJSET_API_TOKEN` (or saved token in `~/.config/set_list_worker/auth.json`) |
+| DB claim helpers | Not named | `claim_next_artist_submission`, `claim_next_dispatchable_set_run`, `initialize_set_run_leases` |
+| `claim_next_lease` | No slot_index arg | Requires `slot_index` parameter |
+| Recognition slot default | 2 | Auto-tuned via scheduler; workflow input defaults to `"auto"` |
+| Revalidation model | Tag-based ISR | `force-dynamic` + CDN TTL (60 s / 5 min SWR). `revalidatePath` calls kept for router cache hygiene. ISR + `revalidateTag` is the target when public archive pages are rebuilt as Next.js pages with real DB queries. |
+| API token hashing | Salted slow hash (argon2id / scrypt) | scrypt (N=16384, r=8, p=1) with per-token random salt stored as `scrypt:<salt_hex>:<hash_hex>` |
+
+---
+
 ## Table of Contents
 
 1. [Project Context & Workload Profile](#1-project-context--workload-profile)
