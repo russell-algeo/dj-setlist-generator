@@ -50,3 +50,7 @@ task_plan.md
 progress.md
 findings.md
 set_list.code-workspace
+skills-lock.json
+.agents/skills/neon-postgres/SKILL.md
+
+docs/
