@@ -62,6 +62,13 @@ jobs:
       LEASE_SIZE_REQUESTED: ${{ github.event.inputs.lease_size }}
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
+      HTTPS_PROXY: http://localhost:8080
+    services:
+      warp:
+        image: patrickplaggenborg/warp-proxy
+        options: --cap-add NET_ADMIN --cap-add SYS_MODULE --privileged
+        ports:
+          - 8080:8080
     steps:
       - uses: actions/checkout@v4
 
