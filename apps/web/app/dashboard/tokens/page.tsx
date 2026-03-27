@@ -24,6 +24,7 @@ export default async function DashboardTokensPage({ searchParams }: DashboardTok
       title="API tokens"
       eyebrow="CLI auth"
       description="Mint bearer tokens for the remote Python CLI. Tokens are hashed at rest and only shown once when the API returns them."
+      viewAs={viewAsActor?.userId}
     >
       {!actor.isAllowlisted ? (
         <section className="panel">

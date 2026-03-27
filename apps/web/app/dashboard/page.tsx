@@ -32,6 +32,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       title="Remote control plane"
       eyebrow="Operator dashboard"
       description="This dashboard owns submissions, queue state, imported archive visibility, and downstream worker orchestration."
+      viewAs={viewAsActor?.userId}
     >
       <section className="panel-grid panel-grid--three">
         <article className="panel">

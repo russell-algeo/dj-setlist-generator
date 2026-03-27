@@ -28,6 +28,7 @@ export default async function DashboardJobsPage({ searchParams }: DashboardJobsP
       title="Job queue"
       eyebrow="Operations"
       description="Submission-level history for discovery jobs, direct set runs, and curated batches."
+      viewAs={viewAsActor?.userId}
     >
       <section className="panel">
         <div className="list-toolbar">

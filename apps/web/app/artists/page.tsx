@@ -81,6 +81,7 @@ export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
       title="Artist index"
       eyebrow="Public archive"
       description="Each artist has a stable app-owned alias and a stored legacy explorer page. Today the alias resolves to that stored page."
+      viewAs={viewAsActor?.userId}
     >
       {!viewAsActor && (
         <div className="inline-actions" style={{ marginBottom: 18 }}>

@@ -98,6 +98,7 @@ export default async function SetsPage({ searchParams }: SetsPageProps) {
       title="Set library"
       eyebrow="Public archive"
       description="Each set has a stable app-owned alias and a stored legacy explorer page. Today the alias resolves to that stored page."
+      viewAs={viewAsActor?.userId}
     >
       {!viewAsActor && (
         <div className="inline-actions" style={{ marginBottom: 18 }}>

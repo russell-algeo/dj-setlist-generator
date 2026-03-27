@@ -35,6 +35,7 @@ export default async function DashboardSettingsPage({ searchParams }: DashboardS
       title="Settings"
       eyebrow="Operator identity"
       description="Account role, OAuth connections, and deployment-level integration state."
+      viewAs={viewAsActor?.userId}
     >
       <section className="panel-grid panel-grid--two">
         <article className="panel">

@@ -55,6 +55,7 @@ export default async function DashboardJobDetailPage({ params, searchParams }: D
       title="Submission detail"
       eyebrow="Operations"
       description="Submission, worker events, discovery candidates, and set-run execution state."
+      viewAs={viewAsActor?.userId}
     >
       <section className="panel-grid panel-grid--two">
         <article className="panel">
