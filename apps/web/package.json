@@ -6,11 +6,15 @@
     "node": "20.x"
   },
   "scripts": {
+    "predev": "pnpm archive:stage",
     "dev": "next dev",
+    "prebuild": "pnpm archive:stage",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "vercel-build": "pnpm archive:stage && next build",
+    "archive:stage": "tsx scripts/stage-public-archive.ts",
     "db:generate": "drizzle-kit generate --config ../../drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config ../../drizzle.config.ts",
     "db:push": "drizzle-kit push --config ../../drizzle.config.ts",

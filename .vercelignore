@@ -1,0 +1,10 @@
+/*
+!apps
+!apps/web
+!apps/web/**
+!output
+!output/**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!drizzle.config.ts

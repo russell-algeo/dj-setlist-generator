@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="62" y1="44" x2="448" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111111" />
+      <stop offset="1" stop-color="#070707" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(176 98) rotate(42.5) scale(174.548 150.09)">
+      <stop stop-color="#D8FF5A" stop-opacity="0.28" />
+      <stop offset="1" stop-color="#D8FF5A" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)" />
+  <rect width="512" height="512" fill="url(#glow)" />
+
+  <rect x="36" y="36" width="440" height="440" fill="none" stroke="#2C2C2C" stroke-width="4" />
+  <path d="M36 94H476" stroke="#232323" stroke-width="4" />
+  <text x="70" y="79" fill="#D8D8D8" font-size="20" font-family="'Space Mono', monospace" letter-spacing="0.11em">[SSA]</text>
+
+  <path d="M136 168H376" stroke="#2A2A2A" stroke-width="4" />
+  <path d="M136 338H376" stroke="#2A2A2A" stroke-width="4" />
+  <text x="122" y="286" fill="#FFFFFF" font-size="168" font-weight="800" font-family="Manrope, Arial, sans-serif" letter-spacing="-0.08em">SS</text>
+
+  <rect x="136" y="316" width="240" height="18" fill="#D8FF5A" />
+  <rect x="136" y="364" width="126" height="12" fill="#6FFFA4" />
+  <rect x="272" y="364" width="54" height="12" fill="#FFD166" />
+  <rect x="336" y="364" width="40" height="12" fill="#7B7B7B" />
+</svg>
