@@ -31,6 +31,13 @@ jobs:
       SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
       SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
       DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
+      HTTPS_PROXY: http://localhost:8080
+    services:
+      warp:
+        image: patrickplaggenborg/warp-proxy
+        options: --cap-add NET_ADMIN --cap-add SYS_MODULE --privileged
+        ports:
+          - 8080:8080
     steps:
       - uses: actions/checkout@v4
 
