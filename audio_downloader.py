@@ -5,6 +5,8 @@ import yt_dlp
 from pathlib import Path
 from config import Config
 
+MAX_BOT_RETRIES = 10
+
 class AudioDownloader:
     """Download audio from YouTube or SoundCloud."""
     
@@ -27,16 +29,17 @@ class AudioDownloader:
         )
 
     def _run_with_bot_retry(self, fn):
-        """Run fn(), retrying indefinitely on YouTube bot detection."""
-        attempt = 0
-        while True:
-            attempt += 1
+        """Run fn(), retrying up to MAX_BOT_RETRIES times on YouTube bot detection."""
+        for attempt in range(1, MAX_BOT_RETRIES + 1):
             if attempt > 1:
-                print(f"🔄 Retry attempt {attempt}...")
+                print(f"🔄 Retry attempt {attempt}/{MAX_BOT_RETRIES}...")
             try:
                 return fn()
             except Exception as e:
                 if self._is_bot_detection_error(e):
+                    if attempt >= MAX_BOT_RETRIES:
+                        print(f"🤖 YouTube bot detection persists after {MAX_BOT_RETRIES} attempts. Giving up.")
+                        raise
                     print(f"🤖 YouTube bot detection triggered. Cooling down for {Config.QUOTA_COOLDOWN_DURATION}s...")
                     time.sleep(Config.QUOTA_COOLDOWN_DURATION)
                 else:
