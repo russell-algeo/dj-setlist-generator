@@ -1,5 +1,6 @@
 """Audio download and normalization."""
 
+import os
 import time
 import yt_dlp
 from pathlib import Path
@@ -77,7 +78,10 @@ class AudioDownloader:
             'quiet': False,
             'no_warnings': False,
         }
-        
+
+        if proxy := os.environ.get("HTTPS_PROXY"):
+            ydl_opts['proxy'] = proxy
+
         print(f"Downloading audio from: {url}")
 
         def _do_download():
@@ -100,7 +104,10 @@ class AudioDownloader:
             'quiet': True,
             'no_warnings': True,
         }
-        
+
+        if proxy := os.environ.get("HTTPS_PROXY"):
+            ydl_opts['proxy'] = proxy
+
         def _do_extract():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)

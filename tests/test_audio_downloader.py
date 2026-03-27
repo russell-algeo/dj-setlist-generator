@@ -43,5 +43,77 @@ class BotRetryTests(unittest.TestCase):
         self.assertEqual(fn.call_count, 3)
 
 
+class ProxyInjectionTests(unittest.TestCase):
+    def test_download_passes_proxy_to_ydl_opts(self):
+        from audio_downloader import AudioDownloader
+
+        with patch.dict("os.environ", {"HTTPS_PROXY": "http://localhost:8080"}):
+            with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+                mock_ctx = MagicMock()
+                mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ctx)
+                mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+                mock_ctx.download = MagicMock()
+
+                d = AudioDownloader.__new__(AudioDownloader)
+                d.assets_dir = MagicMock()
+
+                from pathlib import Path
+                with patch.object(Path, "exists", return_value=False):
+                    with patch.object(Path, "with_suffix", return_value=Path("/tmp/mix")):
+                        try:
+                            d.download("https://youtube.com/watch?v=test", output_path=Path("/tmp/mix.mp3"))
+                        except Exception:
+                            pass
+
+                opts_passed = mock_ydl_cls.call_args[0][0]
+                self.assertEqual(opts_passed.get("proxy"), "http://localhost:8080")
+
+    def test_download_omits_proxy_when_env_not_set(self):
+        from audio_downloader import AudioDownloader
+        import os
+
+        with patch.dict("os.environ", {}, clear=True):
+            os.environ.pop("HTTPS_PROXY", None)
+
+            with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+                mock_ctx = MagicMock()
+                mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ctx)
+                mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+                mock_ctx.download = MagicMock()
+
+                d = AudioDownloader.__new__(AudioDownloader)
+                d.assets_dir = MagicMock()
+
+                from pathlib import Path
+                with patch.object(Path, "exists", return_value=False):
+                    with patch.object(Path, "with_suffix", return_value=Path("/tmp/mix")):
+                        try:
+                            d.download("https://youtube.com/watch?v=test", output_path=Path("/tmp/mix.mp3"))
+                        except Exception:
+                            pass
+
+                opts_passed = mock_ydl_cls.call_args[0][0]
+                self.assertNotIn("proxy", opts_passed)
+
+    def test_get_video_info_passes_proxy_to_ydl_opts(self):
+        from audio_downloader import AudioDownloader
+
+        with patch.dict("os.environ", {"HTTPS_PROXY": "http://localhost:8080"}):
+            with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+                mock_ctx = MagicMock()
+                mock_ctx.extract_info = MagicMock(return_value={
+                    "title": "Test", "duration": 3600, "uploader": "DJ Test"
+                })
+                mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ctx)
+                mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+                d = AudioDownloader.__new__(AudioDownloader)
+                d.assets_dir = MagicMock()
+                d.get_video_info("https://youtube.com/watch?v=test")
+
+                opts_passed = mock_ydl_cls.call_args[0][0]
+                self.assertEqual(opts_passed.get("proxy"), "http://localhost:8080")
+
+
 if __name__ == "__main__":
     unittest.main()
