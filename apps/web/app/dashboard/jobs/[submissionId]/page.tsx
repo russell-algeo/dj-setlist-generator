@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { ViewingAsBanner } from "@/components/viewing-as-banner";
 import { canAccessSubmission, requireSessionActor } from "@/lib/auth/session";
+import { resolveViewAsActor } from "@/lib/admin/users";
 import { formatTimestamp } from "@/lib/format";
 import { getSubmissionDetail } from "@/lib/jobs/service";
 
@@ -9,6 +11,7 @@ type DashboardJobDetailPageProps = {
   params: Promise<{
     submissionId: string;
   }>;
+  searchParams: Promise<{ viewAs?: string }>;
 };
 
 const getPublishedDetails = (sourceMetadata: unknown) => {
@@ -27,9 +30,12 @@ const getPublishedDetails = (sourceMetadata: unknown) => {
   };
 };
 
-export default async function DashboardJobDetailPage({ params }: DashboardJobDetailPageProps) {
-  const actor = await requireSessionActor("/dashboard/jobs");
+export default async function DashboardJobDetailPage({ params, searchParams }: DashboardJobDetailPageProps) {
+  const sessionActor = await requireSessionActor("/dashboard/jobs");
   const { submissionId } = await params;
+  const { viewAs } = await searchParams;
+  const viewAsActor = await resolveViewAsActor(sessionActor, viewAs);
+  const actor = viewAsActor ?? sessionActor;
   const allowed = await canAccessSubmission(actor, submissionId);
 
   if (!allowed) {
@@ -43,6 +49,8 @@ export default async function DashboardJobDetailPage({ params }: DashboardJobDet
   }
 
   return (
+    <>
+      {viewAsActor && <ViewingAsBanner email={viewAsActor.email} userId={viewAsActor.userId} />}
     <AppShell
       title="Submission detail"
       eyebrow="Operations"
@@ -199,5 +207,6 @@ export default async function DashboardJobDetailPage({ params }: DashboardJobDet
         </article>
       </section>
     </AppShell>
+    </>
   );
 }

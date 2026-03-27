@@ -1,15 +1,29 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { ViewingAsBanner } from "@/components/viewing-as-banner";
 import { requireSessionActor } from "@/lib/auth/session";
+import { resolveViewAsActor } from "@/lib/admin/users";
 import { formatTimestamp } from "@/lib/format";
 import { listSubmissionsForActor } from "@/lib/jobs/service";
 
-export default async function DashboardJobsPage() {
-  const actor = await requireSessionActor("/dashboard/jobs");
+type DashboardJobsPageProps = {
+  searchParams: Promise<{ viewAs?: string }>;
+};
+
+export default async function DashboardJobsPage({ searchParams }: DashboardJobsPageProps) {
+  const sessionActor = await requireSessionActor("/dashboard/jobs");
+  const { viewAs } = await searchParams;
+  const viewAsActor = await resolveViewAsActor(sessionActor, viewAs);
+  const actor = viewAsActor ?? sessionActor;
+
   const submissions = await listSubmissionsForActor(actor);
 
+  const vq = viewAsActor ? `?viewAs=${viewAsActor.userId}` : "";
+
   return (
+    <>
+      {viewAsActor && <ViewingAsBanner email={viewAsActor.email} userId={viewAsActor.userId} />}
     <AppShell
       title="Job queue"
       eyebrow="Operations"
@@ -18,9 +32,11 @@ export default async function DashboardJobsPage() {
       <section className="panel">
         <div className="list-toolbar">
           <h2>Recent submissions</h2>
-          <Link className="pill-link" href="/dashboard/submit">
-            New submission
-          </Link>
+          {!viewAsActor && (
+            <Link className="pill-link" href="/dashboard/submit">
+              New submission
+            </Link>
+          )}
         </div>
         {submissions.length > 0 ? (
           <table className="data-table">
@@ -36,7 +52,7 @@ export default async function DashboardJobsPage() {
               {submissions.map((submission) => (
                 <tr key={submission.id}>
                   <td>
-                    <Link href={`/dashboard/jobs/${submission.id}`}>{submission.artistName ?? submission.sourceUrl ?? submission.id}</Link>
+                    <Link href={`/dashboard/jobs/${submission.id}${vq}`}>{submission.artistName ?? submission.sourceUrl ?? submission.id}</Link>
                     <div className="muted mono">{submission.id}</div>
                   </td>
                   <td>{submission.mode}</td>
@@ -51,5 +67,6 @@ export default async function DashboardJobsPage() {
         )}
       </section>
     </AppShell>
+    </>
   );
 }

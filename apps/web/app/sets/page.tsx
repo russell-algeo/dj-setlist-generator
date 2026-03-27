@@ -1,14 +1,17 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { ViewingAsBanner } from "@/components/viewing-as-banner";
 import { listSets } from "@/lib/archive/repository";
 import { getSessionActor } from "@/lib/auth/session";
+import { resolveViewAsActor } from "@/lib/admin/users";
 
 type SetsPageProps = {
   searchParams: Promise<{
     page?: string;
     q?: string;
     scope?: string;
+    viewAs?: string;
   }>;
 };
 
@@ -31,10 +34,13 @@ export default async function SetsPage({ searchParams }: SetsPageProps) {
   const params = await searchParams;
   const page = Number(params.page ?? "1");
   const query = params.q?.trim();
-  const scope = params.scope === "mine" ? "mine" : "global";
-  const isPersonal = scope === "mine";
 
   const actor = await getSessionActor();
+  const viewAsActor = actor ? await resolveViewAsActor(actor, params.viewAs) : null;
+
+  // In viewAs mode, always show the target user's workspace
+  const scope = viewAsActor ? "mine" : (params.scope === "mine" ? "mine" : "global");
+  const isPersonal = scope === "mine";
 
   // Build tab hrefs — preserve search query, reset page when switching scope
   const myWorkspaceHref = `/sets?scope=mine${query ? `&q=${encodeURIComponent(query)}` : ""}`;
@@ -79,34 +85,38 @@ export default async function SetsPage({ searchParams }: SetsPageProps) {
     );
   }
 
-  const userId = isPersonal && actor ? actor.userId : undefined;
-  const { items, totalItems, pageSize } = await listSets({ page, search: query, userId });
+  const scopedUserId = viewAsActor ? viewAsActor.userId : (isPersonal && actor ? actor.userId : undefined);
+  const { items, totalItems, pageSize } = await listSets({ page, search: query, userId: scopedUserId });
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
   const paginationBase = `/sets?${isPersonal ? "scope=mine&" : ""}${query ? `q=${encodeURIComponent(query)}&` : ""}`;
 
   return (
+    <>
+      {viewAsActor && <ViewingAsBanner email={viewAsActor.email} userId={viewAsActor.userId} />}
     <AppShell
       title="Set library"
       eyebrow="Public archive"
       description="Each set has a stable app-owned alias and a stored legacy explorer page. Today the alias resolves to that stored page."
     >
-      <div className="inline-actions" style={{ marginBottom: 18 }}>
-        {actor ? (
+      {!viewAsActor && (
+        <div className="inline-actions" style={{ marginBottom: 18 }}>
+          {actor ? (
+            <Link
+              className={`pill-link${isPersonal ? " pill-link--active" : ""}`}
+              href={myWorkspaceHref}
+            >
+              My workspace
+            </Link>
+          ) : null}
           <Link
-            className={`pill-link${isPersonal ? " pill-link--active" : ""}`}
-            href={myWorkspaceHref}
+            className={`pill-link${!isPersonal ? " pill-link--active" : ""}`}
+            href={globalHref}
           >
-            My workspace
+            Global
           </Link>
-        ) : null}
-        <Link
-          className={`pill-link${!isPersonal ? " pill-link--active" : ""}`}
-          href={globalHref}
-        >
-          Global
-        </Link>
-      </div>
+        </div>
+      )}
 
       <section className="panel">
         <div className="list-toolbar">
@@ -193,5 +203,6 @@ export default async function SetsPage({ searchParams }: SetsPageProps) {
         </div>
       </section>
     </AppShell>
+    </>
   );
 }

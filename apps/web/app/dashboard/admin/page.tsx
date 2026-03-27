@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
@@ -30,6 +31,7 @@ export default async function AdminPage() {
                 <th>User</th>
                 <th>Allowlisted</th>
                 <th>Admin</th>
+                <th>Workspace</th>
               </tr>
             </thead>
             <tbody>
@@ -65,6 +67,15 @@ export default async function AdminPage() {
                           {user.isAdmin ? "Demote" : "Promote"}
                         </button>
                       </form>
+                    )}
+                  </td>
+                  <td>
+                    {user.userId !== actor.userId ? (
+                      <Link className="pill-link" href={`/dashboard?viewAs=${user.userId}`}>
+                        View workspace
+                      </Link>
+                    ) : (
+                      <span className="muted">—</span>
                     )}
                   </td>
                 </tr>

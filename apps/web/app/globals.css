@@ -276,6 +276,27 @@ table.data-table th {
   color: var(--muted);
 }
 
+.viewing-as-banner {
+  background: var(--accent-soft);
+  border: 1px solid rgba(181, 69, 47, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.viewing-as-banner__nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 960px) {
   .panel-grid--two,
   .panel-grid--three {

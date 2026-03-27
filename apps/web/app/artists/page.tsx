@@ -1,23 +1,29 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { ViewingAsBanner } from "@/components/viewing-as-banner";
 import { getArchiveStats, listArtists } from "@/lib/archive/repository";
 import { getSessionActor } from "@/lib/auth/session";
+import { resolveViewAsActor } from "@/lib/admin/users";
 
 type ArtistsPageProps = {
   searchParams: Promise<{
     q?: string;
     scope?: string;
+    viewAs?: string;
   }>;
 };
 
 export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
   const params = await searchParams;
   const query = params.q?.trim();
-  const scope = params.scope === "mine" ? "mine" : "global";
-  const isPersonal = scope === "mine";
 
   const actor = await getSessionActor();
+  const viewAsActor = actor ? await resolveViewAsActor(actor, params.viewAs) : null;
+
+  // In viewAs mode, always show the target user's workspace
+  const scope = viewAsActor ? "mine" : (params.scope === "mine" ? "mine" : "global");
+  const isPersonal = scope === "mine";
 
   // Build tab hrefs — preserve search query, always land on page 1
   const myWorkspaceHref = `/artists?scope=mine${query ? `&q=${encodeURIComponent(query)}` : ""}`;
@@ -62,34 +68,38 @@ export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
     );
   }
 
-  const userId = isPersonal && actor ? actor.userId : undefined;
+  const scopedUserId = viewAsActor ? viewAsActor.userId : (isPersonal && actor ? actor.userId : undefined);
   const [artistRows, stats] = await Promise.all([
-    listArtists(query, userId),
+    listArtists(query, scopedUserId),
     isPersonal ? Promise.resolve(null) : getArchiveStats(),
   ]);
 
   return (
+    <>
+      {viewAsActor && <ViewingAsBanner email={viewAsActor.email} userId={viewAsActor.userId} />}
     <AppShell
       title="Artist index"
       eyebrow="Public archive"
       description="Each artist has a stable app-owned alias and a stored legacy explorer page. Today the alias resolves to that stored page."
     >
-      <div className="inline-actions" style={{ marginBottom: 18 }}>
-        {actor ? (
+      {!viewAsActor && (
+        <div className="inline-actions" style={{ marginBottom: 18 }}>
+          {actor ? (
+            <Link
+              className={`pill-link${isPersonal ? " pill-link--active" : ""}`}
+              href={myWorkspaceHref}
+            >
+              My workspace
+            </Link>
+          ) : null}
           <Link
-            className={`pill-link${isPersonal ? " pill-link--active" : ""}`}
-            href={myWorkspaceHref}
+            className={`pill-link${!isPersonal ? " pill-link--active" : ""}`}
+            href={globalHref}
           >
-            My workspace
+            Global
           </Link>
-        ) : null}
-        <Link
-          className={`pill-link${!isPersonal ? " pill-link--active" : ""}`}
-          href={globalHref}
-        >
-          Global
-        </Link>
-      </div>
+        </div>
+      )}
 
       {isPersonal ? (
         <section className="panel-grid panel-grid--two" style={{ marginBottom: 18 }}>
@@ -178,5 +188,6 @@ export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
         )}
       </section>
     </AppShell>
+    </>
   );
 }

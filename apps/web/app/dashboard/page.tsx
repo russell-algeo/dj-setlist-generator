@@ -2,18 +2,32 @@ import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
 import { SignOutButton } from "@/components/google-sign-in-button";
+import { ViewingAsBanner } from "@/components/viewing-as-banner";
 import { requireSessionActor } from "@/lib/auth/session";
 import { getLatestImportedPages } from "@/lib/archive/repository";
+import { resolveViewAsActor } from "@/lib/admin/users";
 import { getDashboardSummary } from "@/lib/jobs/service";
 
-export default async function DashboardPage() {
-  const actor = await requireSessionActor("/dashboard");
+type DashboardPageProps = {
+  searchParams: Promise<{ viewAs?: string }>;
+};
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+  const sessionActor = await requireSessionActor("/dashboard");
+  const { viewAs } = await searchParams;
+  const viewAsActor = await resolveViewAsActor(sessionActor, viewAs);
+  const actor = viewAsActor ?? sessionActor;
+
   const [summary, recentPages] = await Promise.all([
     getDashboardSummary(actor),
     getLatestImportedPages(),
   ]);
 
+  const vq = viewAsActor ? `?viewAs=${viewAsActor.userId}` : "";
+
   return (
+    <>
+      {viewAsActor && <ViewingAsBanner email={viewAsActor.email} userId={viewAsActor.userId} />}
     <AppShell
       title="Remote control plane"
       eyebrow="Operator dashboard"
@@ -37,16 +51,18 @@ export default async function DashboardPage() {
         <article className="panel">
           <p className="app-shell__eyebrow">Session</p>
           <div className="inline-actions">
-            <Link className="pill-link" href="/dashboard/submit">
-              Submit work
-            </Link>
-            <Link className="pill-link" href="/dashboard/jobs">
+            {!viewAsActor && (
+              <Link className="pill-link" href="/dashboard/submit">
+                Submit work
+              </Link>
+            )}
+            <Link className="pill-link" href={`/dashboard/jobs${vq}`}>
               View jobs
             </Link>
-            <Link className="pill-link" href="/dashboard/settings">
+            <Link className="pill-link" href={`/dashboard/settings${vq}`}>
               Settings
             </Link>
-            {actor.isAdmin && (
+            {actor.isAdmin && !viewAsActor && (
               <Link className="pill-link" href="/dashboard/admin">
                 Admin
               </Link>
@@ -70,7 +86,7 @@ export default async function DashboardPage() {
         <article className="panel">
           <div className="list-toolbar">
             <h2>Recent set runs</h2>
-            <Link className="pill-link" href="/dashboard/jobs">
+            <Link className="pill-link" href={`/dashboard/jobs${vq}`}>
               Full queue
             </Link>
           </div>
@@ -130,5 +146,6 @@ export default async function DashboardPage() {
         </article>
       </section>
     </AppShell>
+    </>
   );
 }

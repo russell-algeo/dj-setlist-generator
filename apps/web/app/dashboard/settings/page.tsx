@@ -1,16 +1,20 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { ViewingAsBanner } from "@/components/viewing-as-banner";
 import { getSpotifyConnectionForUser, requireSessionActor } from "@/lib/auth/session";
+import { resolveViewAsActor } from "@/lib/admin/users";
 import { formatTimestamp } from "@/lib/format";
 
 type DashboardSettingsPageProps = {
-  searchParams: Promise<{ spotify?: string }>;
+  searchParams: Promise<{ spotify?: string; viewAs?: string }>;
 };
 
 export default async function DashboardSettingsPage({ searchParams }: DashboardSettingsPageProps) {
-  const actor = await requireSessionActor("/dashboard/settings");
-  const { spotify: spotifyParam } = await searchParams;
+  const sessionActor = await requireSessionActor("/dashboard/settings");
+  const { spotify: spotifyParam, viewAs } = await searchParams;
+  const viewAsActor = await resolveViewAsActor(sessionActor, viewAs);
+  const actor = viewAsActor ?? sessionActor;
   const spotifyConnection = await getSpotifyConnectionForUser(actor.userId);
 
   const spotifyStatusMessage = (() => {
@@ -25,6 +29,8 @@ export default async function DashboardSettingsPage({ searchParams }: DashboardS
   })();
 
   return (
+    <>
+      {viewAsActor && <ViewingAsBanner email={viewAsActor.email} userId={viewAsActor.userId} />}
     <AppShell
       title="Settings"
       eyebrow="Operator identity"
@@ -65,22 +71,25 @@ export default async function DashboardSettingsPage({ searchParams }: DashboardS
           )}
 
           <div className="inline-actions" style={{ marginTop: 18 }}>
-            <Link className="pill-link" href="/api/spotify/start">
-              {spotifyConnection && !spotifyConnection.revokedAt ? "Reconnect Spotify" : "Connect Spotify"}
-            </Link>
-            {spotifyConnection && !spotifyConnection.revokedAt ? (
+            {!viewAsActor && (
+              <Link className="pill-link" href="/api/spotify/start">
+                {spotifyConnection && !spotifyConnection.revokedAt ? "Reconnect Spotify" : "Connect Spotify"}
+              </Link>
+            )}
+            {!viewAsActor && spotifyConnection && !spotifyConnection.revokedAt ? (
               <form action="/api/spotify/disconnect" method="post">
                 <button className="button button--ghost" type="submit">
                   Disconnect Spotify
                 </button>
               </form>
             ) : null}
-            <Link className="pill-link" href="/dashboard/tokens">
+            <Link className="pill-link" href={viewAsActor ? `/dashboard/tokens?viewAs=${viewAsActor.userId}` : "/dashboard/tokens"}>
               Manage API tokens
             </Link>
           </div>
         </article>
       </section>
     </AppShell>
+    </>
   );
 }
