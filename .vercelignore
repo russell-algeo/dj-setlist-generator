@@ -4,6 +4,8 @@
 !apps/web/**
 !output
 !output/**
+!drizzle
+!drizzle/**
 !package.json
 !pnpm-lock.yaml
 !pnpm-workspace.yaml
