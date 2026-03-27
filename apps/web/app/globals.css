@@ -120,6 +120,12 @@ textarea {
   background: rgba(255, 255, 255, 0.88);
 }
 
+.pill-link--active {
+  background: var(--accent);
+  color: #fff8f1;
+  border-color: var(--accent);
+}
+
 .panel-grid {
   display: grid;
   gap: 18px;
