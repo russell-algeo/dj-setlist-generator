@@ -8,13 +8,14 @@ import {
   desc,
   eq,
   ilike,
+  inArray,
   isNotNull,
   or,
   sql,
 } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
-import { artists, setArtists, sets, sitePages } from "@/lib/db/schema";
+import { artists, setArtists, setRuns, sets, sitePages } from "@/lib/db/schema";
 
 const clampPage = (page: number) => (Number.isFinite(page) && page > 0 ? Math.floor(page) : 1);
 
@@ -58,9 +59,44 @@ export const getArchiveStats = async () => {
   };
 };
 
-export const listArtists = async (search?: string) => {
+export const listArtists = async (search?: string, userId?: string) => {
   const db = getDb();
   const query = search?.trim();
+
+  const searchFilter = query
+    ? or(
+        ilike(artists.name, `%${query}%`),
+        ilike(artists.normalizedName, `%${query.toLowerCase()}%`),
+      )
+    : undefined;
+
+  if (userId) {
+    const rows = await db
+      .select({
+        id: artists.id,
+        slug: artists.slug,
+        name: artists.name,
+        imageUrl: artists.imageUrl,
+        legacyPath: artists.legacyPath,
+        updatedAt: artists.updatedAt,
+        setCount: sql<number>`count(distinct ${sets.id})`,
+      })
+      .from(artists)
+      .innerJoin(setArtists, eq(setArtists.artistId, artists.id))
+      .innerJoin(sets, eq(sets.id, setArtists.setId))
+      .innerJoin(
+        setRuns,
+        and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)),
+      )
+      .where(searchFilter)
+      .groupBy(artists.id)
+      .orderBy(desc(sql`count(distinct ${sets.id})`), asc(artists.name))
+      .limit(200);
+
+    return rows;
+  }
+
+  // Global branch (unchanged behaviour)
   const visibilityFilter = or(isNotNull(artists.legacyPath), isNotNull(setArtists.setId));
 
   const rows = await db
@@ -77,13 +113,7 @@ export const listArtists = async (search?: string) => {
     .leftJoin(setArtists, eq(setArtists.artistId, artists.id))
     .where(
       query
-        ? and(
-            visibilityFilter,
-            or(
-              ilike(artists.name, `%${query}%`),
-              ilike(artists.normalizedName, `%${query.toLowerCase()}%`),
-            ),
-          )
+        ? and(visibilityFilter, searchFilter)
         : visibilityFilter,
     )
     .groupBy(artists.id)
@@ -97,22 +127,36 @@ export const listSets = async ({
   page,
   pageSize = 30,
   search,
+  userId,
 }: {
   page: number;
   pageSize?: number;
   search?: string;
+  userId?: string;
 }) => {
   const db = getDb();
   const safePage = clampPage(page);
   const query = search?.trim();
 
-  const filters = query
+  const searchFilter = query
     ? or(
         ilike(sets.title, `%${query}%`),
         ilike(sets.normalizedTitle, `%${query.toLowerCase()}%`),
         ilike(sets.uploader, `%${query}%`),
       )
     : undefined;
+
+  const userFilter = userId
+    ? inArray(
+        sets.sourceUrl,
+        db
+          .select({ sourceUrl: setRuns.sourceUrl })
+          .from(setRuns)
+          .where(eq(setRuns.requestedBy, userId)),
+      )
+    : undefined;
+
+  const filters = and(searchFilter, userFilter);
 
   const [countRow] = await db
     .select({ value: count(sets.id) })
