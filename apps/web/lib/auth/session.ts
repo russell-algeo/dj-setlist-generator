@@ -1,13 +1,11 @@
 import "server-only";
 
-import { timingSafeEqual } from "node:crypto";
-
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
 import { authOptions } from "@/lib/auth/options";
-import { hashApiToken } from "@/lib/security/api-tokens";
+import { verifyApiToken } from "@/lib/security/api-tokens";
 import { apiTokens, spotifyConnections, submissions, userProfiles } from "@/lib/db/schema";
 import { getDb } from "@/lib/db/client";
 import { env } from "@/lib/env";
@@ -23,16 +21,6 @@ export type SessionActor = {
 
 const db = getDb();
 
-const safeEqualHex = (left: string, right: string) => {
-  const leftBuffer = Buffer.from(left, "utf8");
-  const rightBuffer = Buffer.from(right, "utf8");
-
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer);
-};
 
 export const getSessionActor = async (): Promise<SessionActor | null> => {
   const session = await getServerSession(authOptions);
@@ -74,7 +62,6 @@ export const getBearerTokenActor = async (request: Request): Promise<SessionActo
   }
 
   const tokenPrefix = plainToken.slice(0, 12);
-  const tokenHash = hashApiToken(plainToken);
 
   const [tokenRecord] = await db
     .select({
@@ -91,7 +78,7 @@ export const getBearerTokenActor = async (request: Request): Promise<SessionActo
     .where(and(eq(apiTokens.tokenPrefix, tokenPrefix), isNull(apiTokens.revokedAt)))
     .limit(1);
 
-  if (!tokenRecord || !safeEqualHex(tokenRecord.tokenHash, tokenHash)) {
+  if (!tokenRecord || !verifyApiToken(plainToken, tokenRecord.tokenHash)) {
     return null;
   }
 

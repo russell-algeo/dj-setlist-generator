@@ -132,7 +132,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
 
   if (input.createPlaylist) {
     const [connection] = await db
-      .select({ id: spotifyConnections.id })
+      .select({ userId: spotifyConnections.userId })
       .from(spotifyConnections)
       .where(
         and(
@@ -145,7 +145,9 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
 
     if (!connection) {
       effectiveCreatePlaylist = false;
-      warnings.push("no_spotify_connection");
+      warnings.push(
+        "Spotify playlist creation was disabled: no Spotify account connected. Connect Spotify in Settings and resubmit to enable playlists.",
+      );
     }
   }
 
