@@ -4,9 +4,25 @@ import { AppShell } from "@/components/app-shell";
 import { getSpotifyConnectionForUser, requireSessionActor } from "@/lib/auth/session";
 import { formatTimestamp } from "@/lib/format";
 
-export default async function DashboardSettingsPage() {
+type DashboardSettingsPageProps = {
+  searchParams: Promise<{ spotify?: string }>;
+};
+
+export default async function DashboardSettingsPage({ searchParams }: DashboardSettingsPageProps) {
   const actor = await requireSessionActor("/dashboard/settings");
+  const { spotify: spotifyParam } = await searchParams;
   const spotifyConnection = await getSpotifyConnectionForUser(actor.userId);
+
+  const spotifyStatusMessage = (() => {
+    if (spotifyParam === "connected") return "Spotify connected successfully.";
+    if (spotifyParam === "disconnected") return "Spotify disconnected.";
+    if (spotifyParam === "error") return "Spotify connection failed. Please try again.";
+    if (spotifyParam === "invalid_state") return "Spotify connection failed: invalid state. Please try again.";
+    if (spotifyParam === "missing_config") return "Spotify OAuth is not configured on this deployment.";
+    if (spotifyParam === "token_error") return "Spotify token exchange failed. Please try again.";
+    if (spotifyParam === "profile_error") return "Could not fetch your Spotify profile. Please try again.";
+    return null;
+  })();
 
   return (
     <AppShell
@@ -36,6 +52,9 @@ export default async function DashboardSettingsPage() {
         </article>
         <article className="panel">
           <h2>Spotify</h2>
+          {spotifyStatusMessage ? (
+            <p className="muted" style={{ marginBottom: 12 }}>{spotifyStatusMessage}</p>
+          ) : null}
           {spotifyConnection && !spotifyConnection.revokedAt ? (
             <>
               <p>Connected as {spotifyConnection.spotifyUserId}</p>
@@ -49,6 +68,13 @@ export default async function DashboardSettingsPage() {
             <Link className="pill-link" href="/api/spotify/start">
               {spotifyConnection && !spotifyConnection.revokedAt ? "Reconnect Spotify" : "Connect Spotify"}
             </Link>
+            {spotifyConnection && !spotifyConnection.revokedAt ? (
+              <form action="/api/spotify/disconnect" method="post">
+                <button className="button button--ghost" type="submit">
+                  Disconnect Spotify
+                </button>
+              </form>
+            ) : null}
             <Link className="pill-link" href="/dashboard/tokens">
               Manage API tokens
             </Link>
