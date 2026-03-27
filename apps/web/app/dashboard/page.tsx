@@ -43,6 +43,9 @@ export default async function DashboardPage() {
             <Link className="pill-link" href="/dashboard/jobs">
               View jobs
             </Link>
+            <Link className="pill-link" href="/dashboard/settings">
+              Settings
+            </Link>
             {actor.isAdmin && (
               <Link className="pill-link" href="/dashboard/admin">
                 Admin
