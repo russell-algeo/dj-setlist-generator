@@ -31,7 +31,6 @@ jobs:
       SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
       SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
       DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
-      HTTPS_PROXY: socks5h://localhost:9091
     services:
       warp:
         image: ghcr.io/mon-ius/docker-warp-socks:v5
@@ -56,4 +55,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run discovery job
+        env:
+          HTTPS_PROXY: socks5h://localhost:9091
         run: python -m worker.jobs.discover_artist --submission-id "${{ github.event.inputs.submission_id }}"
