@@ -56,6 +56,8 @@ install_portable_ffmpeg() {
       --location \
       --retry 3 \
       --retry-delay 2 \
+      --connect-timeout 15 \
+      --max-time 120 \
       --silent \
       --show-error \
       "${STATIC_URL}" \
@@ -111,6 +113,12 @@ for attempt in 1 2 3; do
     sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 ffmpeg; then
     if have_path_ffmpeg; then
       echo "FFmpeg installation succeeded."
+      if [[ -n "${PORTABLE_BIN_DIR}" ]]; then
+        mkdir -p "${PORTABLE_BIN_DIR}"
+        cp "$(command -v ffmpeg)" "${PORTABLE_BIN_DIR}/ffmpeg"
+        cp "$(command -v ffprobe)" "${PORTABLE_BIN_DIR}/ffprobe"
+        echo "Copied system FFmpeg to ${PORTABLE_BIN_DIR} for artifact upload."
+      fi
       print_versions
       exit 0
     fi

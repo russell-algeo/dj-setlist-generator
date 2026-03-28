@@ -82,6 +82,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-bootstrap.txt
 
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: Ensure ffmpeg
         run: ./.github/scripts/ensure-ffmpeg.sh
 
