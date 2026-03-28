@@ -10,6 +10,8 @@
     "dev": "next dev",
     "prebuild": "pnpm archive:stage",
     "build": "next build",
+    "deploy:preview": "pnpm -C ../.. deploy:preview",
+    "deploy:prod": "pnpm -C ../.. deploy:prod",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",

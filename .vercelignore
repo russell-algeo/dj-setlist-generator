@@ -1,0 +1,16 @@
+assets
+output
+checkpoints
+.venv
+node_modules
+__pycache__
+.pytest_cache
+plans
+tests
+worker
+docs
+.cache
+.spotify_cache
+apps/web/.next
+apps/web/node_modules
+apps/web/.vercel
