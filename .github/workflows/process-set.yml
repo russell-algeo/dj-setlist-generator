@@ -23,14 +23,6 @@ on:
         options:
           - development
           - production
-      youtube_network_mode:
-        description: Route YouTube traffic directly or through WARP
-        required: false
-        default: warp
-        type: choice
-        options:
-          - warp
-          - direct
       recognition_slot_count:
         description: Number of recognition slots to fan out across, or auto
         required: false
@@ -70,17 +62,6 @@ jobs:
       LEASE_SIZE_REQUESTED: ${{ github.event.inputs.lease_size }}
       BATCH_SIZE: "10"
       QUOTA_COOLDOWN_DURATION: "60"
-    services:
-      warp:
-        image: ghcr.io/mon-ius/docker-warp-socks:v5
-        ports:
-          - 9091:9091
-        options: >-
-          --health-cmd "curl -fsSx socks5h://127.0.0.1:9091 https://cloudflare.com/cdn-cgi/trace | grep -q warp=on"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-start-period 30s
-          --health-retries 6
     steps:
       - uses: actions/checkout@v4
 
@@ -117,18 +98,7 @@ jobs:
           YOUTUBE_USER_AGENT: ${{ secrets.YOUTUBE_USER_AGENT }}
         run: ./.github/scripts/prepare-youtube-auth.sh
 
-      - name: Log YouTube network mode
-        run: |
-          echo "YouTube network mode: ${{ github.event.inputs.youtube_network_mode }}"
-          if [[ "${{ github.event.inputs.youtube_network_mode }}" == "warp" ]]; then
-            echo "Using WARP proxy for yt-dlp traffic."
-          else
-            echo "Using direct runner egress for yt-dlp traffic."
-          fi
-
       - name: Bootstrap set run
-        env:
-          HTTPS_PROXY: ${{ github.event.inputs.youtube_network_mode == 'warp' && 'socks5h://localhost:9091' || '' }}
         run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
 
       - name: Persist refreshed YouTube cookies

@@ -52,6 +52,45 @@ Get credentials from: https://www.discogs.com/settings/developers
 - Option A: Generate a personal access token → set `DISCOGS_TOKEN`
 - Option B: Create an OAuth app → set `DISCOGS_CONSUMER_KEY` + `DISCOGS_CONSUMER_SECRET`
 
+## GitHub Actions YouTube Auth
+
+The current CI bootstrap path uses direct runner egress plus authenticated yt-dlp requests:
+
+- `YOUTUBE_COOKIES_B64`: Base64-encoded Netscape cookie export from a burner YouTube account
+- `YOUTUBE_USER_AGENT`: matching browser user agent from the same session
+- `GH_PAT`: optional fine-grained token with repo secrets write access so CI can rotate `YOUTUBE_COOKIES_B64` after a successful run
+
+`process-set` now runs without the WARP proxy by default. On March 28, 2026, direct-egress bootstrap succeeded on three development test runs for:
+
+- `https://www.youtube.com/watch?v=UOhLcspytqo`
+- `https://www.youtube.com/watch?v=5Ud1afYDzFU`
+- `https://youtu.be/3CCFIMrPpDY?si=X6QGDK7yfi554xW4`
+
+If YouTube bot-detection starts failing again in GitHub-hosted runners, re-add WARP to the `bootstrap` job in `.github/workflows/process-set.yml`:
+
+```yaml
+services:
+  warp:
+    image: ghcr.io/mon-ius/docker-warp-socks:v5
+    ports:
+      - 9091:9091
+    options: >-
+      --health-cmd "curl -fsSx socks5h://127.0.0.1:9091 https://cloudflare.com/cdn-cgi/trace | grep -q warp=on"
+      --health-interval 10s
+      --health-timeout 5s
+      --health-start-period 30s
+      --health-retries 6
+```
+
+Then set the bootstrap step proxy env:
+
+```yaml
+- name: Bootstrap set run
+  env:
+    HTTPS_PROXY: socks5h://localhost:9091
+  run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
+```
+
 ## Usage
 
 ### Process a single URL
