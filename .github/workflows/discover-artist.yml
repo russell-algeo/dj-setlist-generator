@@ -31,13 +31,18 @@ jobs:
       SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
       SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
       DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
-      HTTPS_PROXY: http://localhost:8080
+      HTTPS_PROXY: socks5h://localhost:9091
     services:
       warp:
-        image: patrickplaggenborg/warp-proxy
-        options: --cap-add NET_ADMIN --cap-add SYS_MODULE --privileged
+        image: ghcr.io/mon-ius/docker-warp-socks:v5
         ports:
-          - 8080:8080
+          - 9091:9091
+        options: >-
+          --health-cmd "curl -fsSx socks5h://127.0.0.1:9091 https://cloudflare.com/cdn-cgi/trace | grep -q warp=on"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-start-period 30s
+          --health-retries 6
     steps:
       - uses: actions/checkout@v4
 
