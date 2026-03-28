@@ -92,20 +92,6 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install -r requirements-bootstrap.txt
 
-      - name: Resolve Chrome path for WPC provider
-        run: |
-          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
-            if path="$(command -v "$candidate")"; then
-              echo "Using browser at $path"
-              "$path" --version || true
-              echo "YTDLP_BROWSER_PATH=$path" >> "$GITHUB_ENV"
-              exit 0
-            fi
-          done
-
-          echo "No Chrome/Chromium browser found for yt-dlp-getpot-wpc." >&2
-          exit 1
-
       - name: Write YouTube cookies (disabled for PO token test)
         if: ${{ false }}
         env:
@@ -119,7 +105,7 @@ jobs:
       - name: Bootstrap set run
         env:
           HTTPS_PROXY: socks5h://localhost:9091
-        run: xvfb-run -a python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
+        run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
 
       - id: scheduler
         name: Emit scheduler outputs

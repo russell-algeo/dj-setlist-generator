@@ -1,3 +1,2 @@
 -r requirements-base.txt
 yt-dlp[default,curl-cffi]>=2025.9.26
-yt-dlp-getpot-wpc==1.0.0
