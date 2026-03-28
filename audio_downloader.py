@@ -137,6 +137,7 @@ class AudioDownloader:
         """
         ydl_opts = self._apply_auth_ydl_opts(
             {
+                "format": "bestaudio/best",
                 "quiet": True,
                 "no_warnings": True,
                 "verbose": True,

@@ -143,6 +143,7 @@ class ProxyInjectionTests(unittest.TestCase):
 
                 opts_passed = mock_ydl_cls.call_args[0][0]
                 self.assertEqual(opts_passed.get("proxy"), "http://localhost:8080")
+                self.assertEqual(opts_passed.get("format"), "bestaudio/best")
 
     def test_get_video_info_passes_cookiefile_and_user_agent(self):
         from audio_downloader import AudioDownloader
