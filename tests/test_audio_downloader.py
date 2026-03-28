@@ -143,7 +143,11 @@ class ProxyInjectionTests(unittest.TestCase):
 
                 opts_passed = mock_ydl_cls.call_args[0][0]
                 self.assertEqual(opts_passed.get("proxy"), "http://localhost:8080")
-                self.assertEqual(opts_passed.get("format"), "bestaudio/best")
+                mock_ctx.extract_info.assert_called_once_with(
+                    "https://youtube.com/watch?v=test",
+                    download=False,
+                    process=False,
+                )
 
     def test_get_video_info_passes_cookiefile_and_user_agent(self):
         from audio_downloader import AudioDownloader
@@ -171,6 +175,11 @@ class ProxyInjectionTests(unittest.TestCase):
                 self.assertEqual(
                     opts_passed.get("http_headers", {}).get("User-Agent"),
                     "Mozilla/5.0 test-agent",
+                )
+                mock_ctx.extract_info.assert_called_once_with(
+                    "https://youtube.com/watch?v=test",
+                    download=False,
+                    process=False,
                 )
 
 

@@ -137,7 +137,6 @@ class AudioDownloader:
         """
         ydl_opts = self._apply_auth_ydl_opts(
             {
-                "format": "bestaudio/best",
                 "quiet": True,
                 "no_warnings": True,
                 "verbose": True,
@@ -147,7 +146,8 @@ class AudioDownloader:
 
         def _do_extract():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=False)
+                # Raw extraction avoids format resolution during bootstrap metadata lookup.
+                return ydl.extract_info(url, download=False, process=False)
 
         info = self._run_with_bot_retry(_do_extract) if self._is_youtube_url(url) else _do_extract()
         return {
