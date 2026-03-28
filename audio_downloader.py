@@ -82,6 +82,9 @@ class AudioDownloader:
         if proxy := os.environ.get("HTTPS_PROXY"):
             ydl_opts['proxy'] = proxy
 
+        if cookie_file := os.environ.get("YTDLP_COOKIE_FILE"):
+            ydl_opts['cookiefile'] = cookie_file
+
         print(f"Downloading audio from: {url}")
 
         def _do_download():
@@ -107,6 +110,9 @@ class AudioDownloader:
 
         if proxy := os.environ.get("HTTPS_PROXY"):
             ydl_opts['proxy'] = proxy
+
+        if cookie_file := os.environ.get("YTDLP_COOKIE_FILE"):
+            ydl_opts['cookiefile'] = cookie_file
 
         def _do_extract():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

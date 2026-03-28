@@ -54,6 +54,15 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Write YouTube cookies
+        env:
+          YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
+        run: |
+          if [[ -n "${YOUTUBE_COOKIES_B64}" ]]; then
+            echo "${YOUTUBE_COOKIES_B64}" | base64 -d > /tmp/yt-cookies.txt
+            echo "YTDLP_COOKIE_FILE=/tmp/yt-cookies.txt" >> "$GITHUB_ENV"
+          fi
+
       - name: Run discovery job
         env:
           HTTPS_PROXY: socks5h://localhost:9091
