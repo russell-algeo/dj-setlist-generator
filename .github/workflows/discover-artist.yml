@@ -54,17 +54,21 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Write YouTube cookies (disabled for PO token test)
-        if: ${{ false }}
+      - name: Prepare YouTube auth
+        id: youtube_auth
         env:
           YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
-        run: |
-          if [[ -n "${YOUTUBE_COOKIES_B64}" ]]; then
-            echo "${YOUTUBE_COOKIES_B64}" | base64 -d > /tmp/yt-cookies.txt
-            echo "YTDLP_COOKIE_FILE=/tmp/yt-cookies.txt" >> "$GITHUB_ENV"
-          fi
+          YOUTUBE_USER_AGENT: ${{ secrets.YOUTUBE_USER_AGENT }}
+        run: ./.github/scripts/prepare-youtube-auth.sh
 
       - name: Run discovery job
         env:
           HTTPS_PROXY: socks5h://localhost:9091
         run: python -m worker.jobs.discover_artist --submission-id "${{ github.event.inputs.submission_id }}"
+
+      - name: Persist refreshed YouTube cookies
+        if: ${{ success() && steps.youtube_auth.outputs.cookies_present == 'true' }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: ./.github/scripts/persist-youtube-cookies.sh

@@ -1,6 +1,5 @@
-import time
 import unittest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 
 class BotRetryTests(unittest.TestCase):
@@ -95,6 +94,37 @@ class ProxyInjectionTests(unittest.TestCase):
                 opts_passed = mock_ydl_cls.call_args[0][0]
                 self.assertNotIn("proxy", opts_passed)
 
+    def test_download_passes_cookiefile_and_user_agent(self):
+        from audio_downloader import AudioDownloader
+
+        env = {
+            "YTDLP_COOKIE_FILE": "/tmp/yt-cookies.txt",
+            "YTDLP_USER_AGENT": "Mozilla/5.0 test-agent",
+        }
+
+        with patch.dict("os.environ", env, clear=True):
+            with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+                mock_ctx = MagicMock()
+                mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ctx)
+                mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+                mock_ctx.download = MagicMock()
+
+                d = AudioDownloader.__new__(AudioDownloader)
+                d.assets_dir = MagicMock()
+
+                from pathlib import Path
+
+                with patch.object(Path, "exists", return_value=False):
+                    with patch.object(Path, "with_suffix", return_value=Path("/tmp/mix")):
+                        d.download("https://youtube.com/watch?v=test", output_path=Path("/tmp/mix.mp3"))
+
+                opts_passed = mock_ydl_cls.call_args[0][0]
+                self.assertEqual(opts_passed.get("cookiefile"), "/tmp/yt-cookies.txt")
+                self.assertEqual(
+                    opts_passed.get("http_headers", {}).get("User-Agent"),
+                    "Mozilla/5.0 test-agent",
+                )
+
     def test_get_video_info_passes_proxy_to_ydl_opts(self):
         from audio_downloader import AudioDownloader
 
@@ -113,6 +143,34 @@ class ProxyInjectionTests(unittest.TestCase):
 
                 opts_passed = mock_ydl_cls.call_args[0][0]
                 self.assertEqual(opts_passed.get("proxy"), "http://localhost:8080")
+
+    def test_get_video_info_passes_cookiefile_and_user_agent(self):
+        from audio_downloader import AudioDownloader
+
+        env = {
+            "YTDLP_COOKIE_FILE": "/tmp/yt-cookies.txt",
+            "YTDLP_USER_AGENT": "Mozilla/5.0 test-agent",
+        }
+
+        with patch.dict("os.environ", env, clear=True):
+            with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+                mock_ctx = MagicMock()
+                mock_ctx.extract_info = MagicMock(
+                    return_value={"title": "Test", "duration": 3600, "uploader": "DJ Test"}
+                )
+                mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ctx)
+                mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+                d = AudioDownloader.__new__(AudioDownloader)
+                d.assets_dir = MagicMock()
+                d.get_video_info("https://youtube.com/watch?v=test")
+
+                opts_passed = mock_ydl_cls.call_args[0][0]
+                self.assertEqual(opts_passed.get("cookiefile"), "/tmp/yt-cookies.txt")
+                self.assertEqual(
+                    opts_passed.get("http_headers", {}).get("User-Agent"),
+                    "Mozilla/5.0 test-agent",
+                )
 
 
 if __name__ == "__main__":
