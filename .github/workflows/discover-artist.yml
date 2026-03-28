@@ -54,7 +54,8 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Write YouTube cookies
+      - name: Write YouTube cookies (disabled for PO token test)
+        if: ${{ false }}
         env:
           YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
         run: |

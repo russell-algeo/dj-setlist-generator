@@ -21,6 +21,37 @@ class AudioDownloader:
         self.assets_dir = checkpoint_manager.assets_dir if checkpoint_manager else Config.ASSETS_DIR
         self.assets_dir.mkdir(parents=True, exist_ok=True)
 
+    def _youtube_extractor_args(self) -> dict[str, dict[str, list[str]]]:
+        """Configure yt-dlp for the current WARP + mweb + PO token experiment."""
+        return {
+            "youtube": {
+                "player_client": ["mweb"],
+                "fetch_pot": ["auto"],
+                "pot_trace": ["true"],
+                "jsc_trace": ["true"],
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": ["http://127.0.0.1:4416"],
+            },
+        }
+
+    def _log_yt_dlp_config(self, operation: str, ydl_opts: dict) -> None:
+        """Emit the yt-dlp knobs that matter for YouTube auth experiments."""
+        extractor_args = ydl_opts.get("extractor_args") or {}
+        youtube_args = extractor_args.get("youtube") or {}
+        bgutil_args = extractor_args.get("youtubepot-bgutilhttp") or {}
+        print(
+            "yt-dlp config "
+            f"operation={operation} "
+            f"proxy={ydl_opts.get('proxy') or 'none'} "
+            f"cookiefile={'set' if ydl_opts.get('cookiefile') else 'none'} "
+            f"player_client={','.join(youtube_args.get('player_client', [])) or 'default'} "
+            f"fetch_pot={','.join(youtube_args.get('fetch_pot', [])) or 'default'} "
+            f"pot_trace={','.join(youtube_args.get('pot_trace', [])) or 'default'} "
+            f"jsc_trace={','.join(youtube_args.get('jsc_trace', [])) or 'default'} "
+            f"bgutil_base_url={','.join(bgutil_args.get('base_url', [])) or 'default'}"
+        )
+
     def _is_bot_detection_error(self, error: Exception) -> bool:
         """Check if error is YouTube's bot detection."""
         error_str = str(error).lower()
@@ -77,6 +108,8 @@ class AudioDownloader:
             'outtmpl': output_template,
             'quiet': False,
             'no_warnings': False,
+            'verbose': True,
+            'extractor_args': self._youtube_extractor_args(),
         }
 
         if proxy := os.environ.get("HTTPS_PROXY"):
@@ -86,6 +119,7 @@ class AudioDownloader:
             ydl_opts['cookiefile'] = cookie_file
 
         print(f"Downloading audio from: {url}")
+        self._log_yt_dlp_config("download", ydl_opts)
 
         def _do_download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -106,6 +140,8 @@ class AudioDownloader:
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
+            'verbose': True,
+            'extractor_args': self._youtube_extractor_args(),
         }
 
         if proxy := os.environ.get("HTTPS_PROXY"):
@@ -113,6 +149,8 @@ class AudioDownloader:
 
         if cookie_file := os.environ.get("YTDLP_COOKIE_FILE"):
             ydl_opts['cookiefile'] = cookie_file
+
+        self._log_yt_dlp_config("extract_info", ydl_opts)
 
         def _do_extract():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -1,2 +1,3 @@
 -r requirements-base.txt
-yt-dlp>=2024.1.0
+yt-dlp[default,curl-cffi]>=2025.5.22
+bgutil-ytdlp-pot-provider==1.3.1
