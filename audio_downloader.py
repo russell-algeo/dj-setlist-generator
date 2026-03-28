@@ -22,24 +22,26 @@ class AudioDownloader:
         self.assets_dir.mkdir(parents=True, exist_ok=True)
 
     def _youtube_extractor_args(self) -> dict[str, dict[str, list[str]]]:
-        """Configure yt-dlp for the current WARP + mweb + PO token experiment."""
-        return {
+        """Configure yt-dlp for the current WARP + mweb + browser-backed PO token experiment."""
+        extractor_args: dict[str, dict[str, list[str]]] = {
             "youtube": {
                 "player_client": ["mweb"],
-                "fetch_pot": ["auto"],
+                "fetch_pot": ["always"],
                 "pot_trace": ["true"],
                 "jsc_trace": ["true"],
             },
-            "youtubepot-bgutilhttp": {
-                "base_url": ["http://127.0.0.1:4416"],
-            },
         }
+        if browser_path := os.environ.get("YTDLP_BROWSER_PATH"):
+            extractor_args["youtubepot-wpc"] = {
+                "browser_path": [browser_path],
+            }
+        return extractor_args
 
     def _log_yt_dlp_config(self, operation: str, ydl_opts: dict) -> None:
         """Emit the yt-dlp knobs that matter for YouTube auth experiments."""
         extractor_args = ydl_opts.get("extractor_args") or {}
         youtube_args = extractor_args.get("youtube") or {}
-        bgutil_args = extractor_args.get("youtubepot-bgutilhttp") or {}
+        wpc_args = extractor_args.get("youtubepot-wpc") or {}
         print(
             "yt-dlp config "
             f"operation={operation} "
@@ -49,7 +51,7 @@ class AudioDownloader:
             f"fetch_pot={','.join(youtube_args.get('fetch_pot', [])) or 'default'} "
             f"pot_trace={','.join(youtube_args.get('pot_trace', [])) or 'default'} "
             f"jsc_trace={','.join(youtube_args.get('jsc_trace', [])) or 'default'} "
-            f"bgutil_base_url={','.join(bgutil_args.get('base_url', [])) or 'default'}"
+            f"wpc_browser_path={','.join(wpc_args.get('browser_path', [])) or 'auto'}"
         )
 
     def _is_bot_detection_error(self, error: Exception) -> bool:
