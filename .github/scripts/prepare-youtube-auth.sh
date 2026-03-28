@@ -7,7 +7,7 @@ cookies_present=false
 user_agent_present=false
 
 if [[ -n "${YOUTUBE_COOKIES_B64:-}" ]]; then
-  printf '%s' "${YOUTUBE_COOKIES_B64}" | base64 -d > /tmp/yt-cookies.txt
+  printf '%s' "${YOUTUBE_COOKIES_B64}" | tr -cd 'A-Za-z0-9+/=' | base64 -d > /tmp/yt-cookies.txt
   echo "Prepared YouTube cookie jar bytes=$(wc -c < /tmp/yt-cookies.txt | tr -d ' ')"
   echo "YTDLP_COOKIE_FILE=/tmp/yt-cookies.txt" >> "$GITHUB_ENV"
   cookies_present=true
