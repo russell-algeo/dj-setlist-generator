@@ -51,6 +51,20 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Verify yt-dlp JS runtime
+        run: |
+          deno --version
+          python - <<'PY'
+          import shutil
+
+          print(f"deno={shutil.which('deno') or 'missing'}")
+          print(f"node={shutil.which('node') or 'missing'}")
+          PY
+
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
