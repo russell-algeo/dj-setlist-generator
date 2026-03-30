@@ -21,13 +21,10 @@ const TrackMetaPill = ({ children }: { children: React.ReactNode }) => (
 
 export function ArchiveHomePage({
   summary,
-  preview,
 }: {
   summary: ArchiveHomeBaseSummary;
-  preview: boolean;
 }) {
   const totalPages = Math.max(1, Math.ceil(summary.setLibrary.totalItems / summary.setLibrary.pageSize));
-  const searchBase = preview ? "/archive-preview" : "/";
   const encodedQuery = summary.setLibrary.query
     ? `&q=${encodeURIComponent(summary.setLibrary.query)}`
     : "";
@@ -94,11 +91,7 @@ export function ArchiveHomePage({
                 {summary.featuredArtists.slice(0, 4).map((artist) => (
                   <Link
                     className={styles.heroCard}
-                    href={buildArtistHref({
-                      preview,
-                      slug: artist.slug,
-                      legacyPath: artist.legacyPath,
-                    })}
+                    href={buildArtistHref({ slug: artist.slug })}
                     key={artist.id}
                   >
                     <div className={styles.cardMedia}>
@@ -138,32 +131,23 @@ export function ArchiveHomePage({
                 <div className={styles.actionRow}>
                   <Link
                     className={styles.linkButton}
-                    href={buildArtistHref({
-                      preview,
-                      slug: artist.slug,
-                      legacyPath: artist.legacyPath,
-                    })}
+                    href={buildArtistHref({ slug: artist.slug })}
                   >
                     Open artist
                   </Link>
-                  {!preview && artist.legacyPath ? (
-                    <Link className={styles.linkButton} href={artist.legacyPath}>
-                      Legacy URL
-                    </Link>
-                  ) : null}
                 </div>
               </article>
             ))}
           </div>
         </section>
 
-        <ArchiveHomeConnectionsSection preview={preview} />
+        <ArchiveHomeConnectionsSection />
 
         <section className={styles.section} id="sets">
           <div className={styles.kicker}>Full Set Library</div>
           <h2 className={styles.sectionHeading}>Browse Imported Sets</h2>
           <div className={styles.searchBar}>
-            <form action={searchBase} className={styles.inlineForm}>
+            <form action="/" className={styles.inlineForm}>
               <input
                 defaultValue={summary.setLibrary.query}
                 name="q"
@@ -195,11 +179,7 @@ export function ArchiveHomePage({
                 <div className={styles.actionRow}>
                   <Link
                     className={styles.linkButton}
-                    href={buildSetHref({
-                      preview,
-                      slug: setCard.slug,
-                      legacyPath: setCard.legacyPath,
-                    })}
+                    href={buildSetHref({ slug: setCard.slug })}
                   >
                     Open set
                   </Link>
@@ -216,7 +196,7 @@ export function ArchiveHomePage({
             {summary.setLibrary.page > 1 ? (
               <Link
                 className={styles.linkButton}
-                href={`${searchBase}?page=${summary.setLibrary.page - 1}${encodedQuery}`}
+                href={`/?page=${summary.setLibrary.page - 1}${encodedQuery}`}
               >
                 Previous
               </Link>
@@ -224,7 +204,7 @@ export function ArchiveHomePage({
             {summary.setLibrary.page < totalPages ? (
               <Link
                 className={styles.linkButton}
-                href={`${searchBase}?page=${summary.setLibrary.page + 1}${encodedQuery}`}
+                href={`/?page=${summary.setLibrary.page + 1}${encodedQuery}`}
               >
                 Next
               </Link>
@@ -242,14 +222,12 @@ export function ArchiveHomePage({
 
 export function ArchiveArtistPage({
   artist,
-  preview,
   query,
 }: {
   artist: ArchiveArtistSummary;
-  preview: boolean;
   query: string;
 }) {
-  return <ArchiveArtistExplorer artist={artist} initialQuery={query} preview={preview} />;
+  return <ArchiveArtistExplorer artist={artist} initialQuery={query} />;
 }
 
 export function ArchiveSetPage({
@@ -257,7 +235,6 @@ export function ArchiveSetPage({
   query,
 }: {
   detail: ArchiveSetDetail;
-  preview: boolean;
   query: string;
 }) {
   return <ArchiveSetExplorer detail={detail} initialQuery={query} />;

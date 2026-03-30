@@ -15,16 +15,18 @@ import { buildArtistHref, buildSetHref } from "@/components/archive/archive-href
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { ARCHIVE_HOME_EXPLORER_CSS } from "@/components/archive/archive-home-explorer.styles";
 import type {
+  ArchiveHomeAtlasSelectionPayload,
   ArchiveHomeArtistCard,
+  ArchiveHomeBootstrapPayload,
   ArchiveHomeCompareMode,
-  ArchiveHomeExplorerInitialPayload,
-  ArchiveHomeNetworkPayload,
+  ArchiveHomeNetworkIndexPayload,
   ArchiveHomePairBucket,
-  ArchiveHomePairPayload,
+  ArchiveHomePairSelectionPayload,
   ArchiveHomePairTrack,
-  ArchiveHomeSetLibraryItem,
-  ArchiveHomeSetLibraryPayload,
+  ArchiveHomeSetLibraryPagePayload,
+  ArchiveHomeSetLibraryTrack,
   ArchiveHomeSetSort,
+  ArchiveHomeSetTracklistPayload,
   ArchiveHomeTaxonomyLens,
   ArchiveHomeTrackArtistRef,
   ArchiveHomeTrackCatalogItem,
@@ -139,13 +141,6 @@ const emptyConfidenceCounts = (): Record<ArchiveConfidence, number> => ({
   UNCERTAIN: 0,
 });
 
-const incrementConfidence = (
-  counts: Record<ArchiveConfidence, number>,
-  confidence: ArchiveConfidence,
-) => {
-  counts[confidence] += 1;
-};
-
 const filterTrackRefsByConfidence = (
   setRefs: ArchiveHomeTrackSetRef[],
   filter: ConfidenceFilter,
@@ -195,86 +190,24 @@ const projectTrackByConfidence = (
   };
 };
 
-const buildScopedTrackCatalog = ({
-  compareMode,
-  selectedArtistSlugs,
-  trackCatalog,
-}: {
-  compareMode: ArchiveHomeCompareMode;
-  selectedArtistSlugs: string[];
-  trackCatalog: ArchiveHomeTrackCatalogItem[];
-}) => {
-  const slugSet = new Set(selectedArtistSlugs);
-  return trackCatalog
-    .map<ArchiveHomeTrackCatalogItem | null>((track) => {
-      const artistRefs = track.artistRefs.filter((artistRef) => slugSet.has(artistRef.artistSlug));
-      if (!artistRefs.length) {
-        return null;
-      }
-      if (compareMode === "intersection" && artistRefs.length !== selectedArtistSlugs.length) {
-        return null;
-      }
-
-      const confidenceCounts = emptyConfidenceCounts();
-      let totalAppearances = 0;
-      for (const artistRef of artistRefs) {
-        totalAppearances += artistRef.appearances;
-        for (const setRef of artistRef.setRefs) {
-          incrementConfidence(confidenceCounts, setRef.confidence);
-        }
-      }
-
-      return {
-        ...track,
-        artistRefs,
-        artistsCount: artistRefs.length,
-        confidence: primaryConfidenceFromCounts(confidenceCounts),
-        confidenceCounts,
-        totalAppearances,
-      };
-    })
-    .filter((track): track is ArchiveHomeTrackCatalogItem => Boolean(track))
-    .sort((left, right) => {
-      if (right.totalAppearances !== left.totalAppearances) {
-        return right.totalAppearances - left.totalAppearances;
-      }
-      if (right.artistsCount !== left.artistsCount) {
-        return right.artistsCount - left.artistsCount;
-      }
-      return `${left.artist} ${left.title}`.localeCompare(`${right.artist} ${right.title}`);
-    });
-};
-
 const buildTrackQueryHref = ({
-  artistLegacyPath,
   artistSlug,
-  preview,
   query,
 }: {
-  artistLegacyPath: string | null;
   artistSlug: string;
-  preview: boolean;
   query: string;
 }) => {
-  const base = buildArtistHref({
-    legacyPath: artistLegacyPath,
-    preview,
-    slug: artistSlug,
-  });
+  const base = buildArtistHref({ slug: artistSlug });
   return `${base}?q=${encodeURIComponent(query)}#sets-section`;
 };
 
 const buildTrackSetHref = ({
-  preview,
-  setLegacyPath,
   setSlug,
   trackPosition,
 }: {
-  preview: boolean;
-  setLegacyPath: string | null;
   setSlug: string;
   trackPosition: number;
-}) => `${buildSetHref({ legacyPath: setLegacyPath, preview, slug: setSlug })}#track-${trackPosition}`;
+}) => `${buildSetHref({ slug: setSlug })}#track-${trackPosition}`;
 
 const buildTrackCardStyle = (
   card: HTMLElement | null,
@@ -415,7 +348,7 @@ const buildPairRows = ({
   confidence: ConfidenceFilter;
   lens: PairLens;
   minUsage: number;
-  pairPayload: ArchiveHomePairPayload;
+  pairPayload: ArchiveHomePairSelectionPayload;
   query: string;
   sort: "alpha" | "count";
 }) => {
@@ -551,74 +484,11 @@ const projectPairTrackByConfidence = (
   };
 };
 
-const buildSetLibraryPayloadLocal = ({
-  artistCards,
-  artistFilter,
-  items,
-  page,
-  pageSize,
-  query,
-  sort,
-}: {
-  artistCards: ArchiveHomeArtistCard[];
-  artistFilter: string;
-  items: ArchiveHomeSetLibraryItem[];
-  page: number;
-  pageSize: number;
-  query: string;
-  sort: ArchiveHomeSetSort;
-}): ArchiveHomeSetLibraryPayload => {
-  const normalizedQuery = normalizeSearchText(query);
-  let filteredItems = items.filter((setItem) => {
-    if (artistFilter !== "ALL" && setItem.artistName !== artistFilter) {
-      return false;
-    }
-    if (!normalizedQuery) {
-      return true;
-    }
-    return normalizeSearchText(
-      `${setItem.title} ${setItem.artistName} ${setItem.trackSearchText}`,
-    ).includes(normalizedQuery);
-  });
-
-  filteredItems = [...filteredItems].sort((left, right) => {
-    if (sort === "rate") {
-      return (right.recognitionRate ?? 0) - (left.recognitionRate ?? 0);
-    }
-    if (sort === "tracks") {
-      return right.totalTracks - left.totalTracks;
-    }
-    if (sort === "duration") {
-      return right.duration - left.duration;
-    }
-    return left.artistName.localeCompare(right.artistName) || left.title.localeCompare(right.title);
-  });
-
-  const safePageSize = Math.max(1, Math.min(48, Math.floor(pageSize)));
-  const totalItems = filteredItems.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / safePageSize));
-  const safePage = Math.max(1, Math.min(totalPages, Math.floor(page)));
-  const startIndex = (safePage - 1) * safePageSize;
-
-  return {
-    artistFilter,
-    artistOptions: ["ALL", ...artistCards.map((artistCard) => artistCard.name)],
-    items: filteredItems.slice(startIndex, startIndex + safePageSize),
-    page: safePage,
-    pageSize: safePageSize,
-    query,
-    sort,
-    totalItems,
-    totalPages,
-  };
-};
-
 const TrackCard = ({
   cardClassName,
   openState,
   onToggleSources,
   onToggleSpotify,
-  preview,
   track,
   style,
 }: {
@@ -626,7 +496,6 @@ const TrackCard = ({
   openState: TrackCardOpenState;
   onToggleSources: (event: MouseEvent<HTMLElement>) => void;
   onToggleSpotify: (event: MouseEvent<HTMLButtonElement>) => void;
-  preview: boolean;
   style?: TrackCardStyle | null;
   track: ArchiveHomePairTrack | ArchiveHomeTrackCatalogItem;
 }) => {
@@ -636,14 +505,12 @@ const TrackCard = ({
     : [
         {
           appearances: track.appearancesA,
-          artistLegacyPath: track.setsA[0]?.setLegacyPath ?? null,
           artistName: "",
           artistSlug: "",
           setRefs: track.setsA,
         },
         {
           appearances: track.appearancesB,
-          artistLegacyPath: track.setsB[0]?.setLegacyPath ?? null,
           artistName: "",
           artistSlug: "",
           setRefs: track.setsB,
@@ -715,9 +582,7 @@ const TrackCard = ({
               const queryHref =
                 "artistSlug" in group && group.artistSlug
                   ? buildTrackQueryHref({
-                      artistLegacyPath: group.artistLegacyPath,
                       artistSlug: group.artistSlug,
-                      preview,
                       query: `${track.artist} ${track.title}`.trim(),
                     })
                   : null;
@@ -736,8 +601,6 @@ const TrackCard = ({
                         <li key={`${track.trackKey}-${setRef.setSlug}-${setRef.trackPosition}`}>
                           <a
                             href={buildTrackSetHref({
-                              preview,
-                              setLegacyPath: setRef.setLegacyPath,
                               setSlug: setRef.setSlug,
                               trackPosition: setRef.trackPosition,
                             })}
@@ -764,10 +627,8 @@ const TrackCard = ({
 
 export function ArchiveHomeExplorer({
   initial,
-  preview,
 }: {
-  initial: ArchiveHomeExplorerInitialPayload;
-  preview: boolean;
+  initial: ArchiveHomeBootstrapPayload;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const heroVisualRef = useRef<HTMLDivElement | null>(null);
@@ -785,6 +646,9 @@ export function ArchiveHomeExplorer({
   );
   const [compareMode, setCompareMode] = useState<ArchiveHomeCompareMode>(
     initial.initialAtlas.compareMode,
+  );
+  const [atlasPayload, setAtlasPayload] = useState<ArchiveHomeAtlasSelectionPayload>(
+    initial.initialAtlas,
   );
   const [artistQuery, setArtistQuery] = useState("");
   const [dockedSelectedArtistSlugs, setDockedSelectedArtistSlugs] = useState<string[]>(
@@ -804,13 +668,13 @@ export function ArchiveHomeExplorer({
   const [trackCardStates, setTrackCardStates] = useState<Record<string, TrackCardOpenState>>({});
   const [trackCardStyles, setTrackCardStyles] = useState<Record<string, TrackCardStyle | null>>({});
 
-  const [networkPayload] = useState<ArchiveHomeNetworkPayload | null>(initial.initialNetwork);
+  const networkPayload = initial.initialNetwork as ArchiveHomeNetworkIndexPayload;
   const [networkLayoutVersion, setNetworkLayoutVersion] = useState(0);
   const [networkMinScore, setNetworkMinScore] = useState(10);
   const [networkSearch, setNetworkSearch] = useState("");
   const [networkSelectedArtistSlugs, setNetworkSelectedArtistSlugs] = useState<string[]>([]);
 
-  const [pairPayload, setPairPayload] = useState<ArchiveHomePairPayload | null>(null);
+  const [pairPayload, setPairPayload] = useState<ArchiveHomePairSelectionPayload | null>(null);
   const [pairLens, setPairLens] = useState<PairLens>("genres");
   const [pairQuery, setPairQuery] = useState("");
   const [pairSort, setPairSort] = useState<"alpha" | "count">("count");
@@ -819,33 +683,48 @@ export function ArchiveHomeExplorer({
   const [pairPage, setPairPage] = useState(0);
   const [pairActiveName, setPairActiveName] = useState<string | null>(null);
 
-  const [setLibrary, setSetLibrary] = useState(initial.initialSetLibrary);
+  const [setLibrary, setSetLibrary] = useState<ArchiveHomeSetLibraryPagePayload>(
+    initial.initialSetLibrary,
+  );
   const [setQuery, setSetQuery] = useState(initial.initialSetLibrary.query);
   const [setArtistFilter, setSetArtistFilter] = useState(initial.initialSetLibrary.artistFilter);
   const [setSort, setSetSort] = useState<ArchiveHomeSetSort>(initial.initialSetLibrary.sort);
   const [setPage, setSetPage] = useState(initial.initialSetLibrary.page);
   const [expandedSets, setExpandedSets] = useState<string[]>([]);
+  const [setTracklists, setSetTracklists] = useState<Record<string, ArchiveHomeSetLibraryTrack[]>>(
+    {},
+  );
+  const [loadingTracklists, setLoadingTracklists] = useState<Record<string, boolean>>({});
+
+  const artistCards = initial.artistCards;
+  const atlasCacheRef = useRef(
+    new Map<string, ArchiveHomeAtlasSelectionPayload>([
+      [
+        `${initial.initialAtlas.compareMode}::${initial.initialAtlas.selectedArtistSlugs.join(",")}`,
+        initial.initialAtlas,
+      ],
+    ]),
+  );
+  const pairCacheRef = useRef(new Map<string, ArchiveHomePairSelectionPayload | null>());
+  const setLibraryCacheRef = useRef(
+    new Map<string, ArchiveHomeSetLibraryPagePayload>([
+      [
+        `${initial.initialSetLibrary.artistFilter}::${initial.initialSetLibrary.sort}::${initial.initialSetLibrary.page}::${initial.initialSetLibrary.query}`,
+        initial.initialSetLibrary,
+      ],
+    ]),
+  );
+  const setTracklistCacheRef = useRef(new Map<string, ArchiveHomeSetTracklistPayload | null>());
 
   const deferredArtistQuery = useDeferredValue(artistQuery);
   const deferredTaxonomyQuery = useDeferredValue(taxonomyQuery);
   const deferredPairQuery = useDeferredValue(pairQuery);
   const deferredSetQuery = useDeferredValue(setQuery);
-
-  const atlasPayload = initial.initialAtlas;
-  const artistCards = atlasPayload.artistCards;
-  const scopedTrackCatalog = useMemo(
-    () =>
-      buildScopedTrackCatalog({
-        compareMode,
-        selectedArtistSlugs,
-        trackCatalog: atlasPayload.trackCatalog,
-      }),
-    [atlasPayload.trackCatalog, compareMode, selectedArtistSlugs],
-  );
   const artistBySlug = useMemo(
     () => new Map(artistCards.map((artistCard) => [artistCard.slug, artistCard])),
     [artistCards],
   );
+  const scopedTrackCatalog = atlasPayload.trackCatalog;
   const visibleArtists = useMemo(() => {
     const normalizedQuery = normalizeSearchText(deferredArtistQuery);
     return artistCards.filter((artistCard) =>
@@ -1123,19 +1002,104 @@ export function ArchiveHomeExplorer({
   }, [initial.hero.railSets.length]);
 
   useEffect(() => {
+    const selectionKey = `${compareMode}::${selectedArtistSlugs.join(",")}`;
+    const cached = atlasCacheRef.current.get(selectionKey);
+
+    if (cached) {
+      setAtlasPayload(cached);
+      return;
+    }
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams({
+      mode: compareMode,
+    });
+
+    if (
+      selectedArtistSlugs.length > 0 &&
+      selectedArtistSlugs.length === artistCards.length
+    ) {
+      searchParams.append("artist", "__ALL__");
+    } else {
+      for (const artistSlug of selectedArtistSlugs) {
+        searchParams.append("artist", artistSlug);
+      }
+    }
+
+    void fetch(`/api/archive/home/atlas?${searchParams.toString()}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Atlas request failed with ${response.status}`);
+        }
+        return (await response.json()) as ArchiveHomeAtlasSelectionPayload;
+      })
+      .then((payload) => {
+        atlasCacheRef.current.set(selectionKey, payload);
+        setAtlasPayload(payload);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("[archive-home] atlas selection request failed", error);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [artistCards.length, compareMode, selectedArtistSlugs]);
+
+  useEffect(() => {
     if (networkSelectedArtistSlugs.length !== 2) {
       setPairPayload(null);
       return;
     }
-    setPairPayload(
-      initial.pairPayloads[
-        buildPairLookupKey(
-          networkSelectedArtistSlugs[0]!,
-          networkSelectedArtistSlugs[1]!,
-        )
-      ] ?? null,
+
+    const key = buildPairLookupKey(
+      networkSelectedArtistSlugs[0]!,
+      networkSelectedArtistSlugs[1]!,
     );
-  }, [initial.pairPayloads, networkSelectedArtistSlugs]);
+    const cached = pairCacheRef.current.get(key);
+    if (cached !== undefined) {
+      setPairPayload(cached);
+      return;
+    }
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams({
+      a: networkSelectedArtistSlugs[0]!,
+      b: networkSelectedArtistSlugs[1]!,
+    });
+
+    void fetch(`/api/archive/home/pair?${searchParams.toString()}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (response.status === 404) {
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(`Pair request failed with ${response.status}`);
+        }
+        return (await response.json()) as ArchiveHomePairSelectionPayload;
+      })
+      .then((payload) => {
+        pairCacheRef.current.set(key, payload);
+        setPairPayload(payload);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("[archive-home] pair selection request failed", error);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [networkSelectedArtistSlugs]);
 
   useEffect(() => {
     const updateLayout = () => {
@@ -1150,26 +1114,46 @@ export function ArchiveHomeExplorer({
   }, []);
 
   useEffect(() => {
-    setSetLibrary(
-      buildSetLibraryPayloadLocal({
-        artistCards,
-        artistFilter: setArtistFilter,
-        items: initial.allSetLibraryItems,
-        page: setPage,
-        pageSize: initial.initialSetLibrary.pageSize,
-        query: deferredSetQuery,
-        sort: setSort,
-      }),
-    );
-  }, [
-    artistCards,
-    deferredSetQuery,
-    initial.allSetLibraryItems,
-    initial.initialSetLibrary.pageSize,
-    setArtistFilter,
-    setPage,
-    setSort,
-  ]);
+    const requestKey = `${setArtistFilter}::${setSort}::${setPage}::${deferredSetQuery}`;
+    const cached = setLibraryCacheRef.current.get(requestKey);
+
+    if (cached) {
+      setSetLibrary(cached);
+      return;
+    }
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams({
+      artist: setArtistFilter,
+      page: String(setPage),
+      query: deferredSetQuery,
+      sort: setSort,
+    });
+
+    void fetch(`/api/archive/home/sets?${searchParams.toString()}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Set library request failed with ${response.status}`);
+        }
+        return (await response.json()) as ArchiveHomeSetLibraryPagePayload;
+      })
+      .then((payload) => {
+        setLibraryCacheRef.current.set(requestKey, payload);
+        setSetLibrary(payload);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("[archive-home] set library request failed", error);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [deferredSetQuery, setArtistFilter, setPage, setSort]);
 
   const updateTrackCardState = ({
     openSources,
@@ -1215,6 +1199,51 @@ export function ArchiveHomeExplorer({
       openSpotify: !currentlyOpen,
       trackKey,
     });
+  };
+
+  const toggleSetTracklist = (slug: string) => {
+    setExpandedSets((current) =>
+      current.includes(slug) ? current.filter((key) => key !== slug) : [...current, slug],
+    );
+
+    if (setTracklistCacheRef.current.has(slug)) {
+      const cached = setTracklistCacheRef.current.get(slug);
+      if (cached) {
+        setSetTracklists((current) => ({
+          ...current,
+          [slug]: cached.tracks,
+        }));
+      }
+      return;
+    }
+
+    setLoadingTracklists((current) => ({ ...current, [slug]: true }));
+    void fetch(`/api/archive/home/sets/${encodeURIComponent(slug)}/tracklist`)
+      .then(async (response) => {
+        if (response.status === 404) {
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(`Tracklist request failed with ${response.status}`);
+        }
+        return (await response.json()) as ArchiveHomeSetTracklistPayload;
+      })
+      .then((payload) => {
+        setTracklistCacheRef.current.set(slug, payload);
+        setSetTracklists((current) => ({
+          ...current,
+          [slug]: payload?.tracks ?? [],
+        }));
+      })
+      .catch((error) => {
+        console.error("[archive-home] set tracklist request failed", error);
+      })
+      .finally(() => {
+        setLoadingTracklists((current) => ({
+          ...current,
+          [slug]: false,
+        }));
+      });
   };
 
   const taxonomyMaxCount = taxonomyRows.length
@@ -1352,11 +1381,7 @@ export function ArchiveHomeExplorer({
                       {[...initial.hero.railSets, ...initial.hero.railSets].map((setItem, index) => (
                         <a
                           className="hero-card"
-                          href={buildSetHref({
-                            legacyPath: setItem.legacyPath,
-                            preview,
-                            slug: setItem.slug,
-                          })}
+                          href={buildSetHref({ slug: setItem.slug })}
                           key={`${setItem.id}-${index}`}
                           title="Open set page"
                         >
@@ -1472,11 +1497,7 @@ export function ArchiveHomeExplorer({
                                 </button>
                                 <a
                                   className="chip-btn"
-                                  href={buildArtistHref({
-                                    legacyPath: artistCard.legacyPath,
-                                    preview,
-                                    slug: artistCard.slug,
-                                  })}
+                                  href={buildArtistHref({ slug: artistCard.slug })}
                                 >
                                   Artist Page
                                 </a>
@@ -1747,7 +1768,6 @@ export function ArchiveHomeExplorer({
                                   }
                                   onToggleSources={toggleTrackSources(track.trackKey)}
                                   onToggleSpotify={toggleTrackSpotify(track.trackKey)}
-                                  preview={preview}
                                   style={trackCardStyles[track.trackKey] ?? null}
                                   track={track}
                                 />
@@ -1808,8 +1828,7 @@ export function ArchiveHomeExplorer({
                                         }
                                         onToggleSources={toggleTrackSources(track.trackKey)}
                                         onToggleSpotify={toggleTrackSpotify(track.trackKey)}
-                                        preview={preview}
-                                        style={trackCardStyles[track.trackKey] ?? null}
+                                              style={trackCardStyles[track.trackKey] ?? null}
                                         track={track}
                                       />
                                     ))}
@@ -2126,7 +2145,6 @@ export function ArchiveHomeExplorer({
                               }
                               onToggleSources={toggleTrackSources(track.trackKey)}
                               onToggleSpotify={toggleTrackSpotify(track.trackKey)}
-                              preview={preview}
                               style={trackCardStyles[track.trackKey] ?? null}
                               track={track}
                             />
@@ -2176,8 +2194,7 @@ export function ArchiveHomeExplorer({
                                     }
                                     onToggleSources={toggleTrackSources(track.trackKey)}
                                     onToggleSpotify={toggleTrackSpotify(track.trackKey)}
-                                    preview={preview}
-                                    style={trackCardStyles[track.trackKey] ?? null}
+                                      style={trackCardStyles[track.trackKey] ?? null}
                                     track={track}
                                   />
                                 ))}
@@ -2282,13 +2299,14 @@ export function ArchiveHomeExplorer({
 
               <div className="set-grid" id="setGrid">
                 {setLibrary.items.length ? (
-                  setLibrary.items.map((setItem, index) => {
-                    const setKey = `${index}:${setItem.artistName}:${setItem.title}`;
-                    const expanded = expandedSets.includes(setKey);
+                  setLibrary.items.map((setItem) => {
+                    const expanded = expandedSets.includes(setItem.slug);
+                    const tracklist = setTracklists[setItem.slug] ?? [];
+                    const tracklistLoading = loadingTracklists[setItem.slug] ?? false;
                     return (
-                      <article className="set-card" key={`${setItem.id}-${setKey}`}>
+                      <article className="set-card" key={setItem.id}>
                         <div className="set-thumb">
-                          <a href={buildSetHref({ legacyPath: setItem.legacyPath, preview, slug: setItem.slug })}>
+                          <a href={buildSetHref({ slug: setItem.slug })}>
                             <img
                               alt={setItem.title}
                               loading="lazy"
@@ -2301,17 +2319,13 @@ export function ArchiveHomeExplorer({
                         </div>
                         <div className="set-body">
                           <h4 className="set-title">
-                            <a href={buildSetHref({ legacyPath: setItem.legacyPath, preview, slug: setItem.slug })}>
+                            <a href={buildSetHref({ slug: setItem.slug })}>
                               {setItem.title}
                             </a>
                           </h4>
                           <p className="muted">
                             <a
-                              href={buildArtistHref({
-                                legacyPath: setItem.artistLegacyPath,
-                                preview,
-                                slug: setItem.artistSlug,
-                              })}
+                              href={buildArtistHref({ slug: setItem.artistSlug })}
                             >
                               {setItem.artistName}
                             </a>
@@ -2326,7 +2340,7 @@ export function ArchiveHomeExplorer({
                             </span>
                           </div>
                           <div className="actions">
-                            <a href={buildSetHref({ legacyPath: setItem.legacyPath, preview, slug: setItem.slug })}>
+                            <a href={buildSetHref({ slug: setItem.slug })}>
                               Open Set Page
                             </a>
                             {setItem.sourceUrl ? (
@@ -2335,29 +2349,23 @@ export function ArchiveHomeExplorer({
                               </a>
                             ) : null}
                             <button
-                              onClick={() =>
-                                setExpandedSets((current) =>
-                                  current.includes(setKey)
-                                    ? current.filter((key) => key !== setKey)
-                                    : [...current, setKey],
-                                )
-                              }
+                              onClick={() => toggleSetTracklist(setItem.slug)}
                               type="button"
                             >
                               {expanded ? "Hide Tracklist" : "Show Tracklist"}
                             </button>
                           </div>
                           <div className={joinClasses("set-tracklist", expanded && "open")}>
-                            {setItem.tracks.length ? (
-                              setItem.tracks.map((track) => (
+                            {tracklistLoading ? (
+                              <div className="empty">Loading tracklist…</div>
+                            ) : tracklist.length ? (
+                              tracklist.map((track) => (
                                 <div className="set-track" key={`${setItem.id}-${track.trackKey}-${track.position}`}>
                                   <span className="set-track-time">{track.startTimeFormatted}</span>
                                   <span>
                                     <a
                                       href={buildTrackSetHref({
-                                        preview,
-                                        setLegacyPath: track.trackLegacyPath,
-                                        setSlug: track.trackSetSlug,
+                                        setSlug: track.setSlug,
                                         trackPosition: track.position,
                                       })}
                                     >

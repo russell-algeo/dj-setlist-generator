@@ -142,25 +142,8 @@ const trackMatchesConfidence = (
   return Number(confidenceCounts[filter] ?? 0) > 0;
 };
 
-const buildTrackAnchorHref = ({
-  legacyHref,
-  preview,
-  setLegacyPath,
-  setSlug,
-  trackPosition,
-}: {
-  legacyHref: string | null;
-  preview: boolean;
-  setLegacyPath: string | null;
-  setSlug: string;
-  trackPosition: number;
-}) => {
-  if (preview) {
-    return `${buildSetHref({ preview: true, slug: setSlug, legacyPath: setLegacyPath })}#track-${trackPosition}`;
-  }
-
-  return legacyHref ?? `${buildSetHref({ preview: false, slug: setSlug, legacyPath: setLegacyPath })}#track-${trackPosition}`;
-};
+const buildTrackAnchorHref = (setSlug: string, trackPosition: number) =>
+  `${buildSetHref({ slug: setSlug })}#track-${trackPosition}`;
 
 const buildRecurringCards = (artist: ArchiveArtistSummary): RecurringCardModel[] =>
   artist.recurringTracks.map((track) => ({
@@ -169,13 +152,9 @@ const buildRecurringCards = (artist: ArchiveArtistSummary): RecurringCardModel[]
     spotifyTrackId: extractSpotifyTrackId(track.spotifyUrl),
   }));
 
-const buildSetCards = (artist: ArchiveArtistSummary, preview: boolean): SetCardModel[] =>
+const buildSetCards = (artist: ArchiveArtistSummary): SetCardModel[] =>
   artist.sets.map((setItem) => {
-    const previewHref = buildSetHref({
-      preview,
-      slug: setItem.slug,
-      legacyPath: setItem.legacyPath,
-    });
+    const previewHref = buildSetHref({ slug: setItem.slug });
 
     return {
       ...setItem,
@@ -192,16 +171,10 @@ const buildSetCards = (artist: ArchiveArtistSummary, preview: boolean): SetCardM
     };
   });
 
-const buildAtlasTracks = (artist: ArchiveArtistSummary, preview: boolean): AtlasTrackModel[] =>
+const buildAtlasTracks = (artist: ArchiveArtistSummary): AtlasTrackModel[] =>
   artist.atlasTracks.map((track) => ({
     ...track,
-    previewAnchorHref: buildTrackAnchorHref({
-      legacyHref: track.setAnchor,
-      preview,
-      setLegacyPath: track.setLegacyPath,
-      setSlug: track.setSlug,
-      trackPosition: track.idx,
-    }),
+    previewAnchorHref: buildTrackAnchorHref(track.setSlug, track.idx),
     searchBlob: buildSearchBlob(
       track.artist,
       track.title,
@@ -544,18 +517,16 @@ const buildAtlasOpenCardStyle = (
 export function ArchiveArtistExplorer({
   artist,
   initialQuery,
-  preview,
 }: {
   artist: ArchiveArtistSummary;
   initialQuery: string;
-  preview: boolean;
 }) {
   const heroRailViewportRef = useRef<HTMLDivElement | null>(null);
   const heroRailTrackRef = useRef<HTMLDivElement | null>(null);
   const atlasRailRef = useRef<HTMLDivElement | null>(null);
   const recurringCards = buildRecurringCards(artist);
-  const setCards = buildSetCards(artist, preview);
-  const atlasTracks = buildAtlasTracks(artist, preview);
+  const setCards = buildSetCards(artist);
+  const atlasTracks = buildAtlasTracks(artist);
   const heroRail = buildHeroRail(setCards);
   const heroVisualImageUrl =
     artist.imageUrl ??
@@ -1954,13 +1925,7 @@ export function ArchiveArtistExplorer({
                                 <span className="set-track-time">{track.startTimeFormatted}</span>
                                 <span>
                                   <a
-                                    href={buildTrackAnchorHref({
-                                      legacyHref: track.trackHref,
-                                      preview,
-                                      setLegacyPath: setItem.legacyPath,
-                                      setSlug: setItem.slug,
-                                      trackPosition: track.position,
-                                    })}
+                                    href={buildTrackAnchorHref(setItem.slug, track.position)}
                                     rel="noopener"
                                     target="_blank"
                                   >

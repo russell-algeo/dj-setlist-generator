@@ -10,10 +10,8 @@ import styles from "./archive-page.module.css";
 
 const ConnectionCards = ({
   connections,
-  preview,
 }: {
   connections: ArchiveHomeConnection[];
-  preview: boolean;
 }) => {
   if (connections.length === 0) {
     return <div className={styles.emptyState}>No cross-artist track overlap is available yet.</div>;
@@ -30,21 +28,13 @@ const ConnectionCards = ({
           <div className={styles.actionRow}>
             <Link
               className={styles.linkButton}
-              href={buildArtistHref({
-                preview,
-                slug: connection.artistASlug,
-                legacyPath: connection.artistALegacyPath,
-              })}
+              href={buildArtistHref({ slug: connection.artistASlug })}
             >
               {connection.artistA}
             </Link>
             <Link
               className={styles.linkButton}
-              href={buildArtistHref({
-                preview,
-                slug: connection.artistBSlug,
-                legacyPath: connection.artistBLegacyPath,
-              })}
+              href={buildArtistHref({ slug: connection.artistBSlug })}
             >
               {connection.artistB}
             </Link>
@@ -55,11 +45,7 @@ const ConnectionCards = ({
   );
 };
 
-export function ArchiveHomeConnectionsSection({
-  preview,
-}: {
-  preview: boolean;
-}) {
+export function ArchiveHomeConnectionsSection() {
   const sectionRef = useRef<HTMLElement | null>(null);
   const [payload, setPayload] = useState<ArchiveHomeConnectionsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +124,7 @@ export function ArchiveHomeConnectionsSection({
       </p>
       <div className={styles.gridTwo} style={{ marginTop: 18 }}>
         {payload ? (
-          <ConnectionCards connections={payload.connections} preview={preview} />
+          <ConnectionCards connections={payload.connections} />
         ) : error ? (
           <div className={styles.emptyState}>Unable to load shared-track connections right now.</div>
         ) : (
