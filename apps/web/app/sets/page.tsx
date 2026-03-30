@@ -164,11 +164,6 @@ export default async function SetsPage({ searchParams }: SetsPageProps) {
                     <Link className="pill-link" href={`/sets/${item.slug}`}>
                       Stable alias
                     </Link>
-                    {item.legacyPath ? (
-                      <Link className="pill-link" href={item.legacyPath}>
-                        Stored page
-                      </Link>
-                    ) : null}
                     {item.sourceUrl ? (
                       <Link className="pill-link" href={item.sourceUrl} rel="noreferrer" target="_blank">
                         Source

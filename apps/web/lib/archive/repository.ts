@@ -38,7 +38,7 @@ export const getArchiveStats = async () => {
       .select({ count: countDistinct(artists.id) })
       .from(artists)
       .leftJoin(setArtists, eq(setArtists.artistId, artists.id))
-      .where(or(isNotNull(artists.legacyPath), isNotNull(setArtists.setId))),
+      .where(isNotNull(setArtists.setId)),
     db.select({ count: count(sets.id) }).from(sets),
   ]);
 
@@ -66,7 +66,6 @@ export const listArtists = async (search?: string, userId?: string) => {
         slug: artists.slug,
         name: artists.name,
         imageUrl: artists.imageUrl,
-        legacyPath: artists.legacyPath,
         updatedAt: artists.updatedAt,
         setCount: sql<number>`count(distinct ${sets.id})`,
       })
@@ -86,7 +85,7 @@ export const listArtists = async (search?: string, userId?: string) => {
   }
 
   // Global branch (unchanged behaviour)
-  const visibilityFilter = or(isNotNull(artists.legacyPath), isNotNull(setArtists.setId));
+  const visibilityFilter = isNotNull(setArtists.setId);
 
   const rows = await db
     .select({
@@ -94,7 +93,6 @@ export const listArtists = async (search?: string, userId?: string) => {
       slug: artists.slug,
       name: artists.name,
       imageUrl: artists.imageUrl,
-      legacyPath: artists.legacyPath,
       updatedAt: artists.updatedAt,
       setCount: sql<number>`count(${setArtists.setId})`,
     })
@@ -163,7 +161,6 @@ export const listSets = async ({
       uploader: sets.uploader,
       imageUrl: sets.imageUrl,
       recognitionRate: sets.recognitionRate,
-      legacyPath: sets.legacyPath,
       updatedAt: sets.updatedAt,
     })
     .from(sets)

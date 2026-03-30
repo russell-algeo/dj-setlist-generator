@@ -170,11 +170,6 @@ export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
                     <Link className="pill-link" href={`/artists/${artist.slug}`}>
                       Stable alias
                     </Link>
-                    {artist.legacyPath ? (
-                      <Link className="pill-link" href={artist.legacyPath}>
-                        Stored page
-                      </Link>
-                    ) : null}
                   </div>
                 </div>
               </li>
