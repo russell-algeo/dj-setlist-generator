@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
 import {
@@ -6,7 +6,6 @@ import {
   setArtists,
   setEntries,
   sets,
-  sitePages,
   trackArtists,
   tracks,
 } from "@/lib/db/schema";
@@ -34,8 +33,6 @@ type PublishSource = "output" | "worker";
 type UpsertArchiveSetInput = {
   db?: DbClient;
   payload: ArchiveSetPayload;
-  html: string;
-  legacyPath?: string;
   provenance: {
     source: PublishSource;
     relativeJsonPath?: string;
@@ -44,34 +41,14 @@ type UpsertArchiveSetInput = {
   };
 };
 
-const INVALID_LEGACY_PATH_CHARS = /[<>:"/\\|?*]/gu;
-
-const sanitizeLegacySegment = (value: string) => {
-  const sanitized = value.replace(INVALID_LEGACY_PATH_CHARS, "_").trim().replace(/^[. ]+|[. ]+$/gu, "");
-  const trimmed = sanitized.slice(0, 200);
-  return trimmed || "untitled_mix";
-};
-
-const buildGeneratedLegacyPath = (artistName: string | null, setTitle: string) => {
-  const safeTitle = sanitizeLegacySegment(setTitle);
-  if (artistName) {
-    const safeArtist = sanitizeLegacySegment(artistName);
-    return `/${safeArtist}/${safeTitle}/${safeTitle}.html`;
-  }
-
-  return `/${safeTitle}/${safeTitle}.html`;
-};
-
 export const upsertArtist = async (
   db: DbClient,
   artistName: string,
-  legacyPath?: string,
   metadata: Record<string, unknown> = {},
 ) => {
   const normalizedName = normalizeText(artistName);
   const slug = makeSlug(artistName);
   const [existingArtist] = await db.select().from(artists).where(eq(artists.slug, slug)).limit(1);
-  const nextLegacyPath = legacyPath ?? existingArtist?.legacyPath ?? null;
   const nextImageUrl =
     (metadata.artist_profile_image as string | undefined) ?? existingArtist?.imageUrl ?? null;
   const nextSpotifyArtistUrl =
@@ -89,7 +66,6 @@ export const upsertArtist = async (
       slug,
       name: artistName,
       normalizedName,
-      legacyPath: nextLegacyPath,
       metadata,
       imageUrl: nextImageUrl,
       spotifyArtistUrl: nextSpotifyArtistUrl,
@@ -100,7 +76,6 @@ export const upsertArtist = async (
       set: {
         name: artistName,
         normalizedName,
-        legacyPath: nextLegacyPath,
         metadata,
         imageUrl: nextImageUrl,
         spotifyArtistUrl: nextSpotifyArtistUrl,
@@ -110,7 +85,6 @@ export const upsertArtist = async (
     });
 
   const [artist] = await db.select().from(artists).where(eq(artists.slug, slug)).limit(1);
-
   return artist;
 };
 
@@ -166,11 +140,7 @@ const upsertTrack = async (db: DbClient, row: Record<string, unknown>) => {
 
   await db
     .insert(trackArtists)
-    .values({
-      trackId: track.id,
-      artistId: artist.id,
-      role: "primary",
-    })
+    .values({ trackId: track.id, artistId: artist.id, role: "primary" })
     .onConflictDoNothing();
 
   return track;
@@ -179,8 +149,6 @@ const upsertTrack = async (db: DbClient, row: Record<string, unknown>) => {
 export const upsertArchiveSet = async ({
   db = getDb(),
   payload,
-  html,
-  legacyPath,
   provenance,
 }: UpsertArchiveSetInput) => {
   const mixInfo = payload.mix_info;
@@ -188,17 +156,12 @@ export const upsertArchiveSet = async ({
   const sourceUrl = (mixInfo.url as string | undefined) ?? null;
   const mixArtistName = String(mixInfo.artist_name ?? "").trim();
   const artistName = mixArtistName || null;
-  const requestedLegacyPath = legacyPath ?? buildGeneratedLegacyPath(artistName, setTitle);
-  const artist = artistName ? await upsertArtist(db, artistName, undefined, mixInfo) : null;
-  const proposedSetSlug = makeSlug(
-    setTitle,
-    hashSuffix(sourceUrl ?? `${requestedLegacyPath}:${setTitle}`),
-  );
+  const artist = artistName ? await upsertArtist(db, artistName, mixInfo) : null;
+  const proposedSetSlug = makeSlug(setTitle, hashSuffix(sourceUrl ?? setTitle));
   const [existingSet] = sourceUrl
     ? await db.select().from(sets).where(eq(sets.sourceUrl, sourceUrl)).limit(1)
     : [];
   const setSlug = existingSet?.slug ?? proposedSetSlug;
-  const canonicalLegacyPath = existingSet?.legacyPath ?? requestedLegacyPath;
   const totalTracks = Number(payload.metadata.total_tracks ?? payload.tracks.length ?? 0);
   const uncertainTracks = Number(payload.metadata.uncertain_tracks ?? 0);
   const recognitionRate =
@@ -213,7 +176,6 @@ export const upsertArchiveSet = async ({
     uploader: (mixInfo.uploader as string | undefined) ?? null,
     imageUrl: (mixInfo.artist_profile_image as string | undefined) ?? null,
     recognitionRate,
-    legacyPath: canonicalLegacyPath,
     metadata: {
       mixInfo,
       summary: payload.metadata,
@@ -226,19 +188,12 @@ export const upsertArchiveSet = async ({
   if (sourceUrl) {
     await upsertSet.onConflictDoUpdate({
       target: sets.sourceUrl,
-      set: {
-        ...setValues,
-        legacyPath: canonicalLegacyPath,
-        updatedAt: new Date(),
-      },
+      set: { ...setValues, updatedAt: new Date() },
     });
   } else {
     await upsertSet.onConflictDoUpdate({
       target: sets.slug,
-      set: {
-        ...setValues,
-        updatedAt: new Date(),
-      },
+      set: { ...setValues, updatedAt: new Date() },
     });
   }
 
@@ -255,11 +210,7 @@ export const upsertArchiveSet = async ({
   if (artist) {
     await db
       .insert(setArtists)
-      .values({
-        setId: setRecord.id,
-        artistId: artist.id,
-        role: "primary",
-      })
+      .values({ setId: setRecord.id, artistId: artist.id, role: "primary" })
       .onConflictDoNothing();
   }
 
@@ -289,48 +240,9 @@ export const upsertArchiveSet = async ({
     });
   }
 
-  // Transitional compatibility storage for the static/public stopgap. Runtime archive routes do not read this HTML.
-  await db
-    .insert(sitePages)
-    .values({
-      path: canonicalLegacyPath,
-      pageType: "set",
-      setId: setRecord.id,
-      artistId: artist?.id ?? null,
-      slug: setRecord.slug,
-      html,
-      metadata: {
-        entity: "set",
-        provenance,
-      },
-    })
-    .onConflictDoUpdate({
-      target: sitePages.path,
-      set: {
-        pageType: "set",
-        setId: setRecord.id,
-        artistId: artist?.id ?? null,
-        slug: setRecord.slug,
-        html,
-        metadata: {
-          entity: "set",
-          provenance,
-        },
-        updatedAt: new Date(),
-      },
-    });
-
-  if (provenance.source === "worker" && requestedLegacyPath !== canonicalLegacyPath) {
-    await db.delete(sitePages).where(
-      and(eq(sitePages.setId, setRecord.id), eq(sitePages.path, requestedLegacyPath)),
-    );
-  }
-
   return {
     setId: setRecord.id,
     slug: setRecord.slug,
-    legacyPath: canonicalLegacyPath,
     affectedArtistSlugs: artist ? [artist.slug] : [],
-    affectedArtistLegacyPaths: artist?.legacyPath ? [artist.legacyPath] : [],
   };
 };

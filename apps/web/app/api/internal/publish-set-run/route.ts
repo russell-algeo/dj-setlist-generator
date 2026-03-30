@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { refreshArchiveHomeMaterializedViews } from "@/lib/archive/home-materialized-views";
 import { assertInternalRequest } from "@/lib/auth/session";
 import { upsertArchiveSet } from "@/lib/archive/publish-set";
 import { readRequestBody } from "@/lib/http/request-body";
 
 const publishPayloadSchema = z.object({
   setRunId: z.string().uuid(),
-  html: z.string().min(1),
-  legacyPath: z.string().min(1).optional(),
+  html: z.string().min(1).optional(),
   payload: z.object({
     mix_info: z.record(z.string(), z.unknown()),
     metadata: z.record(z.string(), z.unknown()),
@@ -25,13 +25,12 @@ export async function POST(request: Request) {
   const body = publishPayloadSchema.parse(await readRequestBody(request));
   const published = await upsertArchiveSet({
     payload: body.payload,
-    html: body.html,
-    legacyPath: body.legacyPath,
     provenance: {
       source: "worker",
       setRunId: body.setRunId,
     },
   });
+  await refreshArchiveHomeMaterializedViews();
 
   return NextResponse.json(published);
 }
