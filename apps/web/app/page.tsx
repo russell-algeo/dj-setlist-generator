@@ -44,5 +44,5 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         : "default",
   });
 
-  return <ArchiveHomeExplorer initial={payload} preview={false} />;
+  return <ArchiveHomeExplorer initial={payload} />;
 }
