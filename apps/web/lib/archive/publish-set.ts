@@ -289,6 +289,7 @@ export const upsertArchiveSet = async ({
     });
   }
 
+  // Transitional compatibility storage for the static/public stopgap. Runtime archive routes do not read this HTML.
   await db
     .insert(sitePages)
     .values({
@@ -329,5 +330,7 @@ export const upsertArchiveSet = async ({
     setId: setRecord.id,
     slug: setRecord.slug,
     legacyPath: canonicalLegacyPath,
+    affectedArtistSlugs: artist ? [artist.slug] : [],
+    affectedArtistLegacyPaths: artist?.legacyPath ? [artist.legacyPath] : [],
   };
 };

@@ -1,0 +1,2029 @@
+/* eslint-disable @next/next/no-img-element */
+"use client";
+
+import { startTransition, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+
+import { buildSetHref } from "@/components/archive/archive-hrefs";
+import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import type {
+  ArchiveArtistAtlasTrack,
+  ArchiveArtistSet,
+  ArchiveArtistSetTrackRef,
+  ArchiveArtistSummary,
+  ArchiveConfidence,
+  ArchiveRecurringTrack,
+} from "@/lib/archive/types";
+import { buildSearchBlob, extractSpotifyTrackId, normalizeSearchText } from "@/lib/archive/utils";
+
+import styles from "./archive-artist-explorer.module.css";
+
+type ConfidenceFilter = ArchiveConfidence | "all";
+type AtlasScope = "artist" | "set";
+type AtlasCompareMode = "intersection" | "union";
+type AtlasLens = "artists" | "genres" | "labels" | "tracks";
+type SetSort = "default" | "duration" | "rate" | "tracks";
+
+type RecurringCardModel = ArchiveRecurringTrack & {
+  searchBlob: string;
+  spotifyTrackId: string | null;
+};
+
+type SetCardModel = ArchiveArtistSet & {
+  heroImageUrl: string | null;
+  matchLabel: string;
+  previewHref: string;
+  searchBlob: string;
+  trackKeySet: Set<string>;
+  visibleTracks: ArchiveArtistSetTrackRef[];
+};
+
+type AtlasTrackModel = ArchiveArtistAtlasTrack & {
+  previewAnchorHref: string;
+  searchBlob: string;
+  spotifyTrackId: string | null;
+};
+
+type AtlasEvidenceTrack = {
+  albumArt: string | null;
+  artist: string;
+  confidence: ArchiveConfidence;
+  genres: string[];
+  label: string | null;
+  labelUrl: string | null;
+  occurrences: number;
+  searchBlob: string;
+  setLinks: Array<{
+    href: string;
+    label: string;
+  }>;
+  spotifyTrackId: string | null;
+  spotifyUrl: string | null;
+  title: string;
+  trackKey: string;
+};
+
+type AtlasRow = {
+  count: number;
+  coverage: Set<string>;
+  labelUrl: string | null;
+  name: string;
+  searchBlob: string;
+  tracks: AtlasEvidenceTrack[];
+};
+
+type TrackCardInlineStyle = CSSProperties & Partial<Record<`--${string}`, string>>;
+
+const TRACK_CONFIDENCE_LEVELS: ConfidenceFilter[] = ["all", "HIGH", "MEDIUM", "LOW"];
+const ATLAS_PAGE_SIZE = 10;
+const FOCUS_TITLE_NBSP = "\u00a0";
+const CONFIDENCE_RANK: Record<ArchiveConfidence, number> = {
+  HIGH: 4,
+  MEDIUM: 3,
+  LOW: 2,
+  UNCERTAIN: 1,
+};
+
+const joinClasses = (...values: Array<string | false | null | undefined>) =>
+  values.filter(Boolean).join(" ");
+
+const formatGeneratedAt = (value: string | null) => {
+  if (!value) {
+    return "Unknown";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, value));
+
+const formatMatch = (rate: number | null) => `${Math.round(rate ?? 0)}% match`;
+
+const formatSetSummary = (setItem: ArchiveArtistSet) =>
+  `${setItem.totalTracks} tracks · ${formatMatch(setItem.recognitionRate)} · ${setItem.durationFmt}`;
+
+const formatHeroSetSummary = (setItem: ArchiveArtistSet) =>
+  `${setItem.totalTracks} tracks · ${setItem.durationFmt}`;
+
+const normalizeThresholdValues = (values: number[]) => {
+  const unique = Array.from(
+    new Set(values.filter((value) => Number.isFinite(value) && value > 0).map((value) => Math.floor(value))),
+  ).sort((left, right) => left - right);
+
+  return unique.length > 0 ? unique : [1];
+};
+
+const stepThresholdValue = (current: number, values: number[], direction: number) => {
+  const safeValues = normalizeThresholdValues(values);
+  const index = safeValues.findIndex((value) => value === current);
+  const resolvedIndex = index >= 0 ? index : 0;
+  const nextIndex = clamp(resolvedIndex + direction, 0, safeValues.length - 1);
+  return safeValues[nextIndex] ?? safeValues[0] ?? 1;
+};
+
+const trackMatchesConfidence = (
+  confidenceCounts: Record<ArchiveConfidence, number>,
+  filter: ConfidenceFilter,
+) => {
+  if (filter === "all") {
+    return true;
+  }
+
+  return Number(confidenceCounts[filter] ?? 0) > 0;
+};
+
+const buildTrackAnchorHref = ({
+  legacyHref,
+  preview,
+  setLegacyPath,
+  setSlug,
+  trackPosition,
+}: {
+  legacyHref: string | null;
+  preview: boolean;
+  setLegacyPath: string | null;
+  setSlug: string;
+  trackPosition: number;
+}) => {
+  if (preview) {
+    return `${buildSetHref({ preview: true, slug: setSlug, legacyPath: setLegacyPath })}#track-${trackPosition}`;
+  }
+
+  return legacyHref ?? `${buildSetHref({ preview: false, slug: setSlug, legacyPath: setLegacyPath })}#track-${trackPosition}`;
+};
+
+const buildRecurringCards = (artist: ArchiveArtistSummary): RecurringCardModel[] =>
+  artist.recurringTracks.map((track) => ({
+    ...track,
+    searchBlob: buildSearchBlob(track.artist, track.title, track.genres.join(" "), track.label ?? ""),
+    spotifyTrackId: extractSpotifyTrackId(track.spotifyUrl),
+  }));
+
+const buildSetCards = (artist: ArchiveArtistSummary, preview: boolean): SetCardModel[] =>
+  artist.sets.map((setItem) => {
+    const previewHref = buildSetHref({
+      preview,
+      slug: setItem.slug,
+      legacyPath: setItem.legacyPath,
+    });
+
+    return {
+      ...setItem,
+      heroImageUrl: setItem.thumbnailUrl,
+      matchLabel: formatMatch(setItem.recognitionRate),
+      previewHref,
+      searchBlob: buildSearchBlob(setItem.title, setItem.trackSearchText),
+      trackKeySet: new Set(
+        setItem.tracks
+          .filter((track) => !track.isUnknown)
+          .map((track) => normalizeSearchText(track.trackKey)),
+      ),
+      visibleTracks: setItem.tracks.filter((track) => !track.isUnknown),
+    };
+  });
+
+const buildAtlasTracks = (artist: ArchiveArtistSummary, preview: boolean): AtlasTrackModel[] =>
+  artist.atlasTracks.map((track) => ({
+    ...track,
+    previewAnchorHref: buildTrackAnchorHref({
+      legacyHref: track.setAnchor,
+      preview,
+      setLegacyPath: track.setLegacyPath,
+      setSlug: track.setSlug,
+      trackPosition: track.idx,
+    }),
+    searchBlob: buildSearchBlob(
+      track.artist,
+      track.title,
+      track.genres.join(" "),
+      track.label ?? "",
+      track.setTitle,
+    ),
+    spotifyTrackId: extractSpotifyTrackId(track.spotifyUrl),
+  }));
+
+const splitSetAtlasHeadingTwoLines = (title: string) => {
+  const normalized = title.replace(/\s+/gu, " ").trim();
+  if (!normalized) {
+    return { line1: "No Set Selected", line2: FOCUS_TITLE_NBSP, sizeClass: "focus-title-md" };
+  }
+
+  const words = normalized.split(" ");
+  if (words.length === 1) {
+    const singleClass =
+      normalized.length > 42 ? "focus-title-sm" : normalized.length > 26 ? "focus-title-md" : "focus-title-lg";
+    return { line1: normalized, line2: FOCUS_TITLE_NBSP, sizeClass: singleClass };
+  }
+
+  let splitIndex = 1;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < words.length; index += 1) {
+    const left = words.slice(0, index).join(" ");
+    const right = words.slice(index).join(" ");
+    const delta = Math.abs(left.length - right.length);
+    const longest = Math.max(left.length, right.length);
+    const shortest = Math.min(left.length, right.length);
+    const score = delta + (longest > 52 ? (longest - 52) * 2 : 0) + (shortest < 8 ? 8 - shortest : 0);
+    if (score < bestScore) {
+      bestScore = score;
+      splitIndex = index;
+    }
+  }
+
+  const line1 = words.slice(0, splitIndex).join(" ");
+  const line2 = words.slice(splitIndex).join(" ") || FOCUS_TITLE_NBSP;
+  const longestLine = Math.max(line1.length, line2.length);
+  const totalLength = normalized.length;
+  let sizeClass = "focus-title-lg";
+  if (longestLine > 46 || totalLength > 92) {
+    sizeClass = "focus-title-xs";
+  } else if (longestLine > 36 || totalLength > 74) {
+    sizeClass = "focus-title-sm";
+  } else if (longestLine > 27 || totalLength > 56) {
+    sizeClass = "focus-title-md";
+  }
+
+  return { line1, line2, sizeClass };
+};
+
+const getBetterConfidence = (left: ArchiveConfidence, right: ArchiveConfidence) =>
+  CONFIDENCE_RANK[right] > CONFIDENCE_RANK[left] ? right : left;
+
+const buildHeroRail = (sets: SetCardModel[]) => {
+  const uniqueSets = sets.filter(
+    (setItem, index, value) => value.findIndex((candidate) => candidate.id === setItem.id) === index,
+  );
+
+  if (uniqueSets.length === 0) {
+    return [];
+  }
+
+  const prioritized = uniqueSets.filter((setItem) => Boolean(setItem.heroImageUrl));
+  const chosen: SetCardModel[] = [];
+
+  for (const setItem of prioritized) {
+    if (chosen.length >= 2) {
+      break;
+    }
+
+    chosen.push(setItem);
+  }
+
+  for (const setItem of uniqueSets) {
+    if (chosen.length >= 2) {
+      break;
+    }
+
+    if (!chosen.some((candidate) => candidate.id === setItem.id)) {
+      chosen.push(setItem);
+    }
+  }
+
+  if (chosen.length === 1) {
+    return [...chosen];
+  }
+
+  return [...chosen, ...chosen];
+};
+
+const buildMiniTimeline = (setItem: SetCardModel) => {
+  if (setItem.duration <= 0 || setItem.tracks.length === 0) {
+    return [];
+  }
+
+  const orderedTracks = [...setItem.tracks].sort((left, right) => left.start - right.start);
+  const segments: Array<{
+    confidence: ArchiveConfidence;
+    leftPct: number;
+    widthPct: number;
+  }> = [];
+  let cursor = 0;
+
+  for (let index = 0; index < orderedTracks.length; index += 1) {
+    const track = orderedTracks[index];
+    const nextTrack = orderedTracks[index + 1];
+    const start = clamp(track.start, 0, setItem.duration);
+    const endCandidate =
+      track.end ??
+      (nextTrack ? clamp(nextTrack.start, start, setItem.duration) : setItem.duration);
+    const end = clamp(endCandidate, start, setItem.duration);
+
+    if (start > cursor) {
+      segments.push({
+        confidence: "UNCERTAIN",
+        leftPct: (cursor / setItem.duration) * 100,
+        widthPct: ((start - cursor) / setItem.duration) * 100,
+      });
+    }
+
+    const resolvedConfidence = track.isUnknown ? "UNCERTAIN" : track.confidence;
+    const width = Math.max(0.8, ((end - start) / setItem.duration) * 100);
+    segments.push({
+      confidence: resolvedConfidence,
+      leftPct: (start / setItem.duration) * 100,
+      widthPct: width,
+    });
+    cursor = Math.max(cursor, end);
+  }
+
+  if (cursor < setItem.duration) {
+    segments.push({
+      confidence: "UNCERTAIN",
+      leftPct: (cursor / setItem.duration) * 100,
+      widthPct: ((setItem.duration - cursor) / setItem.duration) * 100,
+    });
+  }
+
+  return segments.filter((segment) => segment.widthPct > 0);
+};
+
+const buildAtlasRows = ({
+  lens,
+  mode,
+  query,
+  scope,
+  selectedSetIds,
+  sort,
+  threshold,
+  tracks,
+}: {
+  lens: AtlasLens;
+  mode: AtlasCompareMode;
+  query: string;
+  scope: AtlasScope;
+  selectedSetIds: Set<string>;
+  sort: "alpha" | "count";
+  threshold: number;
+  tracks: AtlasTrackModel[];
+}): AtlasRow[] => {
+  const rowMap = new Map<string, AtlasRow>();
+  const normalizedQuery = normalizeSearchText(query);
+  const selectedCount = selectedSetIds.size;
+
+  for (const track of tracks) {
+    const names =
+      lens === "genres"
+        ? track.genres
+        : lens === "labels"
+          ? track.label
+            ? [track.label]
+            : []
+          : lens === "artists"
+            ? [track.artist]
+            : [`${track.artist} - ${track.title}`];
+
+    for (const name of names) {
+      if (!name) {
+        continue;
+      }
+
+      const row =
+        rowMap.get(name) ??
+        {
+          count: 0,
+          coverage: new Set<string>(),
+          labelUrl: lens === "labels" ? track.labelUrl : null,
+          name,
+          searchBlob: normalizeSearchText(name),
+          tracks: [],
+        };
+
+      row.coverage.add(track.setId);
+      if (!row.labelUrl && lens === "labels") {
+        row.labelUrl = track.labelUrl;
+      }
+
+      const existingTrackIndex = row.tracks.findIndex((value) => value.trackKey === track.trackKey);
+      if (existingTrackIndex === -1) {
+        row.tracks.push({
+          albumArt: track.albumArt,
+          artist: track.artist,
+          confidence: track.confidence,
+          genres: track.genres,
+          label: track.label,
+          labelUrl: track.labelUrl,
+          occurrences: 1,
+          searchBlob: track.searchBlob,
+          setLinks: [
+            {
+              href: track.previewAnchorHref,
+              label: track.setTitle,
+            },
+          ],
+          spotifyTrackId: track.spotifyTrackId,
+          spotifyUrl: track.spotifyUrl,
+          title: track.title,
+          trackKey: track.trackKey,
+        });
+      } else {
+        const existingTrack = row.tracks[existingTrackIndex];
+        const nextLink = {
+          href: track.previewAnchorHref,
+          label: track.setTitle,
+        };
+        const hasLink = existingTrack.setLinks.some(
+          (value) => value.href === nextLink.href && value.label === nextLink.label,
+        );
+        row.tracks[existingTrackIndex] = {
+          ...existingTrack,
+          albumArt: existingTrack.albumArt ?? track.albumArt,
+          confidence: getBetterConfidence(existingTrack.confidence, track.confidence),
+          genres: existingTrack.genres.length > 0 ? existingTrack.genres : track.genres,
+          label: existingTrack.label ?? track.label,
+          labelUrl: existingTrack.labelUrl ?? track.labelUrl,
+          occurrences: existingTrack.occurrences + 1,
+          setLinks: hasLink ? existingTrack.setLinks : [...existingTrack.setLinks, nextLink],
+          spotifyTrackId: existingTrack.spotifyTrackId ?? track.spotifyTrackId,
+          spotifyUrl: existingTrack.spotifyUrl ?? track.spotifyUrl,
+        };
+      }
+
+      rowMap.set(name, row);
+    }
+  }
+
+  return Array.from(rowMap.values())
+    .map((row) => ({
+      ...row,
+      count:
+        lens === "tracks"
+          ? row.tracks.reduce((total, track) => total + track.occurrences, 0)
+          : row.tracks.length,
+      tracks: [...row.tracks].sort((left, right) => {
+        if (right.occurrences !== left.occurrences) {
+          return right.occurrences - left.occurrences;
+        }
+
+        return `${left.artist} ${left.title}`.localeCompare(`${right.artist} ${right.title}`);
+      }),
+    }))
+    .filter((row) => row.count >= threshold)
+    .filter((row) => (normalizedQuery ? row.searchBlob.includes(normalizedQuery) : true))
+    .filter((row) =>
+      scope === "set" && mode === "intersection" && selectedCount > 1
+        ? row.coverage.size === selectedCount
+        : true,
+    )
+    .sort((left, right) => {
+      if (sort === "alpha") {
+        return left.name.localeCompare(right.name);
+      }
+
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+};
+
+const getRecurringThresholdValues = (cards: RecurringCardModel[]) =>
+  normalizeThresholdValues(cards.map((track) => track.appearances));
+
+const getAtlasThresholdValues = (rows: AtlasRow[]) =>
+  normalizeThresholdValues(rows.map((row) => row.count));
+
+const renderSpotifyEmbed = (trackId: string) => (
+  <div className="spotify-embed">
+    <iframe
+      allow="autoplay; clipboard-write; encrypted-media"
+      src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
+      title="Spotify embed"
+    />
+  </div>
+);
+
+const buildAtlasOpenCardStyle = (
+  card: HTMLElement | null,
+  panel: "embed" | "source",
+): TrackCardInlineStyle | null => {
+  if (!card) {
+    return null;
+  }
+
+  const art = card.querySelector<HTMLElement>(".track-art");
+  const body = card.querySelector<HTMLElement>(".track-body");
+  const actionsWrap = body?.querySelector<HTMLElement>(".actions");
+  const cardHeight = Math.round(card.getBoundingClientRect().height);
+
+  if (cardHeight > 0) {
+    const targetPanelHeight = 91.2;
+    const controls = actionsWrap ?? body;
+    const actionsHeight = controls ? Math.max(28, Math.round(controls.getBoundingClientRect().height)) : 32;
+    const bodyHeight = Math.min(cardHeight, actionsHeight + targetPanelHeight);
+    const artHeight = Math.max(0, cardHeight - bodyHeight);
+    const panelHeight = Math.max(0, bodyHeight - actionsHeight);
+
+    return {
+      "--open-art-height": `${Math.max(0, artHeight)}px`,
+      "--open-body-height": `${Math.max(0, bodyHeight)}px`,
+      "--open-card-height": `${cardHeight}px`,
+      [panel === "embed" ? "--open-embed-height" : "--open-source-height"]: `${Math.max(0, panelHeight)}px`,
+    };
+  }
+
+  if (art) {
+    return {
+      "--open-art-height": `${Math.round(art.getBoundingClientRect().height)}px`,
+    };
+  }
+
+  return null;
+};
+
+export function ArchiveArtistExplorer({
+  artist,
+  initialQuery,
+  preview,
+}: {
+  artist: ArchiveArtistSummary;
+  initialQuery: string;
+  preview: boolean;
+}) {
+  const heroRailViewportRef = useRef<HTMLDivElement | null>(null);
+  const heroRailTrackRef = useRef<HTMLDivElement | null>(null);
+  const atlasRailRef = useRef<HTMLDivElement | null>(null);
+  const recurringCards = buildRecurringCards(artist);
+  const setCards = buildSetCards(artist, preview);
+  const atlasTracks = buildAtlasTracks(artist, preview);
+  const heroRail = buildHeroRail(setCards);
+  const heroVisualImageUrl =
+    artist.imageUrl ??
+    heroRail.find((setItem) => Boolean(setItem.heroImageUrl))?.heroImageUrl ??
+    artist.heroImageUrl;
+
+  const recurringThresholdValues = getRecurringThresholdValues(recurringCards);
+  const [recMin, setRecMin] = useState(recurringThresholdValues[0] ?? 1);
+  const [recFilter, setRecFilter] = useState<ConfidenceFilter>("all");
+  const [recSearch, setRecSearch] = useState(initialQuery);
+  const deferredRecSearch = useDeferredValue(recSearch);
+  const [openRecurringSources, setOpenRecurringSources] = useState<string[]>([]);
+  const [openRecurringSpotify, setOpenRecurringSpotify] = useState<string[]>([]);
+
+  const [atlasScope, setAtlasScope] = useState<AtlasScope>("set");
+  const [atlasSelectedSetIds, setAtlasSelectedSetIds] = useState<string[]>(
+    setCards[0] ? [setCards[0].id] : [],
+  );
+  const [atlasCompareMode, setAtlasCompareMode] = useState<AtlasCompareMode>("union");
+  const [atlasLens, setAtlasLens] = useState<AtlasLens>("genres");
+  const [atlasMin, setAtlasMin] = useState(1);
+  const [atlasConf, setAtlasConf] = useState<ConfidenceFilter>("all");
+  const [atlasSetSearch, setAtlasSetSearch] = useState("");
+  const [atlasQuery, setAtlasQuery] = useState("");
+  const deferredAtlasSetSearch = useDeferredValue(atlasSetSearch);
+  const deferredAtlasQuery = useDeferredValue(atlasQuery);
+  const [atlasSort, setAtlasSort] = useState<"alpha" | "count">("count");
+  const [atlasPage, setAtlasPage] = useState(0);
+  const [atlasActiveName, setAtlasActiveName] = useState<string | null>(null);
+  const [, setAtlasEvidencePage] = useState(0);
+  const [openAtlasSources, setOpenAtlasSources] = useState<string[]>([]);
+  const [openAtlasSpotify, setOpenAtlasSpotify] = useState<string[]>([]);
+  const [atlasCardStyles, setAtlasCardStyles] = useState<Record<string, TrackCardInlineStyle>>({});
+  const [atlasHoverLatchedSetId, setAtlasHoverLatchedSetId] = useState<string | null>(null);
+
+  const [setSearch, setSetSearch] = useState(initialQuery);
+  const [setSort, setSetSort] = useState<SetSort>("default");
+  const deferredSetSearch = useDeferredValue(setSearch);
+  const [compareSelection, setCompareSelection] = useState<string[]>([]);
+  const [expandedSetCards, setExpandedSetCards] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.location.hash) {
+      return;
+    }
+
+    const hash = decodeURIComponent(window.location.hash.slice(1));
+    if (!hash) {
+      return;
+    }
+
+    const scrollToHash = () => {
+      const target = document.getElementById(hash);
+      if (!target) {
+        return;
+      }
+
+      target.scrollIntoView({ behavior: "auto", block: "start" });
+    };
+
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(scrollToHash);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const viewport = heroRailViewportRef.current;
+    const track = heroRailTrackRef.current;
+    if (!viewport || !track) {
+      return;
+    }
+
+    let raf = 0;
+    let lastTs = 0;
+    let scrollPos = 0;
+
+    const stop = () => {
+      if (raf) {
+        window.cancelAnimationFrame(raf);
+      }
+      raf = 0;
+      lastTs = 0;
+    };
+
+    const start = () => {
+      stop();
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        return;
+      }
+      if (window.matchMedia("(max-width: 1320px)").matches) {
+        return;
+      }
+
+      const cycleHeight = track.scrollHeight / 2;
+      if (cycleHeight <= viewport.clientHeight + 4) {
+        return;
+      }
+
+      scrollPos = viewport.scrollTop % cycleHeight;
+      viewport.scrollTop = scrollPos;
+
+      const tick = (ts: number) => {
+        if (!raf) {
+          return;
+        }
+        if (!lastTs) {
+          lastTs = ts;
+        }
+        const dt = (ts - lastTs) / 1000;
+        lastTs = ts;
+        scrollPos += 12 * dt;
+        if (scrollPos >= cycleHeight) {
+          scrollPos -= cycleHeight;
+        }
+        viewport.scrollTop = scrollPos;
+        raf = window.requestAnimationFrame(tick);
+      };
+
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    const handleResize = () => {
+      start();
+    };
+
+    viewport.addEventListener("mouseenter", stop);
+    viewport.addEventListener("mouseleave", start);
+    window.addEventListener("resize", handleResize);
+    start();
+
+    return () => {
+      stop();
+      viewport.removeEventListener("mouseenter", stop);
+      viewport.removeEventListener("mouseleave", start);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [heroRail.length]);
+
+  const clearAtlasCardStyle = (trackKey: string) => {
+    setAtlasCardStyles((current) => {
+      if (!current[trackKey]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[trackKey];
+      return next;
+    });
+  };
+
+  const setAtlasCardStyle = (trackKey: string, style: TrackCardInlineStyle | null) => {
+    if (!style) {
+      clearAtlasCardStyle(trackKey);
+      return;
+    }
+
+    setAtlasCardStyles((current) => ({
+      ...current,
+      [trackKey]: style,
+    }));
+  };
+
+  const handleAtlasSpotifyToggle = (
+    event: MouseEvent<HTMLButtonElement>,
+    trackKey: string,
+  ) => {
+    const card = event.currentTarget.closest(".track-card") as HTMLElement | null;
+    const isOpen = openAtlasSpotify.includes(trackKey);
+
+    if (isOpen) {
+      setOpenAtlasSpotify((current) => current.filter((value) => value !== trackKey));
+      clearAtlasCardStyle(trackKey);
+      return;
+    }
+
+    setAtlasCardStyle(trackKey, buildAtlasOpenCardStyle(card, "embed"));
+    setOpenAtlasSources((current) => current.filter((value) => value !== trackKey));
+    setOpenAtlasSpotify((current) => [...current.filter((value) => value !== trackKey), trackKey]);
+  };
+
+  const handleAtlasSourcesToggle = (
+    event: MouseEvent<HTMLButtonElement>,
+    trackKey: string,
+  ) => {
+    const card = event.currentTarget.closest(".track-card") as HTMLElement | null;
+    const isOpen = openAtlasSources.includes(trackKey);
+
+    if (isOpen) {
+      setOpenAtlasSources((current) => current.filter((value) => value !== trackKey));
+      clearAtlasCardStyle(trackKey);
+      return;
+    }
+
+    setAtlasCardStyle(trackKey, buildAtlasOpenCardStyle(card, "source"));
+    setOpenAtlasSpotify((current) => current.filter((value) => value !== trackKey));
+    setOpenAtlasSources((current) => [...current.filter((value) => value !== trackKey), trackKey]);
+  };
+
+  const recurringQuery = normalizeSearchText(deferredRecSearch);
+  const visibleRecurringCards = recurringCards
+    .filter((track) => {
+      if (track.appearances < recMin) {
+        return false;
+      }
+
+      if (!trackMatchesConfidence(track.confidenceCounts, recFilter)) {
+        return false;
+      }
+
+      return recurringQuery ? track.searchBlob.includes(recurringQuery) : true;
+    })
+    .sort((left, right) => {
+      if (right.appearances !== left.appearances) {
+        return right.appearances - left.appearances;
+      }
+
+      return `${left.artist} - ${left.title}`.localeCompare(`${right.artist} - ${right.title}`);
+    });
+
+  const atlasSetQuery = normalizeSearchText(deferredAtlasSetSearch);
+  const visibleAtlasSetCards = setCards.filter((setItem) =>
+    atlasSetQuery ? setItem.searchBlob.includes(atlasSetQuery) : true,
+  );
+  const visibleAtlasSetIds = new Set(visibleAtlasSetCards.map((setItem) => setItem.id));
+  const effectiveAtlasSelectedIds =
+    atlasScope === "artist"
+      ? []
+      : atlasSelectedSetIds.filter((setId) => visibleAtlasSetIds.has(setId)).length > 0
+        ? atlasSelectedSetIds.filter((setId) => visibleAtlasSetIds.has(setId))
+        : visibleAtlasSetCards[0]
+          ? [visibleAtlasSetCards[0].id]
+          : [];
+  const scopedAtlasSetIds = new Set(
+    atlasScope === "artist"
+      ? visibleAtlasSetCards.map((setItem) => setItem.id)
+      : effectiveAtlasSelectedIds,
+  );
+  const allScopedAtlasTracks = atlasTracks.filter((track) => {
+    if (!scopedAtlasSetIds.has(track.setId)) {
+      return false;
+    }
+
+    return true;
+  });
+  const filteredAtlasTracks =
+    atlasConf === "all"
+      ? allScopedAtlasTracks
+      : allScopedAtlasTracks.filter((track) => track.confidence === atlasConf);
+  const atlasRowsAll = buildAtlasRows({
+    lens: atlasLens,
+    mode: atlasCompareMode,
+    query: deferredAtlasQuery,
+    scope: atlasScope,
+    selectedSetIds: scopedAtlasSetIds,
+    sort: atlasSort,
+    threshold: atlasMin,
+    tracks: filteredAtlasTracks,
+  });
+  const atlasThresholdValues = getAtlasThresholdValues(
+    buildAtlasRows({
+      lens: atlasLens,
+      mode: atlasCompareMode,
+      query: "",
+      scope: atlasScope,
+      selectedSetIds: scopedAtlasSetIds,
+      sort: "count",
+      threshold: 1,
+      tracks: allScopedAtlasTracks,
+    }),
+  );
+  const maxAtlasPage = Math.max(0, Math.ceil(atlasRowsAll.length / ATLAS_PAGE_SIZE) - 1);
+  const currentAtlasPage = clamp(atlasPage, 0, maxAtlasPage);
+  const atlasPageRows = atlasRowsAll.slice(
+    currentAtlasPage * ATLAS_PAGE_SIZE,
+    currentAtlasPage * ATLAS_PAGE_SIZE + ATLAS_PAGE_SIZE,
+  );
+  const effectiveAtlasActiveName =
+    atlasRowsAll.find((row) => row.name === atlasActiveName)?.name ?? null;
+  const activeAtlasRow = atlasRowsAll.find((row) => row.name === effectiveAtlasActiveName) ?? null;
+  const evidenceTracks = activeAtlasRow?.tracks ?? [];
+
+  const setQuery = normalizeSearchText(deferredSetSearch);
+  const visibleSetCards = [...setCards]
+    .filter((setItem) => (setQuery ? setItem.searchBlob.includes(setQuery) : true))
+    .sort((left, right) => {
+      if (setSort === "rate") {
+        return Number(right.recognitionRate ?? 0) - Number(left.recognitionRate ?? 0);
+      }
+      if (setSort === "tracks") {
+        return right.totalTracks - left.totalTracks;
+      }
+      if (setSort === "duration") {
+        return right.duration - left.duration;
+      }
+      return 0;
+    });
+  const compareCards = compareSelection
+    .map((setId) => visibleSetCards.find((setItem) => setItem.id === setId) ?? setCards.find((setItem) => setItem.id === setId))
+    .filter((value): value is SetCardModel => Boolean(value));
+  const sharedTrackNames =
+    compareCards.length === 2
+      ? [...compareCards[0].trackKeySet].filter((trackKey) => compareCards[1].trackKeySet.has(trackKey))
+      : [];
+  const compareMetrics =
+    compareCards.length === 2
+      ? (() => {
+          const union = new Set([...compareCards[0].trackKeySet, ...compareCards[1].trackKeySet]);
+          return {
+            durationDelta: Math.abs(compareCards[0].duration - compareCards[1].duration),
+            onlyA: Math.max(0, compareCards[0].trackKeySet.size - sharedTrackNames.length),
+            onlyB: Math.max(0, compareCards[1].trackKeySet.size - sharedTrackNames.length),
+            overlapPct: union.size > 0 ? Math.round((sharedTrackNames.length / union.size) * 100) : 0,
+            rateDelta: Math.abs(Number(compareCards[0].recognitionRate ?? 0) - Number(compareCards[1].recognitionRate ?? 0)),
+            sharedCount: sharedTrackNames.length,
+          };
+        })()
+      : null;
+  const sharedTrackKeySet = new Set(sharedTrackNames);
+  const dockSelectedAtlasCards = atlasScope !== "artist" && effectiveAtlasSelectedIds.length > 0;
+  const orderedAtlasSetCards = dockSelectedAtlasCards
+    ? [
+        ...visibleAtlasSetCards.filter((setItem) => effectiveAtlasSelectedIds.includes(setItem.id)),
+        ...visibleAtlasSetCards.filter((setItem) => !effectiveAtlasSelectedIds.includes(setItem.id)),
+      ]
+    : visibleAtlasSetCards;
+  const selectedAtlasSet =
+    effectiveAtlasSelectedIds.length === 1
+      ? setCards.find((setItem) => setItem.id === effectiveAtlasSelectedIds[0]) ?? null
+      : null;
+  const focusHeading =
+    atlasScope === "artist"
+      ? "Artist Wide Scope"
+      : effectiveAtlasSelectedIds.length > 1
+        ? `${effectiveAtlasSelectedIds.length} Sets Selected`
+        : selectedAtlasSet?.title ?? "No Set Selected";
+  const focusHeadingLayout = splitSetAtlasHeadingTwoLines(focusHeading);
+  const focusSummary =
+    atlasScope === "artist"
+      ? `${visibleAtlasSetCards.length} sets selected in artist-wide scope.`
+      : effectiveAtlasSelectedIds.length <= 1
+        ? "Single set focus. Select another set card to pivot taxonomy."
+        : `${effectiveAtlasSelectedIds.length} sets in scope. ${atlasCompareMode === "intersection" ? "Intersection" : "Union"} mode active.`;
+  const taxonomySummary =
+    atlasScope === "artist"
+      ? `${allScopedAtlasTracks.length} detections across ${visibleAtlasSetCards.length} sets`
+      : effectiveAtlasSelectedIds.length <= 1
+        ? `${selectedAtlasSet?.title ?? "No Set Selected"} | ${selectedAtlasSet?.totalTracks ?? 0} tracks | ${Math.round(selectedAtlasSet?.recognitionRate ?? 0)}% match`
+        : `${effectiveAtlasSelectedIds.length} sets | ${allScopedAtlasTracks.length} detections in selected scope`;
+  const maxAtlasCount = atlasPageRows.length
+    ? Math.max(...atlasPageRows.map((row) => row.count))
+    : 1;
+  const trackLensUniverse = buildAtlasRows({
+    lens: "tracks",
+    mode: atlasCompareMode,
+    query: deferredAtlasQuery,
+    scope: atlasScope,
+    selectedSetIds: scopedAtlasSetIds,
+    sort: atlasSort,
+    threshold: atlasMin,
+    tracks: allScopedAtlasTracks,
+  });
+  const trackLensCountLabel =
+    atlasConf === "all"
+      ? `${atlasRowsAll.length} matching tracks`
+      : `${atlasRowsAll.length} / ${trackLensUniverse.length} matching tracks`;
+
+  return (
+    <div className={styles.root}>
+      <ArchiveScrollRoot />
+      <header className="topbar">
+        <div className="topbar-inner">
+          <div className="brand">[SET SIGNAL ARCHIVE]</div>
+          <nav className="topnav">
+            <a href="#overview">Overview</a>
+            <a href="#recurring-section">Recurring</a>
+            <a href="#set-atlas-section">Set Atlas</a>
+            <a href="#sets-section">Set Explorer</a>
+            <a href="#status-section">Status</a>
+          </nav>
+        </div>
+      </header>
+
+      <main className="shell">
+        <section className="section" id="overview">
+          <div className="section-inner">
+            <div className="kicker">Artist Intelligence Deck</div>
+            <div className="artist-hero">
+              <div className="artist-hero-main">
+                <div className="artist-hero-visual">
+                  {heroVisualImageUrl ? (
+                    <img alt={`${artist.name} artist image`} src={heroVisualImageUrl} />
+                  ) : (
+                    <div className="artist-hero-image-fallback" />
+                  )}
+                  <h1 className="artist-hero-title">
+                    {artist.name.split(/\s+/u).map((word) => (
+                      <span key={word}>{word}</span>
+                    ))}
+                  </h1>
+                </div>
+                <div className="stats-grid artist-hero-stats">
+                  <article className="stat">
+                    <span className="stat-value">{artist.stats.setsAnalyzed}</span>
+                    <span className="stat-label">Sets analyzed</span>
+                  </article>
+                  <article className="stat">
+                    <span className="stat-value">{artist.stats.uniqueTracks}</span>
+                    <span className="stat-label">Unique tracks</span>
+                  </article>
+                  <article className="stat">
+                    <span className="stat-value">{artist.stats.totalDetections}</span>
+                    <span className="stat-label">Total detections</span>
+                  </article>
+                  <article className="stat">
+                    <span className="stat-value">{artist.stats.recurringTracks}</span>
+                    <span className="stat-label">Recurring tracks</span>
+                  </article>
+                </div>
+              </div>
+
+              <aside className="artist-hero-side">
+                <div className="artist-hero-side-viewport" ref={heroRailViewportRef}>
+                  <div className="artist-hero-side-track" ref={heroRailTrackRef}>
+                    {heroRail.map((setItem, index) => (
+                      <a className="artist-hero-card" href={setItem.previewHref} key={`${setItem.id}:${index}`} rel="noopener" target="_blank">
+                        {setItem.heroImageUrl ? (
+                          <img alt={setItem.title} src={setItem.heroImageUrl} />
+                        ) : (
+                          <div className="artist-hero-card-fallback">No Image</div>
+                        )}
+                        <div className="artist-hero-card-meta">
+                          <p className="artist-hero-card-match">{setItem.matchLabel.toLowerCase()}</p>
+                          <p className="artist-hero-card-title">{setItem.title}</p>
+                          <p className="artist-hero-card-sub">{formatHeroSetSummary(setItem)}</p>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section className="section" id="recurring-section">
+          <div className="section-inner">
+            <div className="section-head">
+              <h2 className="recurring-heading">Recurring Tracks</h2>
+              <p>
+                Index-style track cards with set evidence and source deep links. Threshold and search
+                controls are available below.
+              </p>
+            </div>
+
+            <div className="recurring-controls">
+              <div className="controls-row">
+                <div className="threshold-stepper">
+                  <button
+                    aria-label="Decrease recurring set threshold"
+                    className="btn threshold-arrow"
+                    disabled={recMin === recurringThresholdValues[0]}
+                    onClick={() => setRecMin((current) => stepThresholdValue(current, recurringThresholdValues, -1))}
+                    type="button"
+                  >
+                    ▼
+                  </button>
+                  <span className="btn threshold-value">{recMin}+ SETS</span>
+                  <button
+                    aria-label="Increase recurring set threshold"
+                    className="btn threshold-arrow"
+                    disabled={recMin === recurringThresholdValues[recurringThresholdValues.length - 1]}
+                    onClick={() => setRecMin((current) => stepThresholdValue(current, recurringThresholdValues, 1))}
+                    type="button"
+                  >
+                    ▲
+                  </button>
+                </div>
+
+                {TRACK_CONFIDENCE_LEVELS.map((filter) => (
+                  <button
+                    className={joinClasses("btn", recFilter === filter && "active")}
+                    key={filter}
+                    onClick={() => setRecFilter(filter)}
+                    type="button"
+                  >
+                    {filter === "all" ? "All confidence" : filter.charAt(0) + filter.slice(1).toLowerCase()}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                className="input"
+                onChange={(event) => {
+                  const next = event.target.value;
+                  startTransition(() => {
+                    setRecSearch(next);
+                  });
+                }}
+                placeholder="Search recurring tracks..."
+                type="search"
+                value={recSearch}
+              />
+            </div>
+
+            <div className="recurring-grid">
+              {visibleRecurringCards.map((track) => {
+                const visibleSetRefs = track.setRefs.filter((setRef) =>
+                  recFilter === "all" ? true : setRef.confidence === recFilter,
+                );
+                const hasSources = visibleSetRefs.length > 0;
+                const sourcesOpen = openRecurringSources.includes(track.trackKey);
+                const spotifyOpen = openRecurringSpotify.includes(track.trackKey);
+
+                return (
+                  <article
+                    className={joinClasses(
+                      "track-card",
+                      "rec-card",
+                      sourcesOpen && "sources-open",
+                      spotifyOpen && "embed-open",
+                    )}
+                    key={track.trackKey}
+                  >
+                    <div className="track-art">
+                      {track.albumArt ? <img alt={track.title} src={track.albumArt} loading="lazy" /> : <div className="track-art-fallback">No Art</div>}
+                    </div>
+                    <div className="track-body">
+                      <h4 className="track-title">
+                        {track.artist} - {track.title}
+                      </h4>
+                      <div className="actions">
+                        {track.spotifyTrackId ? (
+                          <button
+                            data-action="spotify-embed"
+                            data-closed-label="Spotify"
+                            data-open-label="Hide Spotify"
+                            data-track-id={track.spotifyTrackId}
+                            data-open={spotifyOpen}
+                            onClick={() => {
+                              setOpenRecurringSpotify((current) =>
+                                current.includes(track.trackKey)
+                                  ? current.filter((value) => value !== track.trackKey)
+                                  : [...current, track.trackKey],
+                              );
+                            }}
+                            type="button"
+                          >
+                            {spotifyOpen ? "Hide Spotify" : "Spotify"}
+                          </button>
+                        ) : null}
+                        {hasSources ? (
+                          <button
+                            data-action="toggle-sources"
+                            data-closed-label={`Sets (${visibleSetRefs.length})`}
+                            data-open-label="Hide Sets"
+                            onClick={() => {
+                              setOpenRecurringSources((current) =>
+                                current.includes(track.trackKey)
+                                  ? current.filter((value) => value !== track.trackKey)
+                                  : [...current, track.trackKey],
+                              );
+                            }}
+                            type="button"
+                          >
+                            {sourcesOpen ? "Hide Sets" : `Sets (${visibleSetRefs.length})`}
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className={joinClasses("source-panel", sourcesOpen && "open")}>
+                        {sourcesOpen ? (
+                          <ul className="source-list">
+                            {visibleSetRefs.map((setRef) => (
+                              <li key={`${track.trackKey}:${setRef.href ?? setRef.setTitle}`}>
+                                {setRef.href ? (
+                                  <a href={setRef.href} rel="noopener" target="_blank">
+                                    {setRef.setTitle}
+                                  </a>
+                                ) : (
+                                  <span>{setRef.setTitle}</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                      {spotifyOpen && track.spotifyTrackId ? renderSpotifyEmbed(track.spotifyTrackId) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            {visibleRecurringCards.length === 0 ? (
+              <div className="no-results">No recurring tracks match the active threshold/filter.</div>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="section" id="set-atlas-section">
+          <div className="section-inner">
+            <div className="section-head">
+              <h2>Set Atlas</h2>
+              <p>Pick a set on the left, then investigate genres, labels, track artists, and tracks with evidence in the right pane.</p>
+            </div>
+
+            <div className="atlas-layout">
+              <div className="atlas-set-pane">
+                <div className="controls-grid set-controls-inline">
+                  <div className="control">
+                    <label htmlFor="atlasSetSearch">Search Sets</label>
+                    <input
+                      className="input"
+                      id="atlasSetSearch"
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        startTransition(() => {
+                          setAtlasSetSearch(next);
+                          setAtlasPage(0);
+                          setAtlasEvidencePage(0);
+                          setAtlasActiveName(null);
+                        });
+                      }}
+                      placeholder="find set cards"
+                      type="text"
+                      value={atlasSetSearch}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  className={joinClasses(
+                    "artist-grid",
+                    "atlas-set-grid",
+                    dockSelectedAtlasCards && "selected-dock",
+                  )}
+                  onPointerEnter={() => {
+                    setAtlasHoverLatchedSetId(null);
+                  }}
+                  onPointerLeave={() => {
+                    setAtlasHoverLatchedSetId(null);
+                    atlasRailRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  ref={atlasRailRef}
+                >
+                  {orderedAtlasSetCards.map((setItem, index) => {
+                    const isSelected = effectiveAtlasSelectedIds.includes(setItem.id);
+
+                    return (
+                      <article
+                        className={joinClasses(
+                          "artist-card",
+                          "atlas-set-card",
+                          effectiveAtlasSelectedIds[0] === setItem.id && "focus",
+                          isSelected && "selected",
+                          atlasHoverLatchedSetId === setItem.id && "hover-latched",
+                        )}
+                        key={setItem.id}
+                        onPointerEnter={() => {
+                          setAtlasHoverLatchedSetId(setItem.id);
+                        }}
+                        onClick={(event) => {
+                          if ((event.target as HTMLElement).closest("a,button")) {
+                            return;
+                          }
+
+                          const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+                          setAtlasScope("set");
+                          setAtlasPage(0);
+                          setAtlasEvidencePage(0);
+                          setAtlasActiveName(null);
+                          setAtlasSelectedSetIds((current) => {
+                            if (!additive) {
+                              return [setItem.id];
+                            }
+
+                            const nextSelection = current.includes(setItem.id)
+                              ? current.filter((value) => value !== setItem.id)
+                              : [...current, setItem.id];
+                            return nextSelection.length > 0 ? nextSelection : [setItem.id];
+                          });
+                        }}
+                        role="button"
+                        style={{ zIndex: orderedAtlasSetCards.length - index }}
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") {
+                            return;
+                          }
+                          event.preventDefault();
+                          setAtlasScope("set");
+                          setAtlasPage(0);
+                          setAtlasEvidencePage(0);
+                          setAtlasActiveName(null);
+                          setAtlasSelectedSetIds([setItem.id]);
+                        }}
+                      >
+                        {setItem.heroImageUrl ? (
+                          <img alt={setItem.title} loading="lazy" src={setItem.heroImageUrl} />
+                        ) : (
+                          <div className="set-card-fallback" aria-hidden="true" />
+                        )}
+                        <div className="artist-detail">
+                          <div className="artist-meta-row">
+                            <div className="card-actions">
+                              <button
+                                className={joinClasses("chip-btn", isSelected && "active")}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setAtlasScope("set");
+                                  setAtlasPage(0);
+                                  setAtlasEvidencePage(0);
+                                  setAtlasActiveName(null);
+                                  setAtlasSelectedSetIds((current) =>
+                                    current.includes(setItem.id)
+                                      ? current.filter((value) => value !== setItem.id)
+                                      : [...current, setItem.id],
+                                  );
+                                }}
+                                type="button"
+                              >
+                                {isSelected ? "In Scope" : "Add to Scope"}
+                              </button>
+                              <a className="chip-btn" href={setItem.previewHref} rel="noopener" target="_blank">
+                                Set Page
+                              </a>
+                              {setItem.sourceUrl ? (
+                                <a className="chip-btn" href={setItem.sourceUrl} rel="noopener" target="_blank">
+                                  Source
+                                </a>
+                              ) : null}
+                            </div>
+                          </div>
+                          <h3>{setItem.title}</h3>
+                          <p>{formatSetSummary(setItem)}</p>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+
+                {visibleAtlasSetCards.length === 0 ? (
+                  <div className="no-results">No sets match current filters.</div>
+                ) : null}
+              </div>
+
+              <aside className="atlas-panel">
+                <div className="focus-header">
+                  <div className={joinClasses("focus-names", "single", focusHeadingLayout.sizeClass)}>
+                    <span className="focus-name">
+                      <span className="focus-line">{focusHeadingLayout.line1}</span>
+                      <span className="focus-line">{focusHeadingLayout.line2}</span>
+                    </span>
+                  </div>
+                  <div className="focus-toolbar">
+                    <p className="focus-summary">{focusSummary}</p>
+                    <div className="focus-mode">
+                      <button
+                        className={joinClasses("chip-btn", atlasScope === "set" && "active")}
+                        onClick={() => {
+                          setAtlasScope("set");
+                          setAtlasPage(0);
+                          setAtlasEvidencePage(0);
+                          setAtlasActiveName(null);
+                        }}
+                        type="button"
+                      >
+                        Selected Set
+                      </button>
+                      <button
+                        className={joinClasses("chip-btn", atlasScope === "artist" && "active")}
+                        onClick={() => {
+                          setAtlasScope("artist");
+                          setAtlasPage(0);
+                          setAtlasEvidencePage(0);
+                          setAtlasActiveName(null);
+                        }}
+                        type="button"
+                      >
+                        Artist Wide
+                      </button>
+                      {atlasScope === "set" && effectiveAtlasSelectedIds.length > 1 ? (
+                        <>
+                          <button
+                            className={joinClasses("chip-btn", atlasCompareMode === "union" && "active")}
+                            onClick={() => {
+                              setAtlasCompareMode("union");
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                              setAtlasActiveName(null);
+                            }}
+                            type="button"
+                          >
+                            Union
+                          </button>
+                          <button
+                            className={joinClasses("chip-btn", atlasCompareMode === "intersection" && "active")}
+                            onClick={() => {
+                              setAtlasCompareMode("intersection");
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                              setAtlasActiveName(null);
+                            }}
+                            type="button"
+                          >
+                            Intersection
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="focus-stats">
+                    <article className="focus-tile">
+                      <p>Sets</p>
+                      <h4>{scopedAtlasSetIds.size}</h4>
+                    </article>
+                    <article className="focus-tile">
+                      <p>Unique Tracks</p>
+                      <h4>{new Set(allScopedAtlasTracks.map((track) => track.trackKey)).size}</h4>
+                    </article>
+                    <article className="focus-tile">
+                      <p>Detections</p>
+                      <h4>{allScopedAtlasTracks.length}</h4>
+                    </article>
+                    <article className="focus-tile">
+                      <p>Scope</p>
+                      <h4>{atlasScope === "artist" ? "Artist" : "Set"}</h4>
+                    </article>
+                  </div>
+                </div>
+
+                <div className="taxonomy-workbench">
+                  <div className="taxonomy-panel">
+                    <div className="panel-head taxonomy-head">
+                      <h3 className="panel-title">Taxonomy Atlas</h3>
+                      <div className="lens-tabs">
+                        {(["genres", "labels", "artists", "tracks"] as const).map((lens) => (
+                          <button
+                            className={joinClasses("chip-btn", atlasLens === lens && "active")}
+                            key={lens}
+                            onClick={() => {
+                              setAtlasLens(lens);
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                              setAtlasActiveName(null);
+                            }}
+                            type="button"
+                          >
+                            {lens === "genres"
+                              ? "Genres"
+                              : lens === "labels"
+                                ? "Labels"
+                                : lens === "artists"
+                                  ? "Artists"
+                                  : "Tracks"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="panel-copy">{taxonomySummary}</p>
+
+                    <div className="taxonomy-controls-bar">
+                      <div className="control taxonomy-search-control">
+                        <input
+                          className="input"
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            startTransition(() => {
+                              setAtlasQuery(next);
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                              setAtlasActiveName(null);
+                            });
+                          }}
+                          placeholder="search"
+                          type="text"
+                          value={atlasQuery}
+                        />
+                      </div>
+                      <div className="taxonomy-controls-row">
+                        <div className="pill-row">
+                          <div className="threshold-stepper">
+                            <button
+                              aria-label="Decrease set threshold"
+                              className="btn threshold-arrow"
+                              disabled={atlasMin === atlasThresholdValues[0]}
+                              onClick={() => {
+                                setAtlasMin((current) => stepThresholdValue(current, atlasThresholdValues, -1));
+                                setAtlasPage(0);
+                                setAtlasEvidencePage(0);
+                                setAtlasActiveName(null);
+                              }}
+                              type="button"
+                            >
+                              ▼
+                            </button>
+                            <span className="btn threshold-value">{atlasMin}+ SETS</span>
+                            <button
+                              aria-label="Increase set threshold"
+                              className="btn threshold-arrow"
+                              disabled={atlasMin === atlasThresholdValues[atlasThresholdValues.length - 1]}
+                              onClick={() => {
+                                setAtlasMin((current) => stepThresholdValue(current, atlasThresholdValues, 1));
+                                setAtlasPage(0);
+                                setAtlasEvidencePage(0);
+                                setAtlasActiveName(null);
+                              }}
+                              type="button"
+                            >
+                              ▲
+                            </button>
+                          </div>
+                        </div>
+                        <div className="pill-row">
+                          {TRACK_CONFIDENCE_LEVELS.map((filter) => (
+                            <button
+                              className={joinClasses("chip-btn", atlasConf === filter && "active")}
+                              key={filter}
+                              onClick={() => {
+                                setAtlasConf(filter);
+                                setAtlasPage(0);
+                                setAtlasEvidencePage(0);
+                                setAtlasActiveName(null);
+                              }}
+                              type="button"
+                            >
+                              {filter === "all" ? `All (${allScopedAtlasTracks.length})` : filter}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="control taxonomy-sort-control">
+                          <span className="taxonomy-sort-icon" aria-hidden="true">
+                            ↕
+                          </span>
+                          <select
+                            aria-label="Sort taxonomy entries"
+                            onChange={(event) => {
+                              setAtlasSort((event.target.value as "alpha" | "count") ?? "count");
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                            }}
+                            value={atlasSort}
+                          >
+                            <option value="count">Highest Usage</option>
+                            <option value="alpha">Alphabetical</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rows">
+                      {atlasLens === "tracks"
+                        ? null
+                        : atlasPageRows.map((row) => {
+                            const isActive = effectiveAtlasActiveName === row.name;
+
+                            return (
+                              <article className={joinClasses("quant-row", isActive && "active")} key={row.name}>
+                                <button
+                                  className="row-hit"
+                                  onClick={() => {
+                                    setAtlasActiveName((current) => (current === row.name ? null : row.name));
+                                    setAtlasEvidencePage(0);
+                                  }}
+                                  type="button"
+                                >
+                                  <div className="row-line">
+                                    <span className="row-name" title={row.name}>
+                                      {row.name}
+                                    </span>
+                                    <div className="bar">
+                                      <span
+                                        style={{
+                                          width: `${maxAtlasCount > 0 ? (row.count / maxAtlasCount) * 100 : 0}%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="row-count">{row.count}</span>
+                                  </div>
+                                </button>
+                                {isActive ? (
+                                  <div className="inline-evidence">
+                                    <div className="inline-head-row">
+                                      <p className="inline-head">{`${row.name} | ${row.tracks.length} matching tracks`}</p>
+                                      {atlasLens === "labels" && row.labelUrl ? (
+                                        <div className="inline-head-actions">
+                                          <a className="discogs" href={row.labelUrl} rel="noopener" target="_blank">
+                                            Label Page
+                                          </a>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    {evidenceTracks.length > 0 ? (
+                                      <div className="evidence-grid">
+                                        {evidenceTracks.map((track) => {
+                                          const trackKey = track.trackKey;
+                                          const sourcesOpen = openAtlasSources.includes(trackKey);
+                                          const spotifyOpen = openAtlasSpotify.includes(trackKey);
+
+                                          return (
+                                            <article
+                                              className={joinClasses(
+                                                "track-card",
+                                                "atlas-track-card",
+                                                sourcesOpen && "sources-open",
+                                                spotifyOpen && "embed-open",
+                                              )}
+                                              key={trackKey}
+                                              style={atlasCardStyles[trackKey]}
+                                            >
+                                              <div className="track-art">
+                                                {track.albumArt ? (
+                                                  <img alt={track.title} loading="lazy" src={track.albumArt} />
+                                                ) : (
+                                                  <div className="track-art-fallback">No Art</div>
+                                                )}
+                                              </div>
+                                              <div className="track-body">
+                                                <h4 className="track-title">
+                                                  {track.artist} - {track.title}
+                                                </h4>
+                                                <p className="muted">
+                                                  Confidence{" "}
+                                                  <span className={joinClasses("set-track-conf", track.confidence.toLowerCase())}>
+                                                    {track.confidence}
+                                                  </span>
+                                                </p>
+                                                <div className="actions">
+                                                  {track.spotifyTrackId ? (
+                                                    <button
+                                                      onClick={(event) => handleAtlasSpotifyToggle(event, trackKey)}
+                                                      type="button"
+                                                    >
+                                                      {spotifyOpen ? "Hide Spotify" : "Spotify"}
+                                                    </button>
+                                                  ) : null}
+                                                  <button
+                                                    onClick={(event) => handleAtlasSourcesToggle(event, trackKey)}
+                                                    type="button"
+                                                  >
+                                                    {sourcesOpen ? "Hide Sets" : `Sets (${track.setLinks.length})`}
+                                                  </button>
+                                                </div>
+                                                <div className={joinClasses("source-panel", sourcesOpen && "open")}>
+                                                  {track.setLinks.length > 0 ? (
+                                                    <ul className="source-list">
+                                                      {track.setLinks.map((source) => (
+                                                        <li key={`${trackKey}:${source.href}`}>
+                                                          <a href={source.href} rel="noopener" target="_blank">
+                                                            {source.label}
+                                                          </a>
+                                                        </li>
+                                                      ))}
+                                                    </ul>
+                                                  ) : (
+                                                    <div className="empty">No set links available.</div>
+                                                  )}
+                                                </div>
+                                                {spotifyOpen && track.spotifyTrackId
+                                                  ? renderSpotifyEmbed(track.spotifyTrackId)
+                                                  : null}
+                                              </div>
+                                            </article>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div className="empty">No evidence tracks match the selected confidence filter.</div>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          })}
+                    </div>
+
+                    {atlasLens === "tracks" && atlasRowsAll.length > 0 ? (
+                      <div className="inline-evidence">
+                        <p className="inline-head">{`Tracks | ${trackLensCountLabel}`}</p>
+                        <div className="evidence-grid">
+                          {atlasRowsAll.map((row) => {
+                            const track = row.tracks[0];
+                            if (!track) {
+                              return null;
+                            }
+
+                            const trackKey = track.trackKey;
+                            const sourcesOpen = openAtlasSources.includes(trackKey);
+                            const spotifyOpen = openAtlasSpotify.includes(trackKey);
+
+                            return (
+                              <article
+                                className={joinClasses(
+                                  "track-card",
+                                  "atlas-track-card",
+                                  sourcesOpen && "sources-open",
+                                  spotifyOpen && "embed-open",
+                                )}
+                                key={trackKey}
+                                style={atlasCardStyles[trackKey]}
+                              >
+                                <div className="track-art">
+                                  {track.albumArt ? (
+                                    <img alt={track.title} loading="lazy" src={track.albumArt} />
+                                  ) : (
+                                    <div className="track-art-fallback">No Art</div>
+                                  )}
+                                </div>
+                                <div className="track-body">
+                                  <h4 className="track-title">
+                                    {track.artist} - {track.title}
+                                  </h4>
+                                  <p className="muted">
+                                    Confidence{" "}
+                                    <span className={joinClasses("set-track-conf", track.confidence.toLowerCase())}>
+                                      {track.confidence}
+                                    </span>
+                                  </p>
+                                  <div className="actions">
+                                    {track.spotifyTrackId ? (
+                                      <button
+                                        onClick={(event) => handleAtlasSpotifyToggle(event, trackKey)}
+                                        type="button"
+                                      >
+                                        {spotifyOpen ? "Hide Spotify" : "Spotify"}
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      onClick={(event) => handleAtlasSourcesToggle(event, trackKey)}
+                                      type="button"
+                                    >
+                                      {sourcesOpen ? "Hide Sets" : `Sets (${track.setLinks.length})`}
+                                    </button>
+                                  </div>
+                                  <div className={joinClasses("source-panel", sourcesOpen && "open")}>
+                                    {track.setLinks.length > 0 ? (
+                                      <ul className="source-list">
+                                        {track.setLinks.map((source) => (
+                                          <li key={`${trackKey}:${source.href}`}>
+                                            <a href={source.href} rel="noopener" target="_blank">
+                                              {source.label}
+                                            </a>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <div className="empty">No set links available.</div>
+                                    )}
+                                  </div>
+                                  {spotifyOpen && track.spotifyTrackId
+                                    ? renderSpotifyEmbed(track.spotifyTrackId)
+                                    : null}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {atlasRowsAll.length === 0 ? (
+                      <div className="no-results">No taxonomy entries match current controls.</div>
+                    ) : null}
+
+                    {atlasLens !== "tracks" ? (
+                      <div className="pager">
+                        <button
+                          className="btn"
+                          disabled={currentAtlasPage === 0}
+                          onClick={() => setAtlasPage((current) => Math.max(0, current - 1))}
+                          type="button"
+                        >
+                          Prev
+                        </button>
+                        <span>
+                          Page {currentAtlasPage + 1} / {Math.max(1, maxAtlasPage + 1)}
+                        </span>
+                        <button
+                          className="btn"
+                          disabled={currentAtlasPage >= maxAtlasPage}
+                          onClick={() => setAtlasPage((current) => Math.min(maxAtlasPage, current + 1))}
+                          type="button"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section className="section" id="sets-section">
+          <div className="section-inner">
+            <div className="section-head">
+              <h2>Set Explorer</h2>
+              <p>Search and compare sets, then inspect shared tracks through expanded tracklists and deep links.</p>
+            </div>
+
+            <div className="set-panel">
+              <div className="controls-grid set-controls-inline set-explorer-controls">
+                <div className="control">
+                  <input
+                    aria-label="Search sets"
+                    className="input"
+                    id="setSearch"
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      startTransition(() => {
+                        setSetSearch(next);
+                      });
+                    }}
+                    placeholder="set title, track"
+                    type="text"
+                    value={setSearch}
+                  />
+                </div>
+                <div className="control">
+                  <select
+                    aria-label="Sort sets"
+                    id="setSort"
+                    onChange={(event) => setSetSort((event.target.value as SetSort) ?? "default")}
+                    value={setSort}
+                  >
+                    <option value="default">Default</option>
+                    <option value="rate">Recognition Rate</option>
+                    <option value="tracks">Track Count</option>
+                    <option value="duration">Duration</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="compare-panel" hidden={compareSelection.length === 0}>
+                <div className="controls-row compare-head">
+                  <strong>Set Connection View</strong>
+                  <button
+                    className="btn"
+                    onClick={() => setCompareSelection([])}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="compare-body">
+                  {compareSelection.length === 1 ? (
+                    <div>1 set selected. Choose one more to compare.</div>
+                  ) : compareCards.length < 2 ? (
+                    <div>Select two sets to compare overlap.</div>
+                  ) : (
+                    <div className="compare-stack">
+                      <div className="compare-summary">
+                        {compareCards[0].title} {"<->"} {compareCards[1].title}
+                      </div>
+                      <div className="compare-grid">
+                        <div className="compare-card">
+                          <span className="compare-value">{compareMetrics?.sharedCount ?? 0}</span>
+                          <span className="compare-label">Shared tracks</span>
+                        </div>
+                        <div className="compare-card">
+                          <span className="compare-value">{compareMetrics?.overlapPct ?? 0}%</span>
+                          <span className="compare-label">Overlap</span>
+                        </div>
+                        <div className="compare-card">
+                          <span className="compare-value">{Math.round(compareMetrics?.rateDelta ?? 0)}%</span>
+                          <span className="compare-label">ID delta</span>
+                        </div>
+                        <div className="compare-card">
+                          <span className="compare-value">{Math.round((compareMetrics?.durationDelta ?? 0) / 60)}m</span>
+                          <span className="compare-label">Duration delta</span>
+                        </div>
+                        <div className="compare-card">
+                          <span className="compare-value">{compareMetrics?.onlyA ?? 0}</span>
+                          <span className="compare-label">Only in A</span>
+                        </div>
+                        <div className="compare-card">
+                          <span className="compare-value">{compareMetrics?.onlyB ?? 0}</span>
+                          <span className="compare-label">Only in B</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="set-grid">
+                {visibleSetCards.map((setItem) => {
+                  const isCompared = compareSelection.includes(setItem.id);
+                  const isExpanded = expandedSetCards.includes(setItem.id);
+                  const miniSegments = buildMiniTimeline(setItem);
+
+                  return (
+                    <article
+                      className={joinClasses(
+                        "set-card",
+                        !setItem.heroImageUrl && "empty-thumb-card",
+                        isCompared && "selected",
+                      )}
+                      key={setItem.id}
+                    >
+                      <div className={joinClasses("set-thumb", !setItem.heroImageUrl && "empty")}>
+                        {setItem.heroImageUrl ? (
+                          <a href={setItem.previewHref} rel="noopener" target="_blank">
+                            <img alt={setItem.title} loading="lazy" src={setItem.heroImageUrl} />
+                          </a>
+                        ) : (
+                          "No Image"
+                        )}
+                      </div>
+                      <div className="set-body">
+                        <h4 className="set-title">
+                          <a href={setItem.previewHref} rel="noopener" target="_blank">
+                            {setItem.title}
+                          </a>
+                        </h4>
+                        <div className="set-mini">
+                          {miniSegments.map((segment, index) => (
+                            <span
+                              className={joinClasses("set-mini-seg", segment.confidence.toLowerCase())}
+                              key={`${setItem.id}:${segment.leftPct}:${index}`}
+                              style={{
+                                left: `${segment.leftPct}%`,
+                                width: `${segment.widthPct}%`,
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <div className="set-meta">
+                          <span className="set-pill">{setItem.totalTracks} tracks</span>
+                          <span className="set-pill">{setItem.matchLabel}</span>
+                          <span className="set-pill">{setItem.durationFmt}</span>
+                          <span className="set-pill">
+                            H:{setItem.confidenceCounts.HIGH} M:{setItem.confidenceCounts.MEDIUM} L:{setItem.confidenceCounts.LOW} U:
+                            {setItem.confidenceCounts.UNCERTAIN}
+                          </span>
+                        </div>
+                        <div className="actions">
+                          <a href={setItem.previewHref} rel="noopener" target="_blank">
+                            Open Set Page
+                          </a>
+                          {setItem.sourceUrl ? (
+                            <a href={setItem.sourceUrl} rel="noopener" target="_blank">
+                              Source
+                            </a>
+                          ) : null}
+                          <button
+                            className="js-set-compare"
+                            onClick={() =>
+                              setCompareSelection((current) => {
+                                if (current.includes(setItem.id)) {
+                                  return current.filter((value) => value !== setItem.id);
+                                }
+                                if (current.length >= 2) {
+                                  return [current[1], setItem.id];
+                                }
+                                return [...current, setItem.id];
+                              })
+                            }
+                            type="button"
+                          >
+                            Compare
+                          </button>
+                          <button
+                            className="js-tracklist-toggle"
+                            onClick={() =>
+                              setExpandedSetCards((current) =>
+                                current.includes(setItem.id)
+                                  ? current.filter((value) => value !== setItem.id)
+                                  : [...current, setItem.id],
+                              )
+                            }
+                            type="button"
+                          >
+                            {isExpanded ? "Hide Tracklist" : "Show Tracklist"}
+                          </button>
+                        </div>
+                        <div className={joinClasses("set-tracklist", isExpanded && "open")}>
+                          {setItem.visibleTracks.length > 0 ? (
+                            setItem.visibleTracks.map((track) => (
+                              <div
+                                className={joinClasses(
+                                  "set-track",
+                                  sharedTrackKeySet.has(normalizeSearchText(track.trackKey)) && "shared",
+                                )}
+                                key={`${setItem.id}:${track.position}`}
+                              >
+                                <span className="set-track-time">{track.startTimeFormatted}</span>
+                                <span>
+                                  <a
+                                    href={buildTrackAnchorHref({
+                                      legacyHref: track.trackHref,
+                                      preview,
+                                      setLegacyPath: setItem.legacyPath,
+                                      setSlug: setItem.slug,
+                                      trackPosition: track.position,
+                                    })}
+                                    rel="noopener"
+                                    target="_blank"
+                                  >
+                                    {track.artist} - {track.title}
+                                  </a>
+                                </span>
+                                <span className={joinClasses("set-track-conf", track.confidence.toLowerCase())}>
+                                  {track.confidence}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="empty">No identified tracks in this set.</div>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <div className="pager compact">
+                <span>
+                  Page 1 / 1 | {visibleSetCards.length} sets
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="section" id="status-section">
+          <div className="section-inner">
+            <div className="section-head">
+              <h2>Collection Status</h2>
+              <p>Visibility into failed set collection attempts for this artist.</p>
+            </div>
+
+            {artist.failedSets.length > 0 ? (
+              <div className="status-list">
+                {artist.failedSets.map((setItem) => (
+                  <article className="status-card" key={`${setItem.title}:${setItem.url ?? ""}`}>
+                    <h3>{setItem.title}</h3>
+                    <p>{setItem.reason ?? "Collection failed for an unknown reason."}</p>
+                    {setItem.url ? (
+                      <a className="chip-btn" href={setItem.url} rel="noopener" target="_blank">
+                        Open Source
+                      </a>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="status-list">
+                <div className="empty">No failed sets were recorded for this artist.</div>
+              </div>
+            )}
+
+            <div className="footer-note">
+              Generated {formatGeneratedAt(artist.generatedAt)} · Set Signal Explorer
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}

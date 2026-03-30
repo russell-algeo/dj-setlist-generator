@@ -19,17 +19,6 @@ import { artists, setArtists, setRuns, sets, sitePages } from "@/lib/db/schema";
 
 const clampPage = (page: number) => (Number.isFinite(page) && page > 0 ? Math.floor(page) : 1);
 
-export const getSitePageByPath = async (pagePath: string) => {
-  const db = getDb();
-  const [page] = await db.select().from(sitePages).where(eq(sitePages.path, pagePath)).limit(1);
-  return page ?? null;
-};
-
-export const getSitePageHtml = async (pagePath: string) => {
-  const page = await getSitePageByPath(pagePath);
-  return page?.html ?? null;
-};
-
 export const getArtistBySlug = async (slug: string) => {
   const db = getDb();
   const [artist] = await db.select().from(artists).where(eq(artists.slug, slug)).limit(1);

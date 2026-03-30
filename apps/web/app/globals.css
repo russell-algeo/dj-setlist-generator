@@ -20,6 +20,11 @@ body {
   overflow-x: hidden;
 }
 
+html.archive-scroll-root,
+body.archive-scroll-root {
+  overflow: visible;
+}
+
 body {
   color: var(--ink);
   background:

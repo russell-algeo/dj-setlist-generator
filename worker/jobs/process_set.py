@@ -48,7 +48,7 @@ def _dispatch_pending() -> None:
     ).raise_for_status()
 
 
-def _revalidate(paths: list[str]) -> None:
+def _revalidate(paths: list[str], tags: list[str] | None = None) -> None:
     import requests
 
     settings = get_settings()
@@ -58,7 +58,7 @@ def _revalidate(paths: list[str]) -> None:
     requests.post(
         f"{settings.api_base_url}/api/internal/revalidate",
         headers={"x-internal-secret": settings.internal_secret},
-        json={"paths": paths},
+        json={"paths": paths, "tags": tags or []},
         timeout=30,
     ).raise_for_status()
 
@@ -549,10 +549,31 @@ async def publish_phase(set_run_id: str) -> str | None:
             },
         )
 
-        revalidate_paths = ["/", "/artists", "/sets"]
+        revalidate_paths = [
+            "/",
+            "/artists",
+            "/sets",
+            "/archive-preview",
+        ]
+        revalidate_tags = ["archive:home", "archive:lists"]
+        if published_row.get("slug"):
+            slug = str(published_row["slug"])
+            revalidate_paths.extend([
+                f"/sets/{slug}",
+                f"/archive-preview/sets/{slug}",
+            ])
+            revalidate_tags.append(f"archive:set:{slug}")
+        for artist_slug in published_row.get("affectedArtistSlugs", []) or []:
+            revalidate_paths.extend([
+                f"/artists/{artist_slug}",
+                f"/archive-preview/artists/{artist_slug}",
+            ])
+            revalidate_tags.append(f"archive:artist:{artist_slug}")
+        for artist_path in published_row.get("affectedArtistLegacyPaths", []) or []:
+            revalidate_paths.append(str(artist_path))
         if published_row.get("legacyPath"):
             revalidate_paths.append(str(published_row["legacyPath"]))
-        _revalidate(revalidate_paths)
+        _revalidate(sorted(set(revalidate_paths)), sorted(set(revalidate_tags)))
 
         return published_set_id
     except WorkflowSupersededError as error:

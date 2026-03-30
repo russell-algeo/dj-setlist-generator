@@ -1,4 +1,4 @@
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { assertInternalRequest } from "@/lib/auth/session";
@@ -19,10 +19,22 @@ export async function POST(request: Request) {
           .map((value) => value.trim())
           .filter(Boolean)
     : ["/", "/artists", "/sets"];
+  const tags = body.tags
+    ? Array.isArray(body.tags)
+      ? body.tags.map((value) => String(value))
+      : String(body.tags)
+          .split(/\r?\n|,/u)
+          .map((value) => value.trim())
+          .filter(Boolean)
+    : [];
 
   for (const path of paths) {
     revalidatePath(path);
   }
 
-  return NextResponse.json({ revalidated: paths });
+  for (const tag of tags) {
+    revalidateTag(tag);
+  }
+
+  return NextResponse.json({ revalidated: { paths, tags } });
 }
