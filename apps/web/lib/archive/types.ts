@@ -1,18 +1,8 @@
 export type ArchiveConfidence = "HIGH" | "MEDIUM" | "LOW" | "UNCERTAIN";
 
 export type ArchiveEntityResolution =
-  | {
-      entityType: "artist";
-      entityId: string;
-      legacyPath: string;
-      slug: string;
-    }
-  | {
-      entityType: "set";
-      entityId: string;
-      legacyPath: string;
-      slug: string;
-    };
+  | { entityType: "artist"; entityId: string; slug: string }
+  | { entityType: "set"; entityId: string; slug: string };
 
 export type ArchiveSetTrack = {
   idx: number;
@@ -64,7 +54,6 @@ export type ArchiveSetTimelineSegment = {
 export type ArchiveSetDetail = {
   id: string;
   slug: string;
-  legacyPath: string | null;
   title: string;
   artistName: string | null;
   artists: Array<{
@@ -111,7 +100,6 @@ export type ArchiveArtistSetTrackRef = {
 export type ArchiveArtistSet = {
   id: string;
   slug: string;
-  legacyPath: string | null;
   title: string;
   sourceUrl: string | null;
   thumbnailUrl: string | null;
@@ -158,9 +146,8 @@ export type ArchiveArtistAtlasTrack = {
   discogsUrl: string | null;
   albumArt: string | null;
   setId: string;
-  setLegacyPath: string | null;
   setSlug: string;
-  setAnchor: string | null;
+  setHref: string | null;
   sourceDeepLink: string | null;
   timeRange: string;
   setTitle: string;
@@ -169,7 +156,6 @@ export type ArchiveArtistAtlasTrack = {
 export type ArchiveArtistSummary = {
   id: string;
   slug: string;
-  legacyPath: string | null;
   name: string;
   imageUrl: string | null;
   heroImageUrl: string | null;
@@ -198,29 +184,24 @@ export type ArchiveArtistSummary = {
 export type ArchiveHomeArtistCard = {
   id: string;
   slug: string;
-  legacyPath: string | null;
   name: string;
   imageUrl: string | null;
   setCount: number;
   recognizedTracks: number;
   latestSetTitle: string | null;
-  latestSetPath: string | null;
 };
 
 export type ArchiveHomeConnection = {
   artistA: string;
   artistASlug: string;
-  artistALegacyPath: string | null;
   artistB: string;
   artistBSlug: string;
-  artistBLegacyPath: string | null;
   sharedTracks: number;
 };
 
 export type ArchiveHomeSetCard = {
   id: string;
   slug: string;
-  legacyPath: string | null;
   title: string;
   artistName: string | null;
   sourceUrl: string | null;

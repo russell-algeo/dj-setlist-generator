@@ -8,7 +8,6 @@ export type ArchiveHomeTaxonomyLens = "genres" | "labels" | "track-artists" | "t
 export type ArchiveHomeArtistCard = {
   id: string;
   imageUrl: string | null;
-  legacyPath: string | null;
   name: string;
   setCount: number;
   slug: string;
@@ -17,12 +16,10 @@ export type ArchiveHomeArtistCard = {
 };
 
 export type ArchiveHomeHeroSet = {
-  artistLegacyPath: string | null;
   artistName: string;
   artistSlug: string;
   duration: number;
   id: string;
-  legacyPath: string | null;
   recognitionRate: number | null;
   slug: string;
   thumbnailUrl: string | null;
@@ -32,7 +29,6 @@ export type ArchiveHomeHeroSet = {
 
 export type ArchiveHomeTrackSetRef = {
   confidence: ArchiveConfidence;
-  setLegacyPath: string | null;
   setSlug: string;
   title: string;
   trackPosition: number;
@@ -40,7 +36,6 @@ export type ArchiveHomeTrackSetRef = {
 
 export type ArchiveHomeTrackArtistRef = {
   appearances: number;
-  artistLegacyPath: string | null;
   artistName: string;
   artistSlug: string;
   setRefs: ArchiveHomeTrackSetRef[];
@@ -64,9 +59,16 @@ export type ArchiveHomeTrackCatalogItem = {
   trackKey: string;
 };
 
+export type ArchiveHomeAtlasSelectionPayload = {
+  compareMode: ArchiveHomeCompareMode;
+  focusArtistSlug: string | null;
+  generatedAt: string | null;
+  selectedArtistSlugs: string[];
+  trackCatalog: ArchiveHomeTrackCatalogItem[];
+};
+
 export type ArchiveHomeNetworkArtist = {
   id: string;
-  legacyPath: string | null;
   name: string;
   setCount: number;
   slug: string;
@@ -74,10 +76,8 @@ export type ArchiveHomeNetworkArtist = {
 
 export type ArchiveHomeNetworkEdge = {
   artistA: string;
-  artistALegacyPath: string | null;
   artistASlug: string;
   artistB: string;
-  artistBLegacyPath: string | null;
   artistBSlug: string;
   normalizedScore: number;
   score: number;
@@ -85,6 +85,11 @@ export type ArchiveHomeNetworkEdge = {
   sharedGenresCount: number;
   sharedLabelsCount: number;
   sharedTracksCount: number;
+};
+
+export type ArchiveHomeNetworkIndexPayload = {
+  artists: ArchiveHomeNetworkArtist[];
+  edges: ArchiveHomeNetworkEdge[];
 };
 
 export type ArchiveHomePairTrack = {
@@ -114,7 +119,7 @@ export type ArchiveHomePairBucket = {
   trackKeys: string[];
 };
 
-export type ArchiveHomePairPayload = {
+export type ArchiveHomePairSelectionPayload = {
   artistA: ArchiveHomeNetworkArtist;
   artistB: ArchiveHomeNetworkArtist;
   normalizedScore: number;
@@ -133,22 +138,19 @@ export type ArchiveHomeSetLibraryTrack = {
   artist: string;
   confidence: ArchiveConfidence;
   position: number;
+  setSlug: string;
   spotifyUrl: string | null;
   startTimeFormatted: string;
   title: string;
   trackKey: string;
-  trackLegacyPath: string | null;
-  trackSetSlug: string;
 };
 
 export type ArchiveHomeSetLibraryItem = {
-  artistLegacyPath: string | null;
   artistName: string;
   artistSlug: string;
   confidenceCounts: Record<ArchiveConfidence, number>;
   duration: number;
   id: string;
-  legacyPath: string | null;
   miniTimeline: Array<{
     confidence: ArchiveConfidence;
     startPct: number;
@@ -156,31 +158,14 @@ export type ArchiveHomeSetLibraryItem = {
   }>;
   recognitionRate: number | null;
   slug: string;
+  sourcePlatform: string | null;
   sourceUrl: string | null;
   thumbnailUrl: string | null;
   title: string;
   totalTracks: number;
-  tracks: ArchiveHomeSetLibraryTrack[];
-  trackSearchText: string;
 };
 
-export type ArchiveHomeAtlasPayload = {
-  allArtistsSelected: boolean;
-  artistCards: ArchiveHomeArtistCard[];
-  compareMode: ArchiveHomeCompareMode;
-  focusArtistSlug: string | null;
-  generatedAt: string | null;
-  selectedArtistSlugs: string[];
-  tickerItems: string[];
-  trackCatalog: ArchiveHomeTrackCatalogItem[];
-};
-
-export type ArchiveHomeNetworkPayload = {
-  artists: ArchiveHomeNetworkArtist[];
-  edges: ArchiveHomeNetworkEdge[];
-};
-
-export type ArchiveHomeSetLibraryPayload = {
+export type ArchiveHomeSetLibraryPagePayload = {
   artistFilter: string;
   artistOptions: string[];
   items: ArchiveHomeSetLibraryItem[];
@@ -192,10 +177,14 @@ export type ArchiveHomeSetLibraryPayload = {
   totalPages: number;
 };
 
-export type ArchiveHomeExplorerInitialPayload = {
-  allSetLibraryItems: ArchiveHomeSetLibraryItem[];
+export type ArchiveHomeSetTracklistPayload = {
+  generatedAt: string | null;
+  slug: string;
+  tracks: ArchiveHomeSetLibraryTrack[];
+};
+
+export type ArchiveHomeBootstrapPayload = {
   artistCards: ArchiveHomeArtistCard[];
-  edgeCount: number;
   generatedAt: string | null;
   globalStats: {
     confidenceBreakdown: Record<ArchiveConfidence, number>;
@@ -211,8 +200,7 @@ export type ArchiveHomeExplorerInitialPayload = {
     railSets: ArchiveHomeHeroSet[];
     tickerItems: string[];
   };
-  initialAtlas: ArchiveHomeAtlasPayload;
-  initialNetwork: ArchiveHomeNetworkPayload;
-  initialSetLibrary: ArchiveHomeSetLibraryPayload;
-  pairPayloads: Record<string, ArchiveHomePairPayload>;
+  initialAtlas: ArchiveHomeAtlasSelectionPayload;
+  initialNetwork: ArchiveHomeNetworkIndexPayload;
+  initialSetLibrary: ArchiveHomeSetLibraryPagePayload;
 };
