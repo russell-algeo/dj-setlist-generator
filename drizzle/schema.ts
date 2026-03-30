@@ -154,14 +154,12 @@ export const artists = app.table(
     imageUrl: text("image_url"),
     spotifyArtistUrl: text("spotify_artist_url"),
     discogsArtistUrl: text("discogs_artist_url"),
-    legacyPath: text("legacy_path"),
     metadata: jsonb("metadata").default(sql`'{}'::jsonb`).notNull(),
     ...timestamps(),
   },
   (table) => ({
     slugIdx: uniqueIndex("artists_slug_idx").on(table.slug),
     normalizedNameIdx: index("artists_normalized_name_idx").on(table.normalizedName),
-    legacyPathIdx: uniqueIndex("artists_legacy_path_idx").on(table.legacyPath),
   }),
 );
 
@@ -222,14 +220,12 @@ export const sets = app.table(
       precision: 5,
       scale: 2,
     }),
-    legacyPath: text("legacy_path"),
     metadata: jsonb("metadata").default(sql`'{}'::jsonb`).notNull(),
     ...timestamps(),
   },
   (table) => ({
     slugIdx: uniqueIndex("sets_slug_idx").on(table.slug),
     sourceUrlIdx: uniqueIndex("sets_source_url_idx").on(table.sourceUrl),
-    legacyPathIdx: uniqueIndex("sets_legacy_path_idx").on(table.legacyPath),
     normalizedTitleIdx: index("sets_normalized_title_idx").on(table.normalizedTitle),
   }),
 );
