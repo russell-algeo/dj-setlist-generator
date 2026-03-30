@@ -30,7 +30,6 @@ import type {
   ArchiveArtistSet,
   ArchiveArtistSummary,
   ArchiveConfidence,
-  ArchiveEntityResolution,
   ArchiveHomeBaseSummary,
   ArchiveHomeConnection,
   ArchiveHomeConnectionsResponse,
@@ -52,7 +51,6 @@ import {
   getString,
   getStringArray,
   normalizeArchiveConfidence,
-  normalizeLegacyPath,
 } from "@/lib/archive/utils";
 
 // Archive pages are projected from normalized rows at runtime; whole-page HTML is never read from Neon.
@@ -361,7 +359,6 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
   return {
     id: setRecord.id,
     slug: setRecord.slug,
-    legacyPath: setRecord.legacyPath,
     title: setRecord.title,
     artistName: artistRows[0]?.name ?? null,
     artists: artistRows.map((artist) => ({
@@ -407,15 +404,6 @@ export const getArchiveSetDetailBySlug = async (slug: string) =>
     { tags: [ARCHIVE_TAGS.set(slug)] },
   )();
 
-export const getArchiveSetDetailByLegacyPath = async (pagePath: string) => {
-  const resolution = await resolveLegacyArchivePath(pagePath);
-  if (!resolution || resolution.entityType !== "set") {
-    return null;
-  }
-
-  return getArchiveSetDetailBySlug(resolution.slug);
-};
-
 const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSummary | null> => {
   const db = getDb();
   const [artistRecord] = await db.select().from(artists).where(eq(artists.slug, slug)).limit(1);
@@ -429,7 +417,6 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
       .select({
         id: sets.id,
         slug: sets.slug,
-        legacyPath: sets.legacyPath,
         title: sets.title,
         sourcePlatform: sets.sourcePlatform,
         sourceUrl: sets.sourceUrl,
@@ -558,7 +545,7 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
     const setRow = setRows.find((entry) => entry.id === row.setId);
     recurring.setRefs.push({
       setTitle: setRow?.title ?? "Unknown Set",
-      href: setRow?.legacyPath ? `${setRow.legacyPath}#track-${track.idx}` : null,
+      href: setRow ? `/sets/${setRow.slug}#track-${track.idx}` : null,
       confidence: track.conf,
       position: track.idx,
     });
@@ -579,9 +566,8 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
       discogsUrl: track.discogsUrl,
       albumArt: track.albumArt,
       setId: row.setId,
-      setLegacyPath: setRow?.legacyPath ?? null,
       setSlug: setRow?.slug ?? "",
-      setAnchor: setRow?.legacyPath ? `${setRow.legacyPath}#track-${track.idx}` : null,
+      setHref: setRow ? `/sets/${setRow.slug}#track-${track.idx}` : null,
       sourceDeepLink: track.sourceDeepLink,
       timeRange: track.endFmt ? `${track.startFmt} - ${track.endFmt}` : track.startFmt,
       setTitle: setRow?.title ?? "Unknown Set",
@@ -599,7 +585,6 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
     return {
       id: setRow.id,
       slug: setRow.slug,
-      legacyPath: setRow.legacyPath,
       title: setRow.title,
       sourceUrl: setRow.sourceUrl,
       thumbnailUrl: resolveDirectSetImage(setRow),
@@ -625,7 +610,7 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
         startTimeFormatted: track.startFmt,
         confidence: track.conf,
         spotifyUrl: track.spotifyUrl,
-        trackHref: setRow.legacyPath ? `${setRow.legacyPath}#track-${track.idx}` : null,
+        trackHref: `/sets/${setRow.slug}#track-${track.idx}`,
         trackKey: buildTrackKey(track.artist, track.title),
       })),
     };
@@ -687,7 +672,6 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
   return {
     id: artistRecord.id,
     slug: artistRecord.slug,
-    legacyPath: artistRecord.legacyPath,
     name: artistRecord.name,
     imageUrl: artistRecord.imageUrl,
     heroImageUrl:
@@ -735,15 +719,6 @@ export const getArchiveArtistSummaryBySlug = async (slug: string) =>
     { tags: [ARCHIVE_TAGS.artist(slug)] },
   )();
 
-export const getArchiveArtistSummaryByLegacyPath = async (pagePath: string) => {
-  const resolution = await resolveLegacyArchivePath(pagePath);
-  if (!resolution || resolution.entityType !== "artist") {
-    return null;
-  }
-
-  return getArchiveArtistSummaryBySlug(resolution.slug);
-};
-
 const getHomeSummaryUncached = async ({
   page,
   pageSize,
@@ -764,7 +739,7 @@ const getHomeSummaryUncached = async ({
         .select({ count: countDistinct(artists.id) })
         .from(artists)
         .leftJoin(setArtists, eq(setArtists.artistId, artists.id))
-        .where(or(isNotNull(artists.legacyPath), isNotNull(setArtists.setId))),
+        .where(isNotNull(setArtists.setId)),
       db.select({ count: count(sets.id) }).from(sets),
       db.select({ count: count(setEntries.id) }).from(setEntries),
       db
@@ -777,14 +752,13 @@ const getHomeSummaryUncached = async ({
     .select({
       id: artists.id,
       slug: artists.slug,
-      legacyPath: artists.legacyPath,
       name: artists.name,
       imageUrl: artists.imageUrl,
       setCount: sql<number>`count(distinct ${setArtists.setId})`,
     })
     .from(artists)
     .leftJoin(setArtists, eq(setArtists.artistId, artists.id))
-    .where(or(isNotNull(artists.legacyPath), isNotNull(setArtists.setId)))
+    .where(isNotNull(setArtists.setId))
     .groupBy(artists.id)
     .orderBy(desc(sql`count(distinct ${setArtists.setId})`), asc(artists.name))
     .limit(18);
@@ -795,7 +769,6 @@ const getHomeSummaryUncached = async ({
         .select({
           artistId: setArtists.artistId,
           setTitle: sets.title,
-          setPath: sets.legacyPath,
           updatedAt: sets.updatedAt,
         })
         .from(setArtists)
@@ -804,18 +777,11 @@ const getHomeSummaryUncached = async ({
         .orderBy(desc(sets.updatedAt))
     : [];
 
-  const latestSetByArtist = new Map<
-    string,
-    {
-      setTitle: string;
-      setPath: string | null;
-    }
-  >();
+  const latestSetByArtist = new Map<string, { setTitle: string }>();
   for (const row of featuredArtistLatestSets) {
     if (!latestSetByArtist.has(row.artistId)) {
       latestSetByArtist.set(row.artistId, {
         setTitle: row.setTitle,
-        setPath: row.setPath,
       });
     }
   }
@@ -825,13 +791,11 @@ const getHomeSummaryUncached = async ({
     return {
       id: artist.id,
       slug: artist.slug,
-      legacyPath: artist.legacyPath,
       name: artist.name,
       imageUrl: artist.imageUrl,
       setCount: Number(artist.setCount ?? 0),
       recognizedTracks: 0,
       latestSetTitle: latestSet?.setTitle ?? null,
-      latestSetPath: latestSet?.setPath ?? null,
     };
   });
 
@@ -851,7 +815,6 @@ const getHomeSummaryUncached = async ({
     .select({
       id: sets.id,
       slug: sets.slug,
-      legacyPath: sets.legacyPath,
       title: sets.title,
       sourcePlatform: sets.sourcePlatform,
       sourceUrl: sets.sourceUrl,
@@ -887,7 +850,6 @@ const getHomeSummaryUncached = async ({
   const setLibrary: ArchiveHomeSetCard[] = setRows.map((row) => ({
     id: row.id,
     slug: row.slug,
-    legacyPath: row.legacyPath,
     title: row.title,
     artistName: row.artistName ?? null,
     sourceUrl: row.sourceUrl,
@@ -931,7 +893,6 @@ const getHomeConnectionsUncached = async (): Promise<ArchiveHomeConnectionsRespo
       artistId: artists.id,
       artistName: artists.name,
       artistSlug: artists.slug,
-      artistLegacyPath: artists.legacyPath,
       trackId: setEntries.trackId,
       displayArtist: setEntries.displayArtist,
       displayTitle: setEntries.displayTitle,
@@ -943,7 +904,7 @@ const getHomeConnectionsUncached = async (): Promise<ArchiveHomeConnectionsRespo
 
   const trackToArtists = new Map<
     string,
-    Map<string, { name: string; slug: string; legacyPath: string | null }>
+    Map<string, { name: string; slug: string }>
   >();
   for (const row of connectionRows) {
     const trackKey = buildTrackKey(row.displayArtist, row.displayTitle, row.trackId);
@@ -951,7 +912,6 @@ const getHomeConnectionsUncached = async (): Promise<ArchiveHomeConnectionsRespo
     bucket.set(row.artistId, {
       name: row.artistName,
       slug: row.artistSlug,
-      legacyPath: row.artistLegacyPath,
     });
     trackToArtists.set(trackKey, bucket);
   }
@@ -974,10 +934,8 @@ const getHomeConnectionsUncached = async (): Promise<ArchiveHomeConnectionsRespo
         connectionCounter.set(key, {
           artistA: artistA.name,
           artistASlug: artistA.slug,
-          artistALegacyPath: artistA.legacyPath,
           artistB: artistB.name,
           artistBSlug: artistB.slug,
-          artistBLegacyPath: artistB.legacyPath,
           sharedTracks: 1,
         });
       }
@@ -1018,52 +976,5 @@ export const getArchiveHomeConnections = async () =>
     ["archive-home-connections"],
     { tags: [ARCHIVE_TAGS.home, ARCHIVE_TAGS.connections] },
   )();
-
-export const resolveLegacyArchivePath = async (
-  pagePath: string,
-): Promise<ArchiveEntityResolution | null> => {
-  const normalizedPath = normalizeLegacyPath(pagePath);
-  const db = getDb();
-  const [[artistMatch], [setMatch]] = await Promise.all([
-    db
-      .select({
-        entityId: artists.id,
-        legacyPath: artists.legacyPath,
-        slug: artists.slug,
-      })
-      .from(artists)
-      .where(eq(artists.legacyPath, normalizedPath))
-      .limit(1),
-    db
-      .select({
-        entityId: sets.id,
-        legacyPath: sets.legacyPath,
-        slug: sets.slug,
-      })
-      .from(sets)
-      .where(eq(sets.legacyPath, normalizedPath))
-      .limit(1),
-  ]);
-
-  if (artistMatch?.legacyPath) {
-    return {
-      entityType: "artist",
-      entityId: artistMatch.entityId,
-      legacyPath: artistMatch.legacyPath,
-      slug: artistMatch.slug,
-    };
-  }
-
-  if (setMatch?.legacyPath) {
-    return {
-      entityType: "set",
-      entityId: setMatch.entityId,
-      legacyPath: setMatch.legacyPath,
-      slug: setMatch.slug,
-    };
-  }
-
-  return null;
-};
 
 export const archiveCacheTags = ARCHIVE_TAGS;
