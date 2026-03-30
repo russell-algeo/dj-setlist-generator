@@ -5,17 +5,9 @@ import {
   buildTrackKey,
   buildYouTubeThumbnail,
   normalizeArchiveConfidence,
-  normalizeLegacyPath,
 } from "./utils";
 
 describe("archive utils", () => {
-  it("normalizes legacy paths", () => {
-    expect(normalizeLegacyPath("Ben UFO/artist_summary.html")).toBe("/Ben UFO/artist_summary.html");
-    expect(normalizeLegacyPath("//Ben UFO///artist_summary.html")).toBe("/Ben UFO/artist_summary.html");
-    expect(normalizeLegacyPath("/Ben%20UFO/artist_summary.html")).toBe("/Ben UFO/artist_summary.html");
-    expect(normalizeLegacyPath("/Ben%2520UFO/artist_summary.html")).toBe("/Ben UFO/artist_summary.html");
-  });
-
   it("normalizes archive confidence values", () => {
     expect(normalizeArchiveConfidence("high")).toBe("HIGH");
     expect(normalizeArchiveConfidence("nope")).toBe("UNCERTAIN");

@@ -32,30 +32,6 @@ export const formatCompactDuration = (seconds: number | null | undefined) => {
   return `${minutes}m`;
 };
 
-export const normalizeLegacyPath = (value: string) => {
-  if (!value) {
-    return "/";
-  }
-
-  let decoded = value;
-
-  for (let idx = 0; idx < 4; idx += 1) {
-    try {
-      const next = decodeURI(decoded);
-      if (next === decoded) {
-        break;
-      }
-      decoded = next;
-    } catch {
-      break;
-    }
-  }
-
-  const prefixed = decoded.startsWith("/") ? decoded : `/${decoded}`;
-  const trimmed = prefixed.replace(/\/{2,}/gu, "/");
-  return trimmed === "" ? "/" : trimmed;
-};
-
 export const normalizeSearchText = (value: string) =>
   value
     .normalize("NFKD")
