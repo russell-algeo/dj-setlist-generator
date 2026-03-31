@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { assertAllowlisted, getRequestActor } from "@/lib/auth/session";
+import { getRequestActor } from "@/lib/auth/session";
 import { isJsonRequest, readRequestBody } from "@/lib/http/request-body";
 import { createSubmission, parseSubmissionInput } from "@/lib/jobs/submissions";
 import { dispatchPendingWork } from "@/lib/jobs/dispatch";
@@ -20,9 +20,11 @@ const parseSourceUrls = (value: FormDataEntryValue | FormDataEntryValue[] | unde
 
 export async function POST(request: Request) {
   const actor = await getRequestActor(request);
-  const denial = assertAllowlisted(actor);
-  if (denial) {
-    return denial;
+  if (!actor) {
+    return new Response(JSON.stringify({ error: "Authentication required" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
   }
 
   const body = await readRequestBody(request);
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
     maxSetsOverride: body.maxSetsOverride ? Number(body.maxSetsOverride) : undefined,
   });
 
-  const { submission, warnings } = await createSubmission(actor!, input);
+  const { submission, warnings } = await createSubmission(actor, input);
   await dispatchPendingWork();
 
   if (isJsonRequest(request) || actor?.authType === "api_token") {

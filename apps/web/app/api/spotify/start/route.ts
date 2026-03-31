@@ -3,15 +3,11 @@ import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { assertAllowlisted, requireSessionActor } from "@/lib/auth/session";
+import { requireSessionActor } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 
 export async function GET(request: Request) {
-  const actor = await requireSessionActor("/dashboard/settings");
-  const denial = assertAllowlisted(actor);
-  if (denial) {
-    return denial;
-  }
+  await requireSessionActor("/api/spotify/start");
 
   if (!env.spotifyClientId || !env.spotifyRedirectUri) {
     return NextResponse.json({ error: "Spotify OAuth is not configured yet" }, { status: 503 });
