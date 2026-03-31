@@ -4,6 +4,15 @@ import { requireSessionActor } from "@/lib/auth/session";
 import { formatTimestamp } from "@/lib/format";
 import { listSubmissionsForActor } from "@/lib/jobs/submissions";
 
+type SubmissionRow = {
+  id: string;
+  mode: string;
+  status: string;
+  artistName: string | null;
+  sourceUrl: string | null;
+  createdAt: Date;
+};
+
 type SubmissionsPageProps = {
   searchParams: Promise<{ status?: string }>;
 };
@@ -27,7 +36,7 @@ export default async function SubmissionsPage({ searchParams }: SubmissionsPageP
   const actor = await requireSessionActor("/submissions");
   const { status: filterStatus } = await searchParams;
 
-  const allSubmissions = await listSubmissionsForActor(actor);
+  const allSubmissions = await listSubmissionsForActor(actor) as unknown as SubmissionRow[];
 
   const submissions =
     !filterStatus || filterStatus === "all"

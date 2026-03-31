@@ -11,6 +11,30 @@ type DetailPageProps = {
   params: Promise<{ submissionId: string }>;
 };
 
+type SubmissionDetail = {
+  submission: {
+    id: string;
+    artistName: string | null;
+    sourceUrl: string | null;
+    mode: string;
+    status: string;
+    createdAt: Date;
+  };
+  runs: Array<{
+    id: string;
+    status: string;
+    setTitle: string | null;
+    sourceUrl: string | null;
+    sourcePlatform: string | null;
+    stage: string | null;
+    errorSummary: string | null;
+    publishedSetId: string | null;
+    attemptCount: number;
+    updatedAt: Date;
+    segmentHitRollup: { hitCount: number; recognizedCount: number } | null;
+  }>;
+};
+
 const MODE_LABEL: Record<string, string> = {
   url: "Single Set URL",
   artist: "Artist Discovery",
@@ -33,7 +57,7 @@ export default async function SubmissionDetailPage({ params }: DetailPageProps) 
   const hasAccess = await canAccessSubmission(actor, submissionId);
   if (!hasAccess) notFound();
 
-  const detail = await getSubmissionDetail(submissionId);
+  const detail = await getSubmissionDetail(submissionId) as unknown as SubmissionDetail | null;
   if (!detail) notFound();
 
   const { submission, runs } = detail;

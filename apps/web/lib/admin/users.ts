@@ -8,8 +8,37 @@ import type { SessionActor } from "@/lib/auth/session";
 
 const db = getDb();
 
-export const listUsers = async () => {
-  return db.select().from(userProfiles).orderBy(asc(userProfiles.email));
+// Workaround: drizzle-orm version mismatch between monorepo root and worktree causes
+// column type inference failures. Cast tables to any to bypass incompatible overloads.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const UP = userProfiles as any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const S = submissions as any;
+
+export type UserRow = {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  isAllowlisted: boolean;
+  isAdmin: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type SubmissionWithUserRow = {
+  id: string;
+  mode: string;
+  status: string;
+  artistName: string | null;
+  sourceUrl: string | null;
+  createdAt: Date;
+  userEmail: string;
+  userDisplayName: string | null;
+};
+
+export const listUsers = async (): Promise<UserRow[]> => {
+  const rows = await db.select().from(UP).orderBy(asc(UP.email));
+  return rows as unknown as UserRow[];
 };
 
 export const resolveViewAsActor = async (
@@ -18,11 +47,8 @@ export const resolveViewAsActor = async (
 ): Promise<SessionActor | null> => {
   if (!viewAsUserId || !sessionActor.isAdmin) return null;
 
-  const [profile] = await db
-    .select()
-    .from(userProfiles)
-    .where(eq(userProfiles.userId, viewAsUserId))
-    .limit(1);
+  const rows = await db.select().from(UP).where(eq(UP.userId, viewAsUserId)).limit(1);
+  const profile = (rows as unknown as UserRow[])[0];
 
   if (!profile) return null;
 
@@ -36,32 +62,33 @@ export const resolveViewAsActor = async (
   };
 };
 
-export const listAllSubmissionsWithUser = async () => {
-  return db
+export const listAllSubmissionsWithUser = async (): Promise<SubmissionWithUserRow[]> => {
+  const rows = await db
     .select({
-      id: submissions.id,
-      mode: submissions.mode,
-      status: submissions.status,
-      artistName: submissions.artistName,
-      sourceUrl: submissions.sourceUrl,
-      createdAt: submissions.createdAt,
-      userEmail: userProfiles.email,
-      userDisplayName: userProfiles.displayName,
+      id: S.id,
+      mode: S.mode,
+      status: S.status,
+      artistName: S.artistName,
+      sourceUrl: S.sourceUrl,
+      createdAt: S.createdAt,
+      userEmail: UP.email,
+      userDisplayName: UP.displayName,
     })
-    .from(submissions)
-    .innerJoin(userProfiles, eq(userProfiles.userId, submissions.requestedBy))
-    .orderBy(desc(submissions.createdAt))
+    .from(S)
+    .innerJoin(UP, eq(UP.userId, S.requestedBy))
+    .orderBy(desc(S.createdAt))
     .limit(200);
+  return rows as unknown as SubmissionWithUserRow[];
 };
 
 export const updateUserProfile = async (
   userId: string,
   updates: { isAllowlisted?: boolean; isAdmin?: boolean },
 ) => {
-  const [updated] = await db
-    .update(userProfiles)
+  const rows = await db
+    .update(UP)
     .set({ ...updates, updatedAt: new Date() })
-    .where(eq(userProfiles.userId, userId))
+    .where(eq(UP.userId, userId))
     .returning();
-  return updated ?? null;
+  return (rows as unknown as UserRow[])[0] ?? null;
 };

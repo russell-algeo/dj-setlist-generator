@@ -9,7 +9,10 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const connection = await getSpotifyConnectionForUser(actor.userId);
+  const connection = await getSpotifyConnectionForUser(actor.userId) as {
+    refreshTokenCiphertext: string | null;
+    revokedAt: Date | null;
+  } | null;
   const spotifyConnected = Boolean(
     connection && connection.refreshTokenCiphertext && !connection.revokedAt,
   );

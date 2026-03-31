@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { requireSessionActor } from "@/lib/auth/session";
 import { formatTimestamp } from "@/lib/format";
-import { listAllSubmissionsWithUser, listUsers } from "@/lib/admin/users";
+import { listAllSubmissionsWithUser, listUsers, type SubmissionWithUserRow, type UserRow } from "@/lib/admin/users";
 
 type AdminPageProps = {
   searchParams: Promise<{ tab?: string }>;
@@ -33,7 +33,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
   const { tab = "users" } = await searchParams;
 
-  const [users, allSubmissions] = await Promise.all([
+  const [users, allSubmissions]: [UserRow[], SubmissionWithUserRow[]] = await Promise.all([
     listUsers(),
     listAllSubmissionsWithUser(),
   ]);
