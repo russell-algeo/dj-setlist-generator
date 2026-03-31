@@ -1,9 +1,9 @@
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
-import { userProfiles } from "@/lib/db/schema";
+import { submissions, userProfiles } from "@/lib/db/schema";
 import type { SessionActor } from "@/lib/auth/session";
 
 const db = getDb();
@@ -34,6 +34,24 @@ export const resolveViewAsActor = async (
     isAllowlisted: profile.isAllowlisted,
     isAdmin: profile.isAdmin,
   };
+};
+
+export const listAllSubmissionsWithUser = async () => {
+  return db
+    .select({
+      id: submissions.id,
+      mode: submissions.mode,
+      status: submissions.status,
+      artistName: submissions.artistName,
+      sourceUrl: submissions.sourceUrl,
+      createdAt: submissions.createdAt,
+      userEmail: userProfiles.email,
+      userDisplayName: userProfiles.displayName,
+    })
+    .from(submissions)
+    .innerJoin(userProfiles, eq(userProfiles.userId, submissions.requestedBy))
+    .orderBy(desc(submissions.createdAt))
+    .limit(200);
 };
 
 export const updateUserProfile = async (
