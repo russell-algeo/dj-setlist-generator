@@ -8,6 +8,9 @@
 # Superpowers brainstorm sessions
 .superpowers/
 
+# Git worktrees
+.worktrees/
+
 # Environment variables (contains API credentials)
 .env
 
