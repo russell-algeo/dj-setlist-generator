@@ -1,0 +1,52 @@
+.toggle {
+  display: flex;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.option {
+  padding: 5px 12px;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+  user-select: none;
+  background: none;
+  border: none;
+}
+
+.option:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.option.active {
+  background: #fff;
+  color: #000;
+}
+
+.option.disabled {
+  color: rgba(255, 255, 255, 0.15);
+  cursor: default;
+  position: relative;
+}
+
+.tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #aaa;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  white-space: nowrap;
+  z-index: 200;
+  pointer-events: none;
+}
