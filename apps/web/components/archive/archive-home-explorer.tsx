@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { buildArtistHref, buildSetHref } from "@/components/archive/archive-hrefs";
+import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { ARCHIVE_HOME_EXPLORER_CSS } from "@/components/archive/archive-home-explorer.styles";
 import type {
@@ -1332,14 +1333,13 @@ export function ArchiveHomeExplorer({
       <style dangerouslySetInnerHTML={{ __html: ARCHIVE_HOME_EXPLORER_CSS }} />
       <ArchiveScrollRoot />
       <div className="shell archive-home-native">
-        <header className="topbar">
-          <div className="logo">[SET SIGNAL ARCHIVE]</div>
-          <nav className="topnav">
-            <a href="#artists">Artist Atlas</a>
-            <a href="#network">Artist Network</a>
-            <a href="#sets">Set Library</a>
-          </nav>
-        </header>
+        <ArchiveHeader
+          navLinks={[
+            { label: "Artist Atlas", href: "#artists" },
+            { label: "Artist Network", href: "#network" },
+            { label: "Set Library", href: "#sets" },
+          ]}
+        />
 
         <section className="hero reveal" id="top">
           <div className="section-inner">

@@ -3,6 +3,7 @@
 
 import { startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
 
+import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import type {
   ArchiveConfidence,
@@ -1450,20 +1451,15 @@ export function ArchiveSetExplorer({
       data-yt-embed-blocked={ytEmbedBlocked ? "true" : undefined}
     >
       <ArchiveScrollRoot />
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">[SET SIGNAL ARCHIVE]</div>
-          <div className="topbar-right">
-            <nav className="topnav">
-              <a href="#overview">Overview</a>
-              <a href="#workspace">Playback</a>
-              <a href="#timeline">Timeline</a>
-              <a href="#journey">Journey</a>
-              <a href="#tracks">Track Atlas</a>
-            </nav>
-          </div>
-        </div>
-      </header>
+      <ArchiveHeader
+        navLinks={[
+          { label: "Overview", href: "#overview" },
+          { label: "Playback", href: "#workspace" },
+          { label: "Timeline", href: "#timeline" },
+          { label: "Journey", href: "#journey" },
+          { label: "Track Atlas", href: "#tracks" },
+        ]}
+      />
 
       <main className="shell detail-shell">
         <section className="section" id="overview">

@@ -4,6 +4,7 @@
 import { startTransition, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 
 import { buildSetHref } from "@/components/archive/archive-hrefs";
+import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import type {
   ArchiveArtistAtlasTrack,
@@ -904,18 +905,15 @@ export function ArchiveArtistExplorer({
   return (
     <div className={styles.root}>
       <ArchiveScrollRoot />
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">[SET SIGNAL ARCHIVE]</div>
-          <nav className="topnav">
-            <a href="#overview">Overview</a>
-            <a href="#recurring-section">Recurring</a>
-            <a href="#set-atlas-section">Set Atlas</a>
-            <a href="#sets-section">Set Explorer</a>
-            <a href="#status-section">Status</a>
-          </nav>
-        </div>
-      </header>
+      <ArchiveHeader
+        navLinks={[
+          { label: "Overview", href: "#overview" },
+          { label: "Recurring", href: "#recurring-section" },
+          { label: "Set Atlas", href: "#set-atlas-section" },
+          { label: "Set Explorer", href: "#sets-section" },
+          { label: "Status", href: "#status-section" },
+        ]}
+      />
 
       <main className="shell">
         <section className="section" id="overview">
