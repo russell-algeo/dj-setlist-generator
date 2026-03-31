@@ -1,0 +1,148 @@
+.container {
+  position: relative;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: none;
+  border-radius: 4px;
+  color: #000;
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 5px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #333;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  background: #0f0f0f;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  z-index: 300;
+  overflow: hidden;
+}
+
+.userRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1c1c1c;
+}
+
+.avatarLg {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-family: "Space Mono", monospace;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.userName {
+  color: #ddd;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.userEmail {
+  color: #555;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.badge {
+  display: inline-block;
+  background: #1a1a1a;
+  border: 1px solid #554400;
+  border-radius: 3px;
+  color: #998800;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  padding: 2px 5px;
+  margin-left: 6px;
+  text-transform: uppercase;
+  font-family: "Space Mono", monospace;
+}
+
+.menuRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 16px;
+  border-top: 1px solid #111;
+}
+
+.menuLabel {
+  color: #888;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.menuAction {
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #555;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  padding: 3px 8px;
+  text-transform: uppercase;
+  background: none;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.menuAction:hover {
+  color: #aaa;
+  border-color: #555;
+}
+
+.menuActionGreen {
+  composes: menuAction;
+  color: #3a8a3a;
+  border-color: #2a4a2a;
+}
+
+.menuActionGreenActive {
+  composes: menuAction;
+  color: #3a7a3a;
+  border-color: #1a3a1a;
+  background: #0d1f0d;
+}
+
+.menuActionDanger {
+  composes: menuAction;
+  color: #8a3a3a;
+  border-color: #4a1a1a;
+}
