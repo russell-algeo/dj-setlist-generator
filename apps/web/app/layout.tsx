@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Manrope, Space_Mono } from "next/font/google";
 
+import { Providers } from "@/components/providers";
 import { env } from "@/lib/env";
 import { socialPreview } from "@/lib/social-preview";
 
@@ -68,7 +69,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${manrope.variable} ${spaceMono.variable}`}>{children}</body>
+      <body className={`${manrope.variable} ${spaceMono.variable}`}>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
