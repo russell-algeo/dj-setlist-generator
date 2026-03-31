@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { ArchiveHomeExplorer } from "@/components/archive/archive-home-explorer";
+import { getSessionActor } from "@/lib/auth/session";
 import { getArchiveHomeExplorerInitial } from "@/lib/archive/home-explorer-data";
 import { buildArchiveMetadata } from "@/lib/archive/metadata";
 
@@ -23,6 +24,9 @@ export async function generateMetadata({
 
 export default async function HomePage({ searchParams }: HomePageProps) {
   const resolvedSearchParams = await searchParams;
+
+  const actor = resolvedSearchParams.scope === "mine" ? await getSessionActor() : null;
+
   const payload = await getArchiveHomeExplorerInitial({
     artistFilter: resolvedSearchParams.artist,
     compareMode:
@@ -42,6 +46,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       resolvedSearchParams.sort === "default"
         ? resolvedSearchParams.sort
         : "default",
+    userId: actor?.userId,
   });
 
   return <ArchiveHomeExplorer initial={payload} />;

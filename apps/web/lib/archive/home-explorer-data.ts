@@ -904,11 +904,13 @@ const getArchiveHomeSetLibraryPayloadUncached = async ({
   page = 1,
   query = "",
   sort = "default",
+  userId,
 }: {
   artistFilter?: string;
   page?: number;
   query?: string;
   sort?: ArchiveHomeSetSort;
+  userId?: string;
 }): Promise<ArchiveHomeSetLibraryPagePayload> => {
   const db = getDb();
   const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
@@ -926,7 +928,10 @@ const getArchiveHomeSetLibraryPayloadUncached = async ({
         OR COALESCE(track_search_text, '') ILIKE ${`%${safeQuery}%`}
       )`
     : sql`true`;
-  const whereClause = sql`${artistClause} AND ${queryClause}`;
+  const userClause = userId
+    ? sql`set_id IN (SELECT published_set_id FROM "ops"."set_runs" WHERE requested_by = ${userId} AND published_set_id IS NOT NULL)`
+    : sql`true`;
+  const whereClause = sql`${artistClause} AND ${queryClause} AND ${userClause}`;
   const orderByClause = orderByForSetSort(sort);
   const countResult = await db.execute(sql<{ totalItems: number | string }>`
     SELECT count(*)::int AS "totalItems"
@@ -979,13 +984,19 @@ export const getArchiveHomeSetLibraryPayload = async ({
   page = 1,
   query = "",
   sort = "default",
+  userId,
 }: {
   artistFilter?: string;
   page?: number;
   query?: string;
   sort?: ArchiveHomeSetSort;
-} = {}) =>
-  unstable_cache(
+  userId?: string;
+} = {}) => {
+  // Bypass cache for user-scoped queries
+  if (userId) {
+    return getArchiveHomeSetLibraryPayloadUncached({ artistFilter, page, query, sort, userId });
+  }
+  return unstable_cache(
     async () =>
       getArchiveHomeSetLibraryPayloadUncached({
         artistFilter,
@@ -996,6 +1007,7 @@ export const getArchiveHomeSetLibraryPayload = async ({
     ["archive-home-set-library-v1", artistFilter, String(page), query, sort],
     { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
   )();
+};
 
 const getArchiveHomeSetTracklistPayloadUncached = async (
   slug: string,
@@ -1092,6 +1104,7 @@ export const getArchiveHomeExplorerInitial = async ({
   query = "",
   selectedArtistSlugs,
   sort = "default",
+  userId,
 }: {
   artistFilter?: string;
   compareMode?: ArchiveHomeCompareMode;
@@ -1099,6 +1112,7 @@ export const getArchiveHomeExplorerInitial = async ({
   query?: string;
   selectedArtistSlugs?: string[];
   sort?: ArchiveHomeSetSort;
+  userId?: string;
 } = {}): Promise<ArchiveHomeBootstrapPayload> => {
   noStore();
 
@@ -1112,6 +1126,7 @@ export const getArchiveHomeExplorerInitial = async ({
         page,
         query,
         sort,
+        userId,
       }),
       getHeroSetCandidates(),
     ]);
