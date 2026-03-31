@@ -5,6 +5,9 @@
 # Claude Code local settings
 .claude/
 
+# Superpowers brainstorm sessions
+.superpowers/
+
 # Environment variables (contains API credentials)
 .env
 
@@ -22,6 +25,7 @@ node_modules/
 dist/
 coverage/
 apps/web/.next/
+apps/web/.next.stale*/
 apps/web/.env.local
 apps/web/.env.*.local
 
@@ -55,3 +59,4 @@ skills-lock.json
 
 docs/
 .vercel
+tmp/
