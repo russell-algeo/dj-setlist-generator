@@ -1,0 +1,161 @@
+.wrap {
+  display: contents;
+}
+
+.sectionHeadRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.trigger {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 7px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-transform: uppercase;
+  transition: border-color 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+
+.trigger:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.panel {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #1c1c1c;
+  border-radius: 6px;
+  padding: 18px;
+  margin-top: 14px;
+}
+
+.panelTitle {
+  color: rgba(255, 255, 255, 0.3);
+  font-family: "Space Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+}
+
+.modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.modesOne {
+  display: block;
+}
+
+.modeCard {
+  background: #0d0d0d;
+  border: 1px solid #1c1c1c;
+  border-radius: 5px;
+  padding: 14px;
+}
+
+.modeTitle {
+  color: #ccc;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  display: block;
+  margin-bottom: 3px;
+}
+
+.modeDesc {
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 10px;
+  line-height: 1.4;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 4px;
+  color: #aaa;
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+}
+
+.input::placeholder {
+  color: #333;
+}
+
+.inputPrefilled {
+  composes: input;
+  color: rgba(255, 255, 255, 0.25);
+  background: #0a0a0a;
+  border-color: #1a1a1a;
+}
+
+.textarea {
+  composes: input;
+  height: 52px;
+  resize: none;
+}
+
+.btnRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.submitBtn {
+  background: #fff;
+  color: #000;
+  border: none;
+  border-radius: 4px;
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 6px 16px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.submitBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cancelBtn {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 10px;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.singleRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.singleInput {
+  composes: input;
+  flex: 1;
+  margin: 0;
+}
+
+.error {
+  color: #8a3a3a;
+  font-size: 10px;
+  margin-top: 6px;
+}

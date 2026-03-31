@@ -6,6 +6,7 @@ import { startTransition, useDeferredValue, useEffect, useRef, useState, type CS
 import { buildSetHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
 import type {
   ArchiveArtistAtlasTrack,
   ArchiveArtistSet,
@@ -1729,9 +1730,12 @@ export function ArchiveArtistExplorer({
 
         <section className="section" id="sets-section">
           <div className="section-inner">
-            <div className="section-head">
-              <h2>Set Explorer</h2>
-              <p>Search and compare sets, then inspect shared tracks through expanded tracklists and deep links.</p>
+            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h2>Set Explorer</h2>
+                <p>Search and compare sets, then inspect shared tracks through expanded tracklists and deep links.</p>
+              </div>
+              <InlineSubmitButton mode="add-sets" artistName={artist.name} />
             </div>
 
             <div className="set-panel">

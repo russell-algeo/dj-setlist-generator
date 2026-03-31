@@ -14,6 +14,7 @@ import {
 import { buildArtistHref, buildSetHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
 import { ARCHIVE_HOME_EXPLORER_CSS } from "@/components/archive/archive-home-explorer.styles";
 import type {
   ArchiveHomeAtlasSelectionPayload,
@@ -1423,9 +1424,12 @@ export function ArchiveHomeExplorer({
 
         <section className="section reveal" id="artists">
           <div className="section-inner">
-            <div className="section-head">
-              <h2>ARTIST ATLAS</h2>
-              <p>Select artists to compare and drill into the right-side taxonomy atlas for evidence.</p>
+            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h2>ARTIST ATLAS</h2>
+                <p>Select artists to compare and drill into the right-side taxonomy atlas for evidence.</p>
+              </div>
+              <InlineSubmitButton mode="scan-artist" />
             </div>
 
             <div className="atlas-layout">
@@ -2240,11 +2244,14 @@ export function ArchiveHomeExplorer({
 
         <section className="section reveal" id="sets">
           <div className="section-inner">
-            <div className="section-head">
-              <h2>FULL SET LIBRARY</h2>
-              <p>
-                Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
-              </p>
+            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h2>FULL SET LIBRARY</h2>
+                <p>
+                  Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
+                </p>
+              </div>
+              <InlineSubmitButton mode="submit-set" />
             </div>
 
             <div className="set-panel">
