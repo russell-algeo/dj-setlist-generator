@@ -36,15 +36,15 @@ export function ScopeToggle() {
   };
 
   return (
-    <div className={styles.toggle}>
-      <button
-        className={`${styles.option} ${!isWorkspace ? styles.active : ""}`}
-        onClick={() => router.push(buildHref("global"))}
-        type="button"
-      >
-        Global
-      </button>
-      <div style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
+      <div className={styles.toggle}>
+        <button
+          className={`${styles.option} ${!isWorkspace ? styles.active : ""}`}
+          onClick={() => router.push(buildHref("global"))}
+          type="button"
+        >
+          Global
+        </button>
         <button
           className={`${styles.option} ${isWorkspace ? styles.active : ""} ${!isAuthenticated ? styles.disabled : ""}`}
           onClick={handleWorkspaceClick}
@@ -54,10 +54,10 @@ export function ScopeToggle() {
         >
           My Workspace
         </button>
-        {tooltipVisible && !isAuthenticated && (
-          <div className={styles.tooltip}>You must log in to use My Workspace</div>
-        )}
       </div>
+      {tooltipVisible && !isAuthenticated && (
+        <div className={styles.tooltip}>You must log in to use My Workspace</div>
+      )}
     </div>
   );
 }
