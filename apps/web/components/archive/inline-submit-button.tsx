@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 
 import styles from "./inline-submit-button.module.css";
 
@@ -33,9 +33,9 @@ async function postSubmission(body: Record<string, string>): Promise<{ submissio
 }
 
 const LABEL: Record<InlineSubmitMode, string> = {
-  "scan-artist": "+ Scan New Artist",
-  "submit-set": "+ Submit New Set",
-  "add-sets": "+ Add Sets",
+  "scan-artist": "+ scan new artist",
+  "submit-set": "+ scan new set",
+  "add-sets": "+ scan new set",
 };
 
 const TITLE: Record<InlineSubmitMode, string> = {
@@ -54,8 +54,6 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
   const [singleUrl, setSingleUrl] = useState("");
   const [state, setState] = useState<SubmitState>({ status: "idle" });
 
-  if (!session?.user) return null;
-
   const handleSubmit = async (payload: Record<string, string>) => {
     setState({ status: "submitting" });
     try {
@@ -73,7 +71,7 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
     <div className={styles.wrap}>
       <button
         className={styles.trigger}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { if (!session?.user) { void signIn(); } else { setOpen((v) => !v); } }}
         type="button"
       >
         {LABEL[mode]}
