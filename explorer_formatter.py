@@ -4554,6 +4554,7 @@ def _render_html(data: dict) -> str:
         if (action === 'set-page') {
           STATE.setPage += Number(actionEl.dataset.delta || 0);
           renderSetLibrary();
+          $('setGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
           return;
         }
       });

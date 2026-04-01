@@ -2970,7 +2970,7 @@ def save_artist_explorer_html(
     if (setSortSelect) setSortSelect.value = setSort;
     setNoResults.style.display = rows.length ? 'none' : 'block';
     setPager.innerHTML = rows.length
-      ? `<button data-delta="-1" ${setPage <= 0 ? 'disabled' : ''}>Prev</button><span class="info">Page ${setPage + 1} / ${totalPages} | ${fmt(rows.length)} sets</span><button data-delta="1" ${setPage >= totalPages - 1 ? 'disabled' : ''}>Next</button>`
+      ? `<button data-action="set-page" data-delta="-1" ${setPage <= 0 ? 'disabled' : ''}>Prev</button><span class="info">Page ${setPage + 1} / ${totalPages} | ${fmt(rows.length)} sets</span><button data-action="set-page" data-delta="1" ${setPage >= totalPages - 1 ? 'disabled' : ''}>Next</button>`
       : '';
     syncSetTracklists();
     renderSetCompare();
@@ -2991,14 +2991,6 @@ def save_artist_explorer_html(
     });
   }
 
-  if (setPager) {
-    setPager.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button[data-delta]');
-      if (!btn) return;
-      setPage += Number(btn.dataset.delta || 0);
-      applySetFilters();
-    });
-  }
 
   if (clearSetCompareBtn) {
     clearSetCompareBtn.addEventListener('click', () => {
@@ -3924,6 +3916,13 @@ def save_artist_explorer_html(
         const conf = String(actionEl.dataset.conf || 'all').toUpperCase();
         atlasTrackConf = conf === 'ALL' ? 'all' : (CONF_FILTER_LEVELS.includes(conf) ? conf : 'all');
         renderSetAtlas();
+        return;
+      }
+
+      if (action === 'set-page') {
+        setPage += Number(actionEl.dataset.delta || 0);
+        applySetFilters();
+        setGrid.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
 
