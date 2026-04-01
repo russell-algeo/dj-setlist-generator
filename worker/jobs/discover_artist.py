@@ -8,7 +8,7 @@ import requests
 from checkpoint_manager import ArtistManager
 from config import Config
 from worker.config import get_settings
-from worker.db import execute, fetch_one, insert_worker_event, json_value, mark_submission
+from worker.db import execute, fetch_one, finalize_submission_from_runs, insert_worker_event, json_value, mark_submission
 from worker.providers.ytdlp import DjSetDiscoverer
 
 
@@ -104,29 +104,43 @@ def run(submission_id: str) -> None:
                   submission_id,
                   requested_by,
                   status,
+                  stage,
                   source_url,
                   source_platform,
                   set_title,
                   create_playlist,
-                  source_metadata
+                  source_metadata,
+                  published_set_id,
+                  completed_at
                 )
                 select
                   s.id,
                   s.requested_by,
-                  'queued',
+                  case when pub.published_set_id is not null then 'completed' else 'queued' end,
+                  case when pub.published_set_id is not null then 'deduped' else null end,
                   %s,
                   %s,
                   %s,
                   s.create_playlist,
-                  %s
+                  %s,
+                  pub.published_set_id,
+                  case when pub.published_set_id is not null then now() else null end
                 from ops.submissions s
+                left join lateral (
+                  select published_set_id
+                  from ops.set_runs pub
+                  where pub.source_url = %s
+                    and pub.status = 'completed'
+                    and pub.published_set_id is not null
+                  limit 1
+                ) pub on true
                 where s.id = %s
-                and not exists (
-                  select 1
-                  from ops.set_runs existing
-                  where existing.submission_id = s.id
-                    and existing.source_url = %s
-                )
+                  and not exists (
+                    select 1
+                    from ops.set_runs existing
+                    where existing.submission_id = s.id
+                      and existing.source_url = %s
+                  )
                 """,
                 (
                     candidate.url,
@@ -139,6 +153,7 @@ def run(submission_id: str) -> None:
                             "duration_minutes": candidate.duration_minutes,
                         }
                     ),
+                    candidate.url,
                     submission_id,
                     candidate.url,
                 ),
@@ -150,8 +165,22 @@ def run(submission_id: str) -> None:
             message=f"Queued {len(sets)} discovered sets",
             details={"set_count": len(sets)},
         )
-        mark_submission(submission_id, status="running")
-        _dispatch_pending()
+
+        # If all discovered sets were deduped (already published), finalise the submission
+        # immediately — no worker will complete runs to trigger this otherwise.
+        queued_count = fetch_one(
+            """
+            select count(*) as count
+            from ops.set_runs
+            where submission_id = %s and status = 'queued'
+            """,
+            (submission_id,),
+        )
+        if not queued_count or int(queued_count.get("count") or 0) == 0:
+            finalize_submission_from_runs(submission_id)
+        else:
+            mark_submission(submission_id, status="running")
+            _dispatch_pending()
     except Exception as exc:
         mark_submission(submission_id, status="failed", error_summary=str(exc))
         insert_worker_event(

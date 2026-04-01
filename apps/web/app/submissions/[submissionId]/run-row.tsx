@@ -25,6 +25,8 @@ const STATUS_COLOR: Record<string, string> = {
   claimed: "#7a7a3a",
 };
 
+const PUBLISHED_WITH_ERRORS_STAGES = new Set(["published_with_errors"]);
+
 export function RunRow({
   id,
   title,
@@ -75,7 +77,19 @@ export function RunRow({
             ))}
           </div>
 
-          {errorSummary && (
+          {stage && PUBLISHED_WITH_ERRORS_STAGES.has(stage) && (
+            <div style={{ background: "#0f0d08", border: "1px solid #4a3a10", borderRadius: 4, padding: "10px 12px", marginBottom: 10 }}>
+              <div style={{ color: "#9a7a20", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Published with errors</div>
+              <div style={{ color: "#7a6a40", fontSize: 10, lineHeight: 1.6 }}>
+                Set data is visible in the archive, but post-publish steps (such as Spotify playlist creation or cache refresh) did not complete. Re-running this submission is recommended to finish the remaining steps.
+              </div>
+              {errorSummary && (
+                <div style={{ color: "#6a5a30", fontSize: 9, marginTop: 8, fontFamily: "monospace" }}>{errorSummary}</div>
+              )}
+            </div>
+          )}
+
+          {!PUBLISHED_WITH_ERRORS_STAGES.has(stage ?? "") && errorSummary && (
             <div style={{ background: "#120a0a", border: "1px solid #3a1a1a", borderRadius: 4, padding: "10px 12px" }}>
               <div style={{ color: "#8a3a3a", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Error</div>
               <div style={{ color: "#6a4a4a", fontSize: 10, lineHeight: 1.6 }}>{errorSummary}</div>

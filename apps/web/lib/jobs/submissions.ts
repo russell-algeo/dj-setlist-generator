@@ -180,23 +180,54 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
   });
 
   if (input.mode === "url" || input.mode === "curated_artist") {
-    const runs = normalizedUrls.map((sourceUrl) => ({
-      submissionId: submission.id,
-      requestedBy: actor.userId,
-      status: "queued",
-      sourceUrl,
-      sourcePlatform: sourceUrl.includes("soundcloud.com")
-        ? "soundcloud"
-        : sourceUrl.includes("youtu")
-          ? "youtube"
-          : "unknown",
-      setTitle: null,
-      createPlaylist: effectiveCreatePlaylist,
-      sourceMetadata: {},
-    }));
+    // Dedup: find URLs already published in a completed run so we don't re-process them.
+    const dedupedByUrl = new Map<string, string>(); // sourceUrl → publishedSetId
+    const existingCompleted = await db
+      .select({ sourceUrl: setRuns.sourceUrl, publishedSetId: setRuns.publishedSetId })
+      .from(setRuns)
+      .where(
+        and(
+          inArray(setRuns.sourceUrl, normalizedUrls),
+          eq(setRuns.status, "completed"),
+          isNotNull(setRuns.publishedSetId),
+        ),
+      );
+    for (const row of existingCompleted) {
+      if (row.sourceUrl && row.publishedSetId && !dedupedByUrl.has(row.sourceUrl)) {
+        dedupedByUrl.set(row.sourceUrl, row.publishedSetId);
+      }
+    }
+
+    const now = new Date();
+    const runs = normalizedUrls.map((sourceUrl) => {
+      const existingPublishedSetId = dedupedByUrl.get(sourceUrl) ?? null;
+      return {
+        submissionId: submission.id,
+        requestedBy: actor.userId,
+        status: existingPublishedSetId ? "completed" : "queued",
+        stage: existingPublishedSetId ? "deduped" : null,
+        sourceUrl,
+        sourcePlatform: sourceUrl.includes("soundcloud.com")
+          ? "soundcloud"
+          : sourceUrl.includes("youtu")
+            ? "youtube"
+            : "unknown",
+        setTitle: null,
+        createPlaylist: effectiveCreatePlaylist,
+        sourceMetadata: {},
+        publishedSetId: existingPublishedSetId,
+        completedAt: existingPublishedSetId ? now : null,
+      };
+    });
 
     if (runs.length > 0) {
       await db.insert(setRuns).values(runs);
+    }
+
+    // If any runs were deduped, sync submission status immediately so it doesn't
+    // stay stuck as "queued" when all its runs are already completed.
+    if (dedupedByUrl.size > 0) {
+      await syncSubmissionStatusFromRuns(submission.id);
     }
   }
 

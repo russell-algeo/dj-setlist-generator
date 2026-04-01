@@ -163,20 +163,28 @@ function CuratedForm({ onClose }: { onClose: () => void }) {
 export function SubmitPanel() {
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
 
-  if (!session?.user) return null;
+  const isAuthenticated = Boolean(session?.user);
 
   return (
     <>
-      <button
-        className={`${styles.trigger} ${open ? styles.open : ""}`}
-        onClick={() => setOpen((v) => !v)}
-        type="button"
-      >
-        + Submit {open ? "▴" : "▾"}
-      </button>
+      <div style={{ position: "relative" }}>
+        <button
+          className={`${styles.trigger} ${open ? styles.open : ""} ${!isAuthenticated ? styles.disabled : ""}`}
+          onClick={() => { if (isAuthenticated) setOpen((v) => !v); }}
+          onMouseEnter={() => !isAuthenticated && setTooltipVisible(true)}
+          onMouseLeave={() => setTooltipVisible(false)}
+          type="button"
+        >
+          + Submit {!isAuthenticated || !open ? "▾" : "▴"}
+        </button>
+        {tooltipVisible && !isAuthenticated && (
+          <div className={styles.tooltip}>You must log in to submit work</div>
+        )}
+      </div>
 
-      {open && (
+      {open && isAuthenticated && (
         <>
           <div className={styles.overlay} onClick={() => setOpen(false)} />
           <div className={styles.panel}>

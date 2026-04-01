@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { signIn, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 
 import styles from "./scope-toggle.module.css";
 
@@ -31,10 +31,7 @@ export function ScopeToggle() {
   };
 
   const handleWorkspaceClick = () => {
-    if (!isAuthenticated) {
-      signIn(undefined, { callbackUrl: buildHref("mine") });
-      return;
-    }
+    if (!isAuthenticated) return;
     router.push(buildHref("mine"));
   };
 
@@ -58,7 +55,7 @@ export function ScopeToggle() {
           My Workspace
         </button>
         {tooltipVisible && !isAuthenticated && (
-          <div className={styles.tooltip}>Sign in to view your workspace</div>
+          <div className={styles.tooltip}>You must log in to use My Workspace</div>
         )}
       </div>
     </div>

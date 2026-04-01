@@ -404,6 +404,51 @@ async def publish_phase(set_run_id: str) -> str | None:
 
     run_row = _load_run(set_run_id)
     _assert_workflow_ownership(set_run_id)
+
+    # If this run already has a published_set_id the data is already in the DB (a prior attempt
+    # published successfully but post-publish bookkeeping failed). Skip all the expensive work
+    # and only retry the non-fatal bookkeeping steps.
+    existing_published_set_id = str(run_row.get("published_set_id") or "") or None
+    if existing_published_set_id:
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.publish.bookkeeping_retry",
+            message="Set already published; retrying post-publish bookkeeping only",
+            details={"published_set_id": existing_published_set_id},
+        )
+        try:
+            finalize_submission_from_runs(str(run_row["submission_id"]))
+            insert_worker_event(
+                submission_id=str(run_row["submission_id"]),
+                set_run_id=set_run_id,
+                event_type="set_run.completed",
+                message="Post-publish bookkeeping retry completed",
+                details={"published_set_id": existing_published_set_id},
+            )
+            _revalidate(["/", "/artists", "/sets", "/archive-preview"], ["archive:home", "archive:lists"])
+            mark_set_run(set_run_id, status="completed", stage="published")
+        except Exception as bookkeeping_error:
+            try:
+                mark_set_run(
+                    set_run_id,
+                    status="completed",
+                    stage="published_with_errors",
+                    error_summary=str(bookkeeping_error),
+                )
+            except Exception:
+                pass
+            try:
+                insert_worker_event(
+                    submission_id=str(run_row["submission_id"]),
+                    set_run_id=set_run_id,
+                    event_type="set_run.post_publish_error",
+                    message=str(bookkeeping_error),
+                )
+            except Exception:
+                pass
+        return existing_published_set_id
+
     source_metadata = dict(run_row.get("source_metadata") or {})
     rollup = get_lease_rollup(set_run_id)
 
@@ -595,6 +640,15 @@ async def publish_phase(set_run_id: str) -> str | None:
             revalidate_paths.append(str(published_row["legacyPath"]))
         _revalidate(sorted(set(revalidate_paths)), sorted(set(revalidate_tags)))
     except Exception as bookkeeping_error:
+        try:
+            mark_set_run(
+                set_run_id,
+                status="completed",
+                stage="published_with_errors",
+                error_summary=str(bookkeeping_error),
+            )
+        except Exception:
+            pass
         try:
             insert_worker_event(
                 submission_id=str(run_row["submission_id"]),

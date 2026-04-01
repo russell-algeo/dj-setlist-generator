@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { signIn, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 
 import styles from "./inline-submit-button.module.css";
 
@@ -48,11 +48,14 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
   const { data: session } = useSession();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
   const [discoveryName, setDiscoveryName] = useState("");
   const [curatedName, setCuratedName] = useState("");
   const [urls, setUrls] = useState("");
   const [singleUrl, setSingleUrl] = useState("");
   const [state, setState] = useState<SubmitState>({ status: "idle" });
+
+  const isAuthenticated = Boolean(session?.user);
 
   const handleSubmit = async (payload: Record<string, string>) => {
     setState({ status: "submitting" });
@@ -69,13 +72,19 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
 
   return (
     <div className={styles.wrap}>
-      <button
-        className={styles.trigger}
-        onClick={() => { if (!session?.user) { void signIn(); } else { setOpen((v) => !v); } }}
-        type="button"
-      >
-        {LABEL[mode]}
-      </button>
+      <div style={{ position: "relative", display: "inline-block" }}>
+        <button
+          className={`${styles.trigger} ${!isAuthenticated ? styles.disabled : ""}`}
+          onClick={() => { if (isAuthenticated) setOpen((v) => !v); }}
+          onMouseEnter={() => !isAuthenticated && setTooltipVisible(true)}
+          onMouseLeave={() => setTooltipVisible(false)}
+          type="button"
+        >
+          {LABEL[mode]}
+        </button>
+        {tooltipVisible && !isAuthenticated && (
+          <div className={styles.tooltip}>You must log in to submit work</div>
+        )}
 
       {open && (
         <div className={styles.panel}>
@@ -208,6 +217,7 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

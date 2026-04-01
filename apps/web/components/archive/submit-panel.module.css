@@ -18,6 +18,34 @@
   color: #fff;
 }
 
+.trigger.disabled {
+  color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.08);
+  cursor: default;
+}
+
+.trigger.disabled:hover {
+  color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #aaa;
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  white-space: nowrap;
+  z-index: 200;
+  pointer-events: none;
+}
+
 .panel {
   position: fixed;
   top: 52px; /* header height */
