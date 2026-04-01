@@ -1456,9 +1456,6 @@ export function ArchiveSetExplorer({
         navLinks={[
           { label: "Overview", href: "#overview" },
           { label: "Playback", href: "#workspace" },
-          { label: "Timeline", href: "#timeline" },
-          { label: "Journey", href: "#journey" },
-          { label: "Track Atlas", href: "#tracks" },
         ]}
       />
 
