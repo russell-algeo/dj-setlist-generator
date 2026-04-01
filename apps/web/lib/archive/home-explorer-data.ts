@@ -638,7 +638,6 @@ const getWorkspaceGlobalStats = async (userId: string) => {
       JOIN "ops"."set_runs" sr2
         ON sr2.source_url = s2.source_url
        AND sr2.requested_by = ${userId}
-       AND sr2.published_set_id IS NOT NULL
     ) s
     LEFT JOIN "app"."set_artists" sa ON sa.set_id = s.id
     LEFT JOIN "app"."set_entries" se ON se.set_id = s.id
@@ -652,7 +651,6 @@ const getWorkspaceGlobalStats = async (userId: string) => {
       JOIN "ops"."set_runs" sr2
         ON sr2.source_url = s2.source_url
        AND sr2.requested_by = ${userId}
-       AND sr2.published_set_id IS NOT NULL
     ) s
     JOIN "app"."set_entries" se ON se.set_id = s.id
     GROUP BY se.confidence
@@ -857,7 +855,6 @@ const getArchiveHomeAtlasPayloadUncached = async ({
       FROM "ops"."set_runs" sr
       JOIN "app"."sets" s ON s.source_url = sr.source_url
       WHERE sr.requested_by = ${userId}
-        AND sr.published_set_id IS NOT NULL
     `);
     const workspaceSetSlugs = new Set(
       asRows<{ setSlug: string }>(slugResult.rows).map((r) => r.setSlug),
@@ -960,7 +957,6 @@ const getArchiveHomePairPayloadUncached = async ({
       FROM "ops"."set_runs" sr
       JOIN "app"."sets" s ON s.source_url = sr.source_url
       WHERE sr.requested_by = ${userId}
-        AND sr.published_set_id IS NOT NULL
     `);
     const workspaceSetSlugs = new Set(
       asRows<{ setSlug: string }>(slugResult.rows).map((r) => r.setSlug),

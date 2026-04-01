@@ -441,7 +441,6 @@ const getArtistSummaryUncached = async (
           and(
             eq(setRuns.sourceUrl, sets.sourceUrl),
             eq(setRuns.requestedBy, userId),
-            isNotNull(setRuns.publishedSetId),
           ),
         )
         .where(eq(setArtists.artistId, artistRecord.id))
