@@ -1422,14 +1422,14 @@ export function ArchiveHomeExplorer({
           </div>
         </section>
 
-        <section className="section reveal" id="artists">
+        <section className="section reveal" id="artists" style={{ position: "relative" }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+            <InlineSubmitButton mode="scan-artist" />
+          </div>
           <div className="section-inner">
-            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <h2>ARTIST ATLAS</h2>
-                <p>Select artists to compare and drill into the right-side taxonomy atlas for evidence.</p>
-              </div>
-              <InlineSubmitButton mode="scan-artist" />
+            <div className="section-head">
+              <h2>ARTIST ATLAS</h2>
+              <p>Select artists to compare and drill into the right-side taxonomy atlas for evidence.</p>
             </div>
 
             <div className="atlas-layout">
@@ -2242,16 +2242,16 @@ export function ArchiveHomeExplorer({
           </div>
         </section>
 
-        <section className="section reveal" id="sets">
+        <section className="section reveal" id="sets" style={{ position: "relative" }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+            <InlineSubmitButton mode="submit-set" />
+          </div>
           <div className="section-inner">
-            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <h2>FULL SET LIBRARY</h2>
-                <p>
-                  Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
-                </p>
-              </div>
-              <InlineSubmitButton mode="submit-set" />
+            <div className="section-head">
+              <h2>FULL SET LIBRARY</h2>
+              <p>
+                Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
+              </p>
             </div>
 
             <div className="set-panel">

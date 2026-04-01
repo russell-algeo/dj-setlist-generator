@@ -10,9 +10,10 @@ type NavLink = { label: string; href: string };
 
 type ArchiveHeaderProps = {
   navLinks: NavLink[];
+  hideScopeToggle?: boolean;
 };
 
-export function ArchiveHeader({ navLinks }: ArchiveHeaderProps) {
+export function ArchiveHeader({ navLinks, hideScopeToggle }: ArchiveHeaderProps) {
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -25,8 +26,8 @@ export function ArchiveHeader({ navLinks }: ArchiveHeaderProps) {
           ))}
         </nav>
         <div className={styles.topbarRight}>
-          <ScopeToggle />
-          <div className={styles.divider} />
+          {!hideScopeToggle && <ScopeToggle />}
+          {!hideScopeToggle && <div className={styles.divider} />}
           <SubmitPanel />
           <AuthDropdown />
         </div>

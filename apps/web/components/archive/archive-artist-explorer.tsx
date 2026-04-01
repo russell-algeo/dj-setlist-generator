@@ -1132,7 +1132,10 @@ export function ArchiveArtistExplorer({
           </div>
         </section>
 
-        <section className="section" id="set-atlas-section">
+        <section className="section" id="set-atlas-section" style={{ position: "relative" }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+            <InlineSubmitButton mode="add-sets" artistName={artist.name} />
+          </div>
           <div className="section-inner">
             <div className="section-head">
               <h2>Set Atlas</h2>
@@ -1728,14 +1731,14 @@ export function ArchiveArtistExplorer({
           </div>
         </section>
 
-        <section className="section" id="sets-section">
+        <section className="section" id="sets-section" style={{ position: "relative" }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+            <InlineSubmitButton mode="add-sets" artistName={artist.name} />
+          </div>
           <div className="section-inner">
-            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <h2>Set Explorer</h2>
-                <p>Search and compare sets, then inspect shared tracks through expanded tracklists and deep links.</p>
-              </div>
-              <InlineSubmitButton mode="add-sets" artistName={artist.name} />
+            <div className="section-head">
+              <h2>Set Explorer</h2>
+              <p>Search and compare sets, then inspect shared tracks through expanded tracklists and deep links.</p>
             </div>
 
             <div className="set-panel">
