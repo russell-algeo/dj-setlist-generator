@@ -908,7 +908,6 @@ export function ArchiveArtistExplorer({
       <ArchiveScrollRoot />
       <ArchiveHeader
         navLinks={[
-          { label: "Overview", href: "#overview" },
           { label: "Recurring", href: "#recurring-section" },
           { label: "Set Atlas", href: "#set-atlas-section" },
           { label: "Set Explorer", href: "#sets-section" },

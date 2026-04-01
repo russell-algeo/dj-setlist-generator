@@ -1454,7 +1454,6 @@ export function ArchiveSetExplorer({
       <ArchiveHeader
         hideScopeToggle
         navLinks={[
-          { label: "Overview", href: "#overview" },
           { label: "Playback", href: "#workspace" },
         ]}
       />
