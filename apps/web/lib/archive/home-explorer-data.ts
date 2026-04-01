@@ -1,7 +1,7 @@
 import "server-only";
 
 import { unstable_cache, unstable_noStore as noStore } from "next/cache";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 import type {
@@ -36,7 +36,7 @@ import {
   normalizeArchiveConfidence,
 } from "@/lib/archive/utils";
 import { getDb } from "@/lib/db/client";
-import { setEntries, sets, tracks } from "@/lib/db/schema";
+import { artists, setArtists, setEntries, setRuns, sets, tracks } from "@/lib/db/schema";
 
 const HOME_TAGS = {
   atlas: "archive:home-atlas",
@@ -617,6 +617,81 @@ const getHomeGlobalStats = unstable_cache(
   { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
 );
 
+const getWorkspaceGlobalStats = async (userId: string) => {
+  const db = getDb();
+
+  const statsResult = await db.execute(sql<{
+    totalSets: number | string;
+    totalArtists: number | string;
+    totalUniqueTracks: number | string;
+    totalAppearances: number | string;
+    unknownRatio: number | string | null;
+  }>`
+    SELECT
+      COUNT(DISTINCT s.id)::int AS "totalSets",
+      COUNT(DISTINCT sa.artist_id)::int AS "totalArtists",
+      COUNT(DISTINCT se.track_id)::int AS "totalUniqueTracks",
+      COUNT(se.id)::int AS "totalAppearances",
+      COUNT(se.id) FILTER (WHERE t.title ILIKE 'Unknown Track%')::float / NULLIF(COUNT(se.id), 0) AS "unknownRatio"
+    FROM (
+      SELECT DISTINCT s2.id, s2.source_url FROM "app"."sets" s2
+      JOIN "ops"."set_runs" sr2
+        ON sr2.source_url = s2.source_url
+       AND sr2.requested_by = ${userId}
+       AND sr2.published_set_id IS NOT NULL
+    ) s
+    LEFT JOIN "app"."set_artists" sa ON sa.set_id = s.id
+    LEFT JOIN "app"."set_entries" se ON se.set_id = s.id
+    LEFT JOIN "app"."tracks" t ON t.id = se.track_id
+  `);
+
+  const confResult = await db.execute(sql<{ confidence: string; count: number | string }>`
+    SELECT se.confidence, COUNT(*)::int AS count
+    FROM (
+      SELECT DISTINCT s2.id FROM "app"."sets" s2
+      JOIN "ops"."set_runs" sr2
+        ON sr2.source_url = s2.source_url
+       AND sr2.requested_by = ${userId}
+       AND sr2.published_set_id IS NOT NULL
+    ) s
+    JOIN "app"."set_entries" se ON se.set_id = s.id
+    GROUP BY se.confidence
+  `);
+
+  const statsRow = asRows<{
+    totalSets: number | string;
+    totalArtists: number | string;
+    totalUniqueTracks: number | string;
+    totalAppearances: number | string;
+    unknownRatio: number | string | null;
+  }>(statsResult.rows)[0];
+
+  const totalAppearances = numberOrZero(statsRow?.totalAppearances);
+  const unknownRatioRaw = statsRow?.unknownRatio;
+  const unknownRatio =
+    unknownRatioRaw != null && unknownRatioRaw !== ""
+      ? Number(unknownRatioRaw)
+      : 0;
+
+  const confidenceBreakdown = emptyConfidenceCounts();
+  for (const row of asRows<{ confidence: string; count: number | string }>(confResult.rows)) {
+    const level = normalizeArchiveConfidence(row.confidence);
+    confidenceBreakdown[level] += numberOrZero(row.count);
+  }
+
+  return {
+    generatedAt: null as string | null,
+    globalStats: {
+      confidenceBreakdown,
+      totalAppearances,
+      totalArtists: numberOrZero(statsRow?.totalArtists),
+      totalSets: numberOrZero(statsRow?.totalSets),
+      totalUniqueTracks: numberOrZero(statsRow?.totalUniqueTracks),
+      unknownRatio: Number.isFinite(unknownRatio) ? unknownRatio : 0,
+    },
+  };
+};
+
 const getHeroSetCandidatesUncached = async () => {
   const db = getDb();
   const result = await db.execute(sql<HomeHeroSetRow>`
@@ -696,9 +771,11 @@ export const getArchiveHomeNetworkPayload = unstable_cache(
 const getArchiveHomeAtlasPayloadUncached = async ({
   compareMode = "union",
   selectedArtistSlugs,
+  userId,
 }: {
   compareMode?: ArchiveHomeCompareMode;
   selectedArtistSlugs: string[];
+  userId?: string;
 }): Promise<ArchiveHomeAtlasSelectionPayload> => {
   const [{ generatedAt }, artistCards, db] = await Promise.all([
     getHomeGlobalStats(),
@@ -766,21 +843,56 @@ const getArchiveHomeAtlasPayloadUncached = async ({
           .flat()
       : rows;
 
-  return mapAtlasRowsToPayload({
+  const payload = mapAtlasRowsToPayload({
     compareMode,
     generatedAt,
     selectedArtistSlugs: resolvedSelected,
     rows: filteredRows,
   });
+
+  if (userId) {
+    // Fetch the set slugs belonging to this user's workspace
+    const slugResult = await db.execute(sql<{ setSlug: string }>`
+      SELECT DISTINCT s.slug AS "setSlug"
+      FROM "ops"."set_runs" sr
+      JOIN "app"."sets" s ON s.source_url = sr.source_url
+      WHERE sr.requested_by = ${userId}
+        AND sr.published_set_id IS NOT NULL
+    `);
+    const workspaceSetSlugs = new Set(
+      asRows<{ setSlug: string }>(slugResult.rows).map((r) => r.setSlug),
+    );
+
+    payload.trackCatalog = payload.trackCatalog
+      .map((track) => ({
+        ...track,
+        artistRefs: track.artistRefs
+          .map((artistRef) => ({
+            ...artistRef,
+            setRefs: artistRef.setRefs.filter((setRef) => workspaceSetSlugs.has(setRef.setSlug)),
+          }))
+          .filter((artistRef) => artistRef.setRefs.length > 0),
+      }))
+      .filter((track) => track.artistRefs.length > 0);
+  }
+
+  return payload;
 };
 
 export const getArchiveHomeAtlasPayload = async ({
   compareMode = "union",
   selectedArtistSlugs,
+  userId,
 }: {
   compareMode?: ArchiveHomeCompareMode;
   selectedArtistSlugs: string[];
+  userId?: string;
 }) => {
+  // Workspace-scoped queries must not be cached globally
+  if (userId) {
+    return getArchiveHomeAtlasPayloadUncached({ compareMode, selectedArtistSlugs, userId });
+  }
+
   const selectionKey = [...selectedArtistSlugs].sort().join(",");
 
   return unstable_cache(
@@ -797,9 +909,11 @@ export const getArchiveHomeAtlasPayload = async ({
 const getArchiveHomePairPayloadUncached = async ({
   artistASlug,
   artistBSlug,
+  userId,
 }: {
   artistASlug: string;
   artistBSlug: string;
+  userId?: string;
 }): Promise<ArchiveHomePairSelectionPayload | null> => {
   const [leftSlug, rightSlug] = [artistASlug, artistBSlug].sort();
   if (!leftSlug || !rightSlug || leftSlug === rightSlug) {
@@ -834,10 +948,32 @@ const getArchiveHomePairPayloadUncached = async ({
     return null;
   }
 
-  const sharedTracks = mapPairTrack(row.sharedTracks);
+  let sharedTracks = mapPairTrack(row.sharedTracks);
   const sharedLabels = mapPairBuckets(row.sharedLabels);
   const sharedGenres = mapPairBuckets(row.sharedGenres);
   const sharedMusicArtists = mapPairBuckets(row.sharedMusicArtists);
+
+  if (userId) {
+    // Filter shared tracks to only those whose set references are in the user's workspace
+    const slugResult = await db.execute(sql<{ setSlug: string }>`
+      SELECT DISTINCT s.slug AS "setSlug"
+      FROM "ops"."set_runs" sr
+      JOIN "app"."sets" s ON s.source_url = sr.source_url
+      WHERE sr.requested_by = ${userId}
+        AND sr.published_set_id IS NOT NULL
+    `);
+    const workspaceSetSlugs = new Set(
+      asRows<{ setSlug: string }>(slugResult.rows).map((r) => r.setSlug),
+    );
+
+    sharedTracks = sharedTracks
+      .map((track) => ({
+        ...track,
+        setsA: track.setsA.filter((ref) => workspaceSetSlugs.has(ref.setSlug)),
+        setsB: track.setsB.filter((ref) => workspaceSetSlugs.has(ref.setSlug)),
+      }))
+      .filter((track) => track.setsA.length > 0 || track.setsB.length > 0);
+  }
 
   return {
     artistA: {
@@ -861,17 +997,24 @@ const getArchiveHomePairPayloadUncached = async ({
     sharedMusicArtists,
     sharedMusicArtistsCount: numberOrZero(row.sharedMusicArtistsCount),
     sharedTracks,
-    sharedTracksCount: numberOrZero(row.sharedTracksCount),
+    sharedTracksCount: sharedTracks.length,
   };
 };
 
 export const getArchiveHomePairPayload = async ({
   artistASlug,
   artistBSlug,
+  userId,
 }: {
   artistASlug: string;
   artistBSlug: string;
+  userId?: string;
 }) => {
+  // Workspace-scoped queries must not be cached globally
+  if (userId) {
+    return getArchiveHomePairPayloadUncached({ artistASlug, artistBSlug, userId });
+  }
+
   const lookupKey = buildPairLookupKey(artistASlug, artistBSlug);
 
   return unstable_cache(
@@ -904,13 +1047,11 @@ const getArchiveHomeSetLibraryPayloadUncached = async ({
   page = 1,
   query = "",
   sort = "default",
-  userId,
 }: {
   artistFilter?: string;
   page?: number;
   query?: string;
   sort?: ArchiveHomeSetSort;
-  userId?: string;
 }): Promise<ArchiveHomeSetLibraryPagePayload> => {
   const db = getDb();
   const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
@@ -928,10 +1069,7 @@ const getArchiveHomeSetLibraryPayloadUncached = async ({
         OR COALESCE(track_search_text, '') ILIKE ${`%${safeQuery}%`}
       )`
     : sql`true`;
-  const userClause = userId
-    ? sql`set_id IN (SELECT published_set_id FROM "ops"."set_runs" WHERE requested_by = ${userId} AND published_set_id IS NOT NULL)`
-    : sql`true`;
-  const whereClause = sql`${artistClause} AND ${queryClause} AND ${userClause}`;
+  const whereClause = sql`${artistClause} AND ${queryClause}`;
   const orderByClause = orderByForSetSort(sort);
   const countResult = await db.execute(sql<{ totalItems: number | string }>`
     SELECT count(*)::int AS "totalItems"
@@ -984,19 +1122,13 @@ export const getArchiveHomeSetLibraryPayload = async ({
   page = 1,
   query = "",
   sort = "default",
-  userId,
 }: {
   artistFilter?: string;
   page?: number;
   query?: string;
   sort?: ArchiveHomeSetSort;
-  userId?: string;
-} = {}) => {
-  // Bypass cache for user-scoped queries
-  if (userId) {
-    return getArchiveHomeSetLibraryPayloadUncached({ artistFilter, page, query, sort, userId });
-  }
-  return unstable_cache(
+} = {}) =>
+  unstable_cache(
     async () =>
       getArchiveHomeSetLibraryPayloadUncached({
         artistFilter,
@@ -1007,7 +1139,6 @@ export const getArchiveHomeSetLibraryPayload = async ({
     ["archive-home-set-library-v1", artistFilter, String(page), query, sort],
     { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
   )();
-};
 
 const getArchiveHomeSetTracklistPayloadUncached = async (
   slug: string,
@@ -1061,6 +1192,184 @@ export const getArchiveHomeSetTracklistPayload = async (slug: string) =>
     { tags: [HOME_TAGS.home, HOME_TAGS.lists, HOME_TAGS.setTracklist(slug)] },
   )();
 
+// --- Workspace helpers (uncached, userId-scoped) ---
+
+const getUserSetIds = async (db: ReturnType<typeof getDb>, userId: string): Promise<string[]> => {
+  const rows = await db
+    .selectDistinct({ id: sets.id })
+    .from(sets)
+    .innerJoin(setRuns, and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)));
+  return rows.map((r) => r.id);
+};
+
+export const getWorkspaceArtistCards = async (userId: string): Promise<ArchiveHomeArtistCard[]> => {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: artists.id,
+      slug: artists.slug,
+      name: artists.name,
+      imageUrl: artists.imageUrl,
+      setCount: sql<number>`count(distinct ${sets.id})`,
+    })
+    .from(artists)
+    .innerJoin(setArtists, and(eq(setArtists.artistId, artists.id), eq(setArtists.role, "primary")))
+    .innerJoin(sets, eq(sets.id, setArtists.setId))
+    .innerJoin(setRuns, and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)))
+    .groupBy(artists.id, artists.slug, artists.name, artists.imageUrl)
+    .orderBy(asc(artists.name));
+  return rows.map((row) => ({
+    id: row.id,
+    imageUrl: row.imageUrl,
+    name: row.name,
+    setCount: numberOrZero(row.setCount),
+    slug: row.slug,
+    totalAppearances: 0,
+    uniqueTracks: 0,
+  }));
+};
+
+export const getWorkspaceSetLibraryPayload = async ({
+  artistFilter = "ALL",
+  page = 1,
+  query = "",
+  sort = "default",
+  userId,
+}: {
+  artistFilter?: string;
+  page?: number;
+  query?: string;
+  sort?: ArchiveHomeSetSort;
+  userId: string;
+}): Promise<ArchiveHomeSetLibraryPagePayload> => {
+  const db = getDb();
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const safeQuery = query.trim();
+
+  const setIds = await getUserSetIds(db, userId);
+
+  if (!setIds.length) {
+    const artistCards = await getWorkspaceArtistCards(userId);
+    return {
+      artistFilter,
+      artistOptions: ["ALL", ...artistCards.map((a) => a.name)],
+      items: [],
+      page: 1,
+      pageSize: PAGE_SIZE,
+      query: safeQuery,
+      sort,
+      totalItems: 0,
+      totalPages: 1,
+    };
+  }
+
+  const artistClause =
+    artistFilter !== "ALL" ? sql`artist_name = ${artistFilter}` : sql`true`;
+  const queryClause = safeQuery
+    ? sql`(
+        set_title ILIKE ${`%${safeQuery}%`}
+        OR COALESCE(artist_name, '') ILIKE ${`%${safeQuery}%`}
+        OR COALESCE(track_search_text, '') ILIKE ${`%${safeQuery}%`}
+      )`
+    : sql`true`;
+  const setIdValues = setIds.map((id) => sql`${id}::uuid`);
+  const setIdClause = sql`set_id IN (${sql.join(setIdValues, sql`, `)})`;
+  const whereClause = sql`${setIdClause} AND ${artistClause} AND ${queryClause}`;
+  const orderByClause = orderByForSetSort(sort);
+
+  const countResult = await db.execute(sql<{ totalItems: number | string }>`
+    SELECT count(*)::int AS "totalItems"
+    FROM "app"."archive_home_set_library_index_mv"
+    WHERE ${whereClause}
+  `);
+
+  const totalItems = numberOrZero(
+    asRows<{ totalItems: number | string }>(countResult.rows)[0]?.totalItems,
+  );
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const safeResolvedPage = Math.max(1, Math.min(safePage, totalPages));
+  const offset = (safeResolvedPage - 1) * PAGE_SIZE;
+
+  const pageResult = await db.execute(sql<HomeSetLibraryRow>`
+    SELECT
+      set_id::text AS id,
+      set_slug AS slug,
+      set_title AS title,
+      artist_slug AS "artistSlug",
+      artist_name AS "artistName",
+      confidence_counts AS "confidenceCounts",
+      duration_seconds AS duration,
+      mini_timeline AS "miniTimeline",
+      recognition_rate AS "recognitionRate",
+      source_platform AS "sourcePlatform",
+      source_url AS "sourceUrl",
+      thumbnail_url AS "thumbnailUrl",
+      total_tracks AS "totalTracks"
+    FROM "app"."archive_home_set_library_index_mv"
+    WHERE ${whereClause}
+    ${orderByClause}
+    LIMIT ${PAGE_SIZE}
+    OFFSET ${offset}
+  `);
+
+  const artistCards = await getWorkspaceArtistCards(userId);
+  return {
+    artistFilter,
+    artistOptions: ["ALL", ...artistCards.map((a) => a.name)],
+    items: asRows<HomeSetLibraryRow>(pageResult.rows).map(mapSetLibraryRow),
+    page: safeResolvedPage,
+    pageSize: PAGE_SIZE,
+    query: safeQuery,
+    sort,
+    totalItems,
+    totalPages,
+  };
+};
+
+export const getWorkspaceNetworkPayload = async (
+  userId: string,
+): Promise<ArchiveHomeNetworkIndexPayload> => {
+  const artistCards = await getWorkspaceArtistCards(userId);
+  if (!artistCards.length) {
+    return { artists: [], edges: [] };
+  }
+
+  const slugSet = new Set(artistCards.map((a) => a.slug));
+  const slugValues = [...slugSet].map((slug) => sql`${slug}`);
+
+  const db = getDb();
+  const edgeResult = await db.execute(sql<HomeNetworkEdgeRow>`
+    SELECT
+      artist_a_name AS "artistA",
+      artist_a_slug AS "artistASlug",
+      artist_b_name AS "artistB",
+      artist_b_slug AS "artistBSlug",
+      normalized_score AS "normalizedScore",
+      score,
+      shared_music_artists_count AS "sharedArtistsCount",
+      shared_genres_count AS "sharedGenresCount",
+      shared_labels_count AS "sharedLabelsCount",
+      shared_tracks_count AS "sharedTracksCount"
+    FROM "app"."archive_home_pair_summaries_mv"
+    WHERE score > 0
+      AND artist_a_slug IN (${sql.join(slugValues, sql`, `)})
+      AND artist_b_slug IN (${sql.join(slugValues, sql`, `)})
+    ORDER BY score DESC, artist_a_name ASC, artist_b_name ASC
+  `);
+
+  const networkArtists: ArchiveHomeNetworkArtist[] = artistCards.map((a) => ({
+    id: a.id,
+    name: a.name,
+    setCount: a.setCount,
+    slug: a.slug,
+  }));
+
+  return {
+    artists: networkArtists,
+    edges: asRows<HomeNetworkEdgeRow>(edgeResult.rows).map(mapNetworkEdgeRow),
+  };
+};
+
 const buildHeroPayload = ({
   artistCards,
   heroSetCandidates,
@@ -1102,6 +1411,7 @@ export const getArchiveHomeExplorerInitial = async ({
   compareMode = "union",
   page = 1,
   query = "",
+  scope = "global",
   selectedArtistSlugs,
   sort = "default",
   userId,
@@ -1110,25 +1420,24 @@ export const getArchiveHomeExplorerInitial = async ({
   compareMode?: ArchiveHomeCompareMode;
   page?: number;
   query?: string;
+  scope?: "mine" | "global";
   selectedArtistSlugs?: string[];
   sort?: ArchiveHomeSetSort;
   userId?: string;
 } = {}): Promise<ArchiveHomeBootstrapPayload> => {
   noStore();
 
+  const isWorkspace = scope === "mine" && Boolean(userId);
+
   const [artistCards, globalStatsResult, initialNetwork, initialSetLibrary, heroSetCandidates] =
     await Promise.all([
-      getHomeArtistCards(),
-      getHomeGlobalStats(),
-      getArchiveHomeNetworkPayload(),
-      getArchiveHomeSetLibraryPayload({
-        artistFilter,
-        page,
-        query,
-        sort,
-        userId,
-      }),
-      getHeroSetCandidates(),
+      isWorkspace ? getWorkspaceArtistCards(userId!) : getHomeArtistCards(),
+      isWorkspace ? getWorkspaceGlobalStats(userId!) : getHomeGlobalStats(),
+      isWorkspace ? getWorkspaceNetworkPayload(userId!) : getArchiveHomeNetworkPayload(),
+      isWorkspace
+        ? getWorkspaceSetLibraryPayload({ artistFilter, page, query, sort, userId: userId! })
+        : getArchiveHomeSetLibraryPayload({ artistFilter, page, query, sort }),
+      isWorkspace ? Promise.resolve<ArchiveHomeHeroSet[]>([]) : getHeroSetCandidates(),
     ]);
 
   const resolvedSelected =
@@ -1140,6 +1449,7 @@ export const getArchiveHomeExplorerInitial = async ({
   const initialAtlas = await getArchiveHomeAtlasPayload({
     compareMode,
     selectedArtistSlugs: resolvedSelected,
+    userId: isWorkspace ? userId : undefined,
   });
   const tickerItems = buildTickerItems({
     edgeCount: initialNetwork.edges.length,
@@ -1158,6 +1468,7 @@ export const getArchiveHomeExplorerInitial = async ({
     initialAtlas,
     initialNetwork,
     initialSetLibrary,
+    scope,
   };
 };
 

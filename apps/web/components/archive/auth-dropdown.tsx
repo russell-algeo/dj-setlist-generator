@@ -49,7 +49,7 @@ export function AuthDropdown() {
     return (
       <button
         className={styles.trigger}
-        onClick={() => signIn()}
+        onClick={() => signIn("google", { callbackUrl: window.location.href })}
         type="button"
       >
         Sign In

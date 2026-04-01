@@ -404,7 +404,10 @@ export const getArchiveSetDetailBySlug = async (slug: string) =>
     { tags: [ARCHIVE_TAGS.set(slug)] },
   )();
 
-const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSummary | null> => {
+const getArtistSummaryUncached = async (
+  slug: string,
+  userId?: string,
+): Promise<ArchiveArtistSummary | null> => {
   const db = getDb();
   const [artistRecord] = await db.select().from(artists).where(eq(artists.slug, slug)).limit(1);
 
@@ -412,24 +415,58 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
     return null;
   }
 
+  const setSelect = {
+    id: sets.id,
+    slug: sets.slug,
+    title: sets.title,
+    sourcePlatform: sets.sourcePlatform,
+    sourceUrl: sets.sourceUrl,
+    durationSeconds: sets.durationSeconds,
+    imageUrl: sets.imageUrl,
+    recognitionRate: sets.recognitionRate,
+    updatedAt: sets.updatedAt,
+    metadata: sets.metadata,
+  };
+
+  // In workspace mode, restrict to sets submitted by this user via set_runs.
+  // Use a subquery for the user's set IDs to avoid duplicate rows when a URL
+  // was submitted multiple times. Only count successfully published runs.
+  const setRowsQuery = userId
+    ? db
+        .select(setSelect)
+        .from(setArtists)
+        .innerJoin(sets, eq(sets.id, setArtists.setId))
+        .innerJoin(
+          setRuns,
+          and(
+            eq(setRuns.sourceUrl, sets.sourceUrl),
+            eq(setRuns.requestedBy, userId),
+            isNotNull(setRuns.publishedSetId),
+          ),
+        )
+        .where(eq(setArtists.artistId, artistRecord.id))
+        .groupBy(...Object.values(setSelect))
+        .orderBy(desc(sets.updatedAt), asc(sets.title))
+    : db
+        .select(setSelect)
+        .from(setArtists)
+        .innerJoin(sets, eq(sets.id, setArtists.setId))
+        .where(eq(setArtists.artistId, artistRecord.id))
+        .orderBy(desc(sets.updatedAt), asc(sets.title));
+
+  const failedRunsWhere = userId
+    ? and(
+        eq(setRuns.status, "failed"),
+        eq(setRuns.requestedBy, userId),
+        sql`lower(${submissions.artistName}) = lower(${artistRecord.name})`,
+      )
+    : and(
+        eq(setRuns.status, "failed"),
+        sql`lower(${submissions.artistName}) = lower(${artistRecord.name})`,
+      );
+
   const [setRows, failedSetRunRows] = await Promise.all([
-    db
-      .select({
-        id: sets.id,
-        slug: sets.slug,
-        title: sets.title,
-        sourcePlatform: sets.sourcePlatform,
-        sourceUrl: sets.sourceUrl,
-        durationSeconds: sets.durationSeconds,
-        imageUrl: sets.imageUrl,
-        recognitionRate: sets.recognitionRate,
-        updatedAt: sets.updatedAt,
-        metadata: sets.metadata,
-      })
-      .from(setArtists)
-      .innerJoin(sets, eq(sets.id, setArtists.setId))
-      .where(eq(setArtists.artistId, artistRecord.id))
-      .orderBy(desc(sets.updatedAt), asc(sets.title)),
+    setRowsQuery,
     db
       .select({
         id: setRuns.id,
@@ -441,7 +478,7 @@ const getArtistSummaryUncached = async (slug: string): Promise<ArchiveArtistSumm
       })
       .from(setRuns)
       .innerJoin(submissions, eq(submissions.id, setRuns.submissionId))
-      .where(and(eq(setRuns.status, "failed"), sql`lower(${submissions.artistName}) = lower(${artistRecord.name})`))
+      .where(failedRunsWhere)
       .orderBy(desc(setRuns.updatedAt)),
   ]);
 
@@ -718,6 +755,11 @@ export const getArchiveArtistSummaryBySlug = async (slug: string) =>
     ["archive-artist-summary-v2", slug],
     { tags: [ARCHIVE_TAGS.artist(slug)] },
   )();
+
+// Workspace variant: returns only sets submitted by the given user for this artist.
+// Not cached — user-specific and must not be shared across requests.
+export const getArchiveArtistSummaryBySlugForUser = async (slug: string, userId: string) =>
+  getArtistSummaryUncached(slug, userId);
 
 const getHomeSummaryUncached = async ({
   page,

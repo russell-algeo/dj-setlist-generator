@@ -203,4 +203,5 @@ export type ArchiveHomeBootstrapPayload = {
   initialAtlas: ArchiveHomeAtlasSelectionPayload;
   initialNetwork: ArchiveHomeNetworkIndexPayload;
   initialSetLibrary: ArchiveHomeSetLibraryPagePayload;
+  scope: "mine" | "global";
 };

@@ -632,6 +632,7 @@ export function ArchiveHomeExplorer({
 }: {
   initial: ArchiveHomeBootstrapPayload;
 }) {
+  const scope = initial.scope ?? "global";
   const rootRef = useRef<HTMLDivElement | null>(null);
   const heroVisualRef = useRef<HTMLDivElement | null>(null);
   const heroStatsRef = useRef<HTMLDivElement | null>(null);
@@ -699,22 +700,30 @@ export function ArchiveHomeExplorer({
   const [loadingTracklists, setLoadingTracklists] = useState<Record<string, boolean>>({});
 
   const artistCards = initial.artistCards;
+  // In workspace mode, do not pre-populate the atlas cache with server-rendered data so the
+  // useEffect always fires a fresh workspace-scoped fetch on mount.
   const atlasCacheRef = useRef(
-    new Map<string, ArchiveHomeAtlasSelectionPayload>([
-      [
-        `${initial.initialAtlas.compareMode}::${initial.initialAtlas.selectedArtistSlugs.join(",")}`,
-        initial.initialAtlas,
-      ],
-    ]),
+    initial.scope === "mine"
+      ? new Map<string, ArchiveHomeAtlasSelectionPayload>()
+      : new Map<string, ArchiveHomeAtlasSelectionPayload>([
+          [
+            `${initial.initialAtlas.compareMode}::${initial.initialAtlas.selectedArtistSlugs.join(",")}`,
+            initial.initialAtlas,
+          ],
+        ]),
   );
   const pairCacheRef = useRef(new Map<string, ArchiveHomePairSelectionPayload | null>());
+  // In workspace mode, do not pre-populate the cache with server-rendered data so the
+  // useEffect always fires a fresh workspace-scoped fetch on mount.
   const setLibraryCacheRef = useRef(
-    new Map<string, ArchiveHomeSetLibraryPagePayload>([
-      [
-        `${initial.initialSetLibrary.artistFilter}::${initial.initialSetLibrary.sort}::${initial.initialSetLibrary.page}::${initial.initialSetLibrary.query}`,
-        initial.initialSetLibrary,
-      ],
-    ]),
+    initial.scope === "mine"
+      ? new Map<string, ArchiveHomeSetLibraryPagePayload>()
+      : new Map<string, ArchiveHomeSetLibraryPagePayload>([
+          [
+            `${initial.initialSetLibrary.artistFilter}::${initial.initialSetLibrary.sort}::${initial.initialSetLibrary.page}::${initial.initialSetLibrary.query}`,
+            initial.initialSetLibrary,
+          ],
+        ]),
   );
   const setTracklistCacheRef = useRef(new Map<string, ArchiveHomeSetTracklistPayload | null>());
 
@@ -726,7 +735,7 @@ export function ArchiveHomeExplorer({
     () => new Map(artistCards.map((artistCard) => [artistCard.slug, artistCard])),
     [artistCards],
   );
-  const scopedTrackCatalog = atlasPayload.trackCatalog;
+  const scopedTrackCatalog = artistCards.length === 0 ? [] : atlasPayload.trackCatalog;
   const visibleArtists = useMemo(() => {
     const normalizedQuery = normalizeSearchText(deferredArtistQuery);
     return artistCards.filter((artistCard) =>
@@ -1004,7 +1013,7 @@ export function ArchiveHomeExplorer({
   }, [initial.hero.railSets.length]);
 
   useEffect(() => {
-    const selectionKey = `${compareMode}::${selectedArtistSlugs.join(",")}`;
+    const selectionKey = `${scope}::${compareMode}::${selectedArtistSlugs.join(",")}`;
     const cached = atlasCacheRef.current.get(selectionKey);
 
     if (cached) {
@@ -1016,6 +1025,10 @@ export function ArchiveHomeExplorer({
     const searchParams = new URLSearchParams({
       mode: compareMode,
     });
+
+    if (scope === "mine") {
+      searchParams.set("scope", "mine");
+    }
 
     if (
       selectedArtistSlugs.length > 0 &&
@@ -1051,7 +1064,7 @@ export function ArchiveHomeExplorer({
     return () => {
       controller.abort();
     };
-  }, [artistCards.length, compareMode, selectedArtistSlugs]);
+  }, [artistCards.length, compareMode, scope, selectedArtistSlugs]);
 
   useEffect(() => {
     if (networkSelectedArtistSlugs.length !== 2) {
@@ -1074,6 +1087,10 @@ export function ArchiveHomeExplorer({
       a: networkSelectedArtistSlugs[0]!,
       b: networkSelectedArtistSlugs[1]!,
     });
+
+    if (scope === "mine") {
+      searchParams.set("scope", "mine");
+    }
 
     void fetch(`/api/archive/home/pair?${searchParams.toString()}`, {
       signal: controller.signal,
@@ -1101,7 +1118,7 @@ export function ArchiveHomeExplorer({
     return () => {
       controller.abort();
     };
-  }, [networkSelectedArtistSlugs]);
+  }, [networkSelectedArtistSlugs, scope]);
 
   useEffect(() => {
     const updateLayout = () => {
@@ -1116,7 +1133,7 @@ export function ArchiveHomeExplorer({
   }, []);
 
   useEffect(() => {
-    const requestKey = `${setArtistFilter}::${setSort}::${setPage}::${deferredSetQuery}`;
+    const requestKey = `${scope}::${setArtistFilter}::${setSort}::${setPage}::${deferredSetQuery}`;
     const cached = setLibraryCacheRef.current.get(requestKey);
 
     if (cached) {
@@ -1131,6 +1148,10 @@ export function ArchiveHomeExplorer({
       query: deferredSetQuery,
       sort: setSort,
     });
+
+    if (scope === "mine") {
+      searchParams.set("scope", "mine");
+    }
 
     void fetch(`/api/archive/home/sets?${searchParams.toString()}`, {
       signal: controller.signal,
@@ -1155,7 +1176,7 @@ export function ArchiveHomeExplorer({
     return () => {
       controller.abort();
     };
-  }, [deferredSetQuery, setArtistFilter, setPage, setSort]);
+  }, [deferredSetQuery, scope, setArtistFilter, setPage, setSort]);
 
   const updateTrackCardState = ({
     openSources,
@@ -1422,14 +1443,14 @@ export function ArchiveHomeExplorer({
           </div>
         </section>
 
-        <section className="section reveal" id="artists">
+        <section className="section reveal" id="artists" style={{ position: "relative" }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+            <InlineSubmitButton mode="scan-artist" />
+          </div>
           <div className="section-inner">
-            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <h2>ARTIST ATLAS</h2>
-                <p>Select artists to compare and drill into the right-side taxonomy atlas for evidence.</p>
-              </div>
-              <InlineSubmitButton mode="scan-artist" />
+            <div className="section-head">
+              <h2>ARTIST ATLAS</h2>
+              <p>Select artists to compare and drill into the right-side taxonomy atlas for evidence.</p>
             </div>
 
             <div className="atlas-layout">
@@ -2242,16 +2263,16 @@ export function ArchiveHomeExplorer({
           </div>
         </section>
 
-        <section className="section reveal" id="sets">
+        <section className="section reveal" id="sets" style={{ position: "relative" }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+            <InlineSubmitButton mode="submit-set" />
+          </div>
           <div className="section-inner">
-            <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <h2>FULL SET LIBRARY</h2>
-                <p>
-                  Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
-                </p>
-              </div>
-              <InlineSubmitButton mode="submit-set" />
+            <div className="section-head">
+              <h2>FULL SET LIBRARY</h2>
+              <p>
+                Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
+              </p>
             </div>
 
             <div className="set-panel">

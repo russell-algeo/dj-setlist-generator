@@ -28,8 +28,6 @@
   text-decoration: none;
 }
 
-.root :global(button),
-.root :global(input),
 .root :global(select) {
   font: inherit;
 }
@@ -57,7 +55,8 @@
 
 .root :global(.brand) {
   font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #d8d8d8;
@@ -78,6 +77,8 @@
 .root :global(.topnav a) {
   color: #cfcfcf;
   border-bottom: 1px solid transparent;
+  line-height: 1;
+  padding-top: 2px;
   padding-bottom: 2px;
   transition: color 0.2s ease, border-color 0.2s ease;
 }
