@@ -61,6 +61,7 @@
   text-transform: uppercase;
   color: #d8d8d8;
   white-space: nowrap;
+  padding-bottom: 2px;
 }
 
 .root :global(.topnav) {

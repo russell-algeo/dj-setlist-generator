@@ -518,14 +518,34 @@ async def publish_phase(set_run_id: str) -> str | None:
             html=set_html,
             legacy_path=_output_legacy_path(context.checkpoint_manager.output_dir, filename),
         )
-
-        published_set_id = str(published_row["setId"]) if published_row.get("setId") else None
-        mark_set_run(
-            set_run_id,
-            status="completed",
-            stage="published",
-            published_set_id=published_set_id,
+    except WorkflowSupersededError as error:
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=set_run_id,
+            event_type="set_run.workflow_superseded",
+            message=str(error),
+            details={"phase": "publish"},
         )
+        return None
+    except Exception as error:
+        _mark_failed(run_row, error, stage="publish_failed")
+        raise
+    finally:
+        Config.ENABLE_SPOTIFY_PLAYLISTS = original_playlist_setting
+
+    # Data is now in the DB. Mark the run completed immediately so the row self-describes
+    # as having published data, before any post-publish step that could fail.
+    published_set_id = str(published_row["setId"]) if published_row.get("setId") else None
+    mark_set_run(
+        set_run_id,
+        status="completed",
+        stage="published",
+        published_set_id=published_set_id,
+    )
+
+    # Post-publish bookkeeping — non-fatal. Failures are logged but do not change run status
+    # or published_set_id, so the run remains self-describing.
+    try:
         update_set_run_metadata(
             set_run_id,
             {
@@ -574,22 +594,18 @@ async def publish_phase(set_run_id: str) -> str | None:
         if published_row.get("legacyPath"):
             revalidate_paths.append(str(published_row["legacyPath"]))
         _revalidate(sorted(set(revalidate_paths)), sorted(set(revalidate_tags)))
+    except Exception as bookkeeping_error:
+        try:
+            insert_worker_event(
+                submission_id=str(run_row["submission_id"]),
+                set_run_id=set_run_id,
+                event_type="set_run.post_publish_error",
+                message=str(bookkeeping_error),
+            )
+        except Exception:
+            pass
 
-        return published_set_id
-    except WorkflowSupersededError as error:
-        insert_worker_event(
-            submission_id=str(run_row["submission_id"]),
-            set_run_id=set_run_id,
-            event_type="set_run.workflow_superseded",
-            message=str(error),
-            details={"phase": "publish"},
-        )
-        return None
-    except Exception as error:
-        _mark_failed(run_row, error, stage="publish_failed")
-        raise
-    finally:
-        Config.ENABLE_SPOTIFY_PLAYLISTS = original_playlist_setting
+    return published_set_id
 
 
 def finalize_phase(
