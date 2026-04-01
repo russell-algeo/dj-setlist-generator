@@ -487,7 +487,6 @@ const getHomeArtistCardsUncached = async () => {
       FROM "app"."set_artists" sa
       INNER JOIN "app"."sets" s
         ON s.id = sa.set_id
-       AND s.legacy_path IS NOT NULL
       WHERE sa.role = 'primary'
       GROUP BY sa.artist_id
     ),
@@ -522,8 +521,7 @@ const getHomeArtistCardsUncached = async () => {
       ON atlas_counts.artist_id = a.id
     LEFT JOIN cover_images
       ON cover_images.artist_slug = a.slug
-    WHERE a.legacy_path IS NOT NULL
-       OR COALESCE(set_counts."setCount", 0) > 0
+    WHERE COALESCE(set_counts."setCount", 0) > 0
     ORDER BY a.name ASC
   `);
 
@@ -555,7 +553,7 @@ const getHomeGlobalStatsUncached = async () => {
         FROM "app"."artists" a
         LEFT JOIN "app"."set_artists" sa
           ON sa.artist_id = a.id
-        WHERE a.legacy_path IS NOT NULL OR sa.set_id IS NOT NULL
+        WHERE sa.set_id IS NOT NULL
       ) artist_ids
     ),
     set_counts AS (
