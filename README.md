@@ -59,6 +59,7 @@ The current CI bootstrap path uses direct runner egress plus authenticated yt-dl
 - `YOUTUBE_COOKIES_B64`: Base64-encoded Netscape cookie export from a burner YouTube account
 - `YOUTUBE_USER_AGENT`: matching browser user agent from the same session
 - `GH_PAT`: optional fine-grained token with repo secrets write access so CI can rotate `YOUTUBE_COOKIES_B64` after a successful run
+- `PROCESS_SET_MAX_ACTIVE_RUNS`: app-side cap for how many `process-set` workflow runs may be active at once (default `10`)
 
 `process-set` now runs without the WARP proxy by default. On March 28, 2026, direct-egress bootstrap succeeded on three development test runs for:
 

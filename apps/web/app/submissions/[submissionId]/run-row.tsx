@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 
+import { isActiveSetRunStatus } from "@/lib/jobs/status";
+
 type RunRowProps = {
   id: string;
   title: string | null;
@@ -19,6 +21,13 @@ type RunRowProps = {
 const STATUS_COLOR: Record<string, string> = {
   queued: "#555",
   running: "#7a7a3a",
+  dispatched: "#7a7a3a",
+  resolving: "#7a7a3a",
+  recognizing: "#7a7a3a",
+  aggregating: "#7a7a3a",
+  enriching: "#7a7a3a",
+  publishing: "#7a7a3a",
+  cancelling: "#7a5a3a",
   completed: "#3a7a3a",
   failed: "#8a3a3a",
   cancelled: "#555",
@@ -40,7 +49,7 @@ export function RunRow({
   updatedAt,
 }: RunRowProps) {
   const [expanded, setExpanded] = useState(false);
-  const color = STATUS_COLOR[status] ?? "#555";
+  const color = isActiveSetRunStatus(status) ? "#7a7a3a" : (STATUS_COLOR[status] ?? "#555");
 
   return (
     <>

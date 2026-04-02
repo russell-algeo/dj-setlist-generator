@@ -14,7 +14,8 @@ import {
   workerEvents,
 } from "@/lib/db/schema";
 import type { SessionActor } from "@/lib/auth/session";
-import { activeSetRunStatuses, createWorkerEvent } from "@/lib/jobs/internal";
+import { createWorkerEvent } from "@/lib/jobs/internal";
+import { activeSetRunStatuses, summarizeSetRunCounts } from "@/lib/jobs/status";
 
 const db = getDb();
 
@@ -78,15 +79,13 @@ export const syncSubmissionStatusFromRuns = async (submissionId: string) => {
     return null;
   }
 
-  const totalCount = rows.length;
-  const activeCount = rows.filter(
-    ({ status }) =>
-      status === "queued" ||
-      activeSetRunStatuses.includes(status as (typeof activeSetRunStatuses)[number]),
-  ).length;
-  const completedCount = rows.filter(({ status }) => status === "completed").length;
-  const failedCount = rows.filter(({ status }) => status === "failed").length;
-  const cancelledCount = rows.filter(({ status }) => status === "cancelled").length;
+  const {
+    totalCount,
+    activeCount,
+    completedCount,
+    failedCount,
+    cancelledCount,
+  } = summarizeSetRunCounts(rows);
 
   const nextStatus =
     activeCount > 0

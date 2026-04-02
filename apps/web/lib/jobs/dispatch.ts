@@ -5,11 +5,12 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { dispatchDiscoverArtistWorkflow, dispatchProcessSetWorkflow } from "@/lib/github/workflows";
 import { getDb } from "@/lib/db/client";
 import { segmentHits, setRunLeases, setRuns, submissions } from "@/lib/db/schema";
+import { env } from "@/lib/env";
 import {
   automaticRecoveryAttemptLimit,
   createWorkerEvent,
-  terminalSetRunStatuses,
 } from "@/lib/jobs/internal";
+import { isTerminalSetRunStatus } from "@/lib/jobs/status";
 import { syncSubmissionStatusFromRuns } from "@/lib/jobs/submissions";
 
 const db = getDb();
@@ -287,10 +288,14 @@ const dispatchOneSetRun = async (queuedRun: typeof setRuns.$inferSelect) => {
 };
 
 export const dispatchAllQueuedSetRuns = async () => {
-  const claimed = await db.execute(sql`select * from ops.claim_next_dispatchable_set_run()`);
+  const maxActive = env.processSetMaxActiveRuns;
+  const claimed = await db.execute(
+    sql`select * from ops.claim_next_dispatchable_set_run(${maxActive})`,
+  );
+  const claimedCount = claimed.rows.length;
 
-  if (claimed.rows.length === 0) {
-    return { dispatched: 0, results: [] };
+  if (claimedCount === 0) {
+    return { maxActive, claimedCount, dispatched: 0, results: [] };
   }
 
   const claimedIds = claimed.rows.map((r) => String(r.id));
@@ -299,6 +304,8 @@ export const dispatchAllQueuedSetRuns = async () => {
   const results = await Promise.allSettled(queuedRuns.map(dispatchOneSetRun));
 
   return {
+    maxActive,
+    claimedCount,
     dispatched: results.filter((r) => r.status === "fulfilled").length,
     results: results.map((r) => (r.status === "fulfilled" ? r.value : { error: String(r.reason) })),
   };
@@ -355,7 +362,7 @@ export const finalizeSetRunWorkflow = async (values: {
     return { action: "superseded_workflow_finalize_ignored" as const };
   }
 
-  if (terminalSetRunStatuses.includes(run.status as (typeof terminalSetRunStatuses)[number])) {
+  if (isTerminalSetRunStatus(run.status)) {
     await syncSubmissionStatusFromRuns(run.submissionId);
     return {
       action: "already_terminal" as const,

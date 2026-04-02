@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { canAccessSubmission, requireSessionActor } from "@/lib/auth/session";
 import { formatTimestamp } from "@/lib/format";
 import { getSubmissionDetail } from "@/lib/jobs/submissions";
+import { summarizeSetRunCounts } from "@/lib/jobs/status";
 
 import { RunRow } from "./run-row";
 
@@ -62,12 +63,21 @@ export default async function SubmissionDetailPage({ params }: DetailPageProps) 
 
   const { submission, runs } = detail;
 
-  const completedRuns = runs.filter((r) => r.status === "completed");
-  const failedRuns = runs.filter((r) => r.status === "failed");
-  const activeRuns = runs.filter((r) => r.status === "queued" || r.status === "running" || r.status === "claimed");
+  const runCounts = summarizeSetRunCounts(runs);
   const totalHits = runs.reduce((acc, r) => acc + (r.segmentHitRollup?.hitCount ?? 0), 0);
   const totalRecognized = runs.reduce((acc, r) => acc + (r.segmentHitRollup?.recognizedCount ?? 0), 0);
   const recognitionRate = totalHits > 0 ? Math.round((totalRecognized / totalHits) * 100) : null;
+  const metricCards = [
+    { value: runCounts.totalCount, label: "Total Sets" },
+    { value: runCounts.queuedCount, label: "Queued" },
+    { value: runCounts.inFlightCount, label: "In Flight" },
+    { value: runCounts.completedCount, label: "Complete" },
+    { value: runCounts.failedCount, label: "Failed" },
+  ];
+
+  if (runCounts.cancelledCount > 0) {
+    metricCards.push({ value: runCounts.cancelledCount, label: "Cancelled" });
+  }
 
   const statusColor = STATUS_COLOR[submission.status] ?? "#555";
 
@@ -101,13 +111,15 @@ export default async function SubmissionDetailPage({ params }: DetailPageProps) 
           </span>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 28 }}>
-          {[
-            { value: runs.length, label: "Total Sets" },
-            { value: completedRuns.length, label: "Complete" },
-            { value: activeRuns.length, label: "Active" },
-            { value: failedRuns.length, label: "Failed" },
-          ].map(({ value, label }) => (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${metricCards.length}, 1fr)`,
+            gap: 12,
+            marginBottom: 28,
+          }}
+        >
+          {metricCards.map(({ value, label }) => (
             <div key={label} style={{ background: "#111", border: "1px solid #1c1c1c", borderRadius: 6, padding: "14px 16px" }}>
               <div style={{ color: "#ddd", fontSize: 20, marginBottom: 4 }}>{value}</div>
               <div style={{ color: "#444", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase" }}>{label}</div>
