@@ -61,6 +61,7 @@ const NETWORK_EDGE_WIDTH_BASE = 1;
 const NETWORK_EDGE_WIDTH_RANGE = 2;
 const NETWORK_LENS_RADIUS = 140;
 const NETWORK_LENS_FALLOFF = 1.8;
+const NETWORK_NODE_BASE_RADIUS = 12;
 const NETWORK_NODE_MAX_SCALE = 1.8;
 const NETWORK_LABEL_BASE_SIZE = 11;
 const NETWORK_LABEL_SIZE_RANGE = 7;
@@ -1463,7 +1464,7 @@ export function ArchiveHomeExplorer({
         const angle =
           (Math.PI * 2 * index) / Math.max(1, networkPayload.artists.length) - Math.PI / 2;
         positions.set(artist.slug, {
-          r: 8 + Math.min(8, Math.sqrt(artist.setCount) * 0.7),
+          r: NETWORK_NODE_BASE_RADIUS,
           x: cx + Math.cos(angle) * radius,
           y: cy + Math.sin(angle) * radius,
         });
