@@ -2594,7 +2594,7 @@ export function ArchiveHomeExplorer({
 
         <section className="section reveal" id="sets" style={{ position: "relative" }}>
           <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
-            <InlineSubmitButton mode="submit-set" />
+            <InlineSubmitButton mode="scan-artist" />
           </div>
           <div className="section-inner">
             <div className="section-head">
