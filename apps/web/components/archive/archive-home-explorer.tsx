@@ -2433,7 +2433,6 @@ export function ArchiveHomeExplorer({
                           setItem.duration >= 3600
                             ? `${Math.floor(setItem.duration / 3600)}h ${Math.floor((setItem.duration % 3600) / 60)}m`
                             : `${Math.floor(setItem.duration / 60)}m`,
-                          `H:${setItem.confidenceCounts.HIGH} M:${setItem.confidenceCounts.MEDIUM} L:${setItem.confidenceCounts.LOW} U:${setItem.confidenceCounts.UNCERTAIN}`,
                         ]}
                         miniTimeline={setItem.miniTimeline.map((segment) => ({
                           confidence: segment.confidence,

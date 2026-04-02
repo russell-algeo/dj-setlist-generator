@@ -2140,7 +2140,6 @@ export function ArchiveArtistExplorer({
                         `${setItem.totalTracks} tracks`,
                         setItem.matchLabel,
                         setItem.durationFmt,
-                        `H:${setItem.confidenceCounts.HIGH} M:${setItem.confidenceCounts.MEDIUM} L:${setItem.confidenceCounts.LOW} U:${setItem.confidenceCounts.UNCERTAIN}`,
                       ]}
                       miniTimeline={miniSegments}
                       selected={isCompared}

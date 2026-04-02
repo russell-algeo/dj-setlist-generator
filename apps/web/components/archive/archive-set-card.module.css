@@ -81,7 +81,7 @@
 
 .mini {
   border: 1px solid var(--line);
-  background: #0a0a0a;
+  background: rgb(123 123 123);
   height: 14px;
   position: relative;
   overflow: hidden;
