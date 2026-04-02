@@ -15,6 +15,7 @@ import {
 
 import { buildSetHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
+import { ArchiveSetCard } from "@/components/archive/archive-set-card";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
 import { ARCHIVE_SET_LIBRARY_PAGE_SIZE } from "@/lib/archive/constants";
@@ -2114,121 +2115,57 @@ export function ArchiveArtistExplorer({
                   const miniSegments = buildMiniTimeline(setItem);
 
                   return (
-                    <article
-                      className={joinClasses(
-                        "set-card",
-                        !setItem.heroImageUrl && "empty-thumb-card",
-                        isCompared && "selected",
-                      )}
+                    <ArchiveSetCard
+                      actions={[
+                        {
+                          key: `compare:${setItem.id}`,
+                          label: "Compare",
+                          onClick: () =>
+                            setCompareSelection((current) => {
+                              if (current.includes(setItem.id)) {
+                                return current.filter((value) => value !== setItem.id);
+                              }
+                              if (current.length >= 2) {
+                                return [current[1], setItem.id];
+                              }
+                              return [...current, setItem.id];
+                            }),
+                        },
+                      ]}
+                      imageAlt={setItem.title}
+                      imageTarget="_blank"
+                      imageUrl={setItem.heroImageUrl}
                       key={setItem.id}
-                    >
-                      <div className={joinClasses("set-thumb", !setItem.heroImageUrl && "empty")}>
-                        {setItem.heroImageUrl ? (
-                          <a href={setItem.previewHref} rel="noopener" target="_blank">
-                            <img alt={setItem.title} loading="lazy" src={setItem.heroImageUrl} />
-                          </a>
-                        ) : (
-                          "No Image"
-                        )}
-                      </div>
-                      <div className="set-body">
-                        <h4 className="set-title">
-                          <a href={setItem.previewHref} rel="noopener" target="_blank">
-                            {setItem.title}
-                          </a>
-                        </h4>
-                        <div className="set-mini">
-                          {miniSegments.map((segment, index) => (
-                            <span
-                              className={joinClasses("set-mini-seg", segment.confidence.toLowerCase())}
-                              key={`${setItem.id}:${segment.leftPct}:${index}`}
-                              style={{
-                                left: `${segment.leftPct}%`,
-                                width: `${segment.widthPct}%`,
-                              }}
-                            />
-                          ))}
-                        </div>
-                        <div className="set-meta">
-                          <span className="set-pill">{setItem.totalTracks} tracks</span>
-                          <span className="set-pill">{setItem.matchLabel}</span>
-                          <span className="set-pill">{setItem.durationFmt}</span>
-                          <span className="set-pill">
-                            H:{setItem.confidenceCounts.HIGH} M:{setItem.confidenceCounts.MEDIUM} L:{setItem.confidenceCounts.LOW} U:
-                            {setItem.confidenceCounts.UNCERTAIN}
-                          </span>
-                        </div>
-                        <div className="actions">
-                          <a href={setItem.previewHref} rel="noopener" target="_blank">
-                            Open Set Page
-                          </a>
-                          {setItem.sourceUrl ? (
-                            <a href={setItem.sourceUrl} rel="noopener" target="_blank">
-                              Source
-                            </a>
-                          ) : null}
-                          <button
-                            className="js-set-compare"
-                            onClick={() =>
-                              setCompareSelection((current) => {
-                                if (current.includes(setItem.id)) {
-                                  return current.filter((value) => value !== setItem.id);
-                                }
-                                if (current.length >= 2) {
-                                  return [current[1], setItem.id];
-                                }
-                                return [...current, setItem.id];
-                              })
-                            }
-                            type="button"
-                          >
-                            Compare
-                          </button>
-                          <button
-                            className="js-tracklist-toggle"
-                            onClick={() =>
-                              setExpandedSetCards((current) =>
-                                current.includes(setItem.id)
-                                  ? current.filter((value) => value !== setItem.id)
-                                  : [...current, setItem.id],
-                              )
-                            }
-                            type="button"
-                          >
-                            {isExpanded ? "Hide Tracklist" : "Show Tracklist"}
-                          </button>
-                        </div>
-                        <div className={joinClasses("set-tracklist", isExpanded && "open")}>
-                          {setItem.visibleTracks.length > 0 ? (
-                            setItem.visibleTracks.map((track) => (
-                              <div
-                                className={joinClasses(
-                                  "set-track",
-                                  sharedTrackKeySet.has(normalizeSearchText(track.trackKey)) && "shared",
-                                )}
-                                key={`${setItem.id}:${track.position}`}
-                              >
-                                <span className="set-track-time">{track.startTimeFormatted}</span>
-                                <span>
-                                  <a
-                                    href={buildTrackAnchorHref(setItem.slug, track.position)}
-                                    rel="noopener"
-                                    target="_blank"
-                                  >
-                                    {track.artist} - {track.title}
-                                  </a>
-                                </span>
-                                <span className={joinClasses("set-track-conf", track.confidence.toLowerCase())}>
-                                  {track.confidence}
-                                </span>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="empty">No identified tracks in this set.</div>
-                          )}
-                        </div>
-                      </div>
-                    </article>
+                      metaPills={[
+                        `${setItem.totalTracks} tracks`,
+                        setItem.matchLabel,
+                        setItem.durationFmt,
+                        `H:${setItem.confidenceCounts.HIGH} M:${setItem.confidenceCounts.MEDIUM} L:${setItem.confidenceCounts.LOW} U:${setItem.confidenceCounts.UNCERTAIN}`,
+                      ]}
+                      miniTimeline={miniSegments}
+                      selected={isCompared}
+                      setHref={setItem.previewHref}
+                      sourceHref={setItem.sourceUrl}
+                      title={setItem.title}
+                      titleTarget="_blank"
+                      toggleTracklist={() =>
+                        setExpandedSetCards((current) =>
+                          current.includes(setItem.id)
+                            ? current.filter((value) => value !== setItem.id)
+                            : [...current, setItem.id],
+                        )
+                      }
+                      tracklist={setItem.visibleTracks.map((track) => ({
+                        confidence: track.confidence,
+                        href: buildTrackAnchorHref(setItem.slug, track.position),
+                        id: `${setItem.id}:${track.position}`,
+                        label: `${track.artist} - ${track.title}`,
+                        shared: sharedTrackKeySet.has(normalizeSearchText(track.trackKey)),
+                        startTimeFormatted: track.startTimeFormatted,
+                        target: "_blank",
+                      }))}
+                      tracklistExpanded={isExpanded}
+                    />
                   );
                 })}
               </div>

@@ -13,6 +13,7 @@ import {
 
 import { buildArtistHref, buildSetHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
+import { ArchiveSetCard } from "@/components/archive/archive-set-card";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
 import { ARCHIVE_HOME_EXPLORER_CSS } from "@/components/archive/archive-home-explorer.styles";
@@ -48,6 +49,11 @@ type TrackCardStyle = CSSProperties & Partial<Record<`--${string}`, string>>;
 const CONF_FILTER_LEVELS: ConfidenceFilter[] = ["all", "HIGH", "MEDIUM", "LOW"];
 const THRESHOLD_LEVELS = [1, 2, 3, 5, 8, 12] as const;
 const DEFAULT_NETWORK_MIN_SCORE = 5;
+const NETWORK_EDGE_VISUAL_CURVE = 0.6;
+const NETWORK_EDGE_ALPHA_FLOOR = 0.18;
+const NETWORK_EDGE_ALPHA_RANGE = 0.58;
+const NETWORK_EDGE_WIDTH_BASE = 1;
+const NETWORK_EDGE_WIDTH_RANGE = 2;
 const PAGE = {
   evidence: 9,
   pairRows: 10,
@@ -77,6 +83,18 @@ const fmt = (value: number) => value.toLocaleString("en-US");
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+
+const buildNetworkEdgeVisual = (normalizedScore: number) => {
+  const normalized = clamp(normalizedScore / 100, 0, 1);
+  const visualWeight = Math.pow(normalized, NETWORK_EDGE_VISUAL_CURVE);
+  const alpha = NETWORK_EDGE_ALPHA_FLOOR + visualWeight * NETWORK_EDGE_ALPHA_RANGE;
+  const strokeWidth = NETWORK_EDGE_WIDTH_BASE + visualWeight * NETWORK_EDGE_WIDTH_RANGE;
+
+  return {
+    stroke: `rgba(216,255,90,${alpha.toFixed(3)})`,
+    strokeWidth: strokeWidth.toFixed(2),
+  };
+};
 
 const hashString = (value: string) => {
   let hash = 0;
@@ -2021,8 +2039,9 @@ export function ArchiveHomeExplorer({
                       if (!left || !right) {
                         return null;
                       }
-                      const stroke = `rgba(216,255,90,${Math.max(0.08, edge.normalizedScore / 120).toFixed(3)})`;
-                      const strokeWidth = (0.6 + edge.normalizedScore / 25).toFixed(2);
+                      const { stroke, strokeWidth } = buildNetworkEdgeVisual(
+                        edge.normalizedScore,
+                      );
                       return (
                         <line
                           key={`${edge.artistASlug}-${edge.artistBSlug}`}
@@ -2393,91 +2412,52 @@ export function ArchiveHomeExplorer({
                     const tracklist = setTracklists[setItem.slug] ?? [];
                     const tracklistLoading = loadingTracklists[setItem.slug] ?? false;
                     return (
-                      <article className="set-card" key={setItem.id}>
-                        <div className="set-thumb">
-                          <a href={buildSetHref({ slug: setItem.slug })}>
-                            <img
-                              alt={setItem.title}
-                              loading="lazy"
-                              src={
-                                setItem.thumbnailUrl ??
-                                fallbackMedia(`set:${setItem.artistName}:${setItem.title}`)
-                              }
-                            />
-                          </a>
-                        </div>
-                        <div className="set-body">
-                          <h4 className="set-title">
-                            <a href={buildSetHref({ slug: setItem.slug })}>
-                              {setItem.title}
-                            </a>
-                          </h4>
-                          <p className="muted">
-                            <a
-                              href={buildArtistHref({ slug: setItem.artistSlug })}
-                            >
-                              {setItem.artistName}
-                            </a>
-                          </p>
-                          <div className="set-meta">
-                            <span className="set-pill">{fmt(setItem.totalTracks)} tracks</span>
-                            <span className="set-pill">{Math.round(setItem.recognitionRate ?? 0)}% match</span>
-                            <span className="set-pill">
-                              {setItem.duration >= 3600
-                                ? `${Math.floor(setItem.duration / 3600)}h ${Math.floor((setItem.duration % 3600) / 60)}m`
-                                : `${Math.floor(setItem.duration / 60)}m`}
-                            </span>
-                          </div>
-                          <div className="actions">
-                            <a href={buildSetHref({ slug: setItem.slug })}>
-                              Open Set Page
-                            </a>
-                            {setItem.sourceUrl ? (
-                              <a href={setItem.sourceUrl} rel="noreferrer" target="_blank">
-                                Source
-                              </a>
-                            ) : null}
-                            <button
-                              onClick={() => toggleSetTracklist(setItem.slug)}
-                              type="button"
-                            >
-                              {expanded ? "Hide Tracklist" : "Show Tracklist"}
-                            </button>
-                          </div>
-                          <div className={joinClasses("set-tracklist", expanded && "open")}>
-                            {tracklistLoading ? (
-                              <div className="empty">Loading tracklist…</div>
-                            ) : tracklist.length ? (
-                              tracklist.map((track) => (
-                                <div className="set-track" key={`${setItem.id}-${track.trackKey}-${track.position}`}>
-                                  <span className="set-track-time">{track.startTimeFormatted}</span>
-                                  <span>
-                                    <a
-                                      href={buildTrackSetHref({
-                                        setSlug: track.setSlug,
-                                        trackPosition: track.position,
-                                      })}
-                                    >
-                                      {track.artist} - {track.title}
-                                    </a>
-                                  </span>
-                                  <span
-                                    className="set-track-conf"
-                                    style={{
-                                      borderColor: CONFIDENCE_COLOR[track.confidence],
-                                      color: CONFIDENCE_COLOR[track.confidence],
-                                    }}
-                                  >
-                                    {track.confidence}
-                                  </span>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="empty">No recognized tracks in this set.</div>
-                            )}
-                          </div>
-                        </div>
-                      </article>
+                      <ArchiveSetCard
+                        actions={
+                          setItem.artistSlug
+                            ? [
+                                {
+                                  href: buildArtistHref({ slug: setItem.artistSlug }),
+                                  key: `artist:${setItem.id}`,
+                                  label: "Artist Page",
+                                },
+                              ]
+                            : []
+                        }
+                        imageAlt={setItem.title}
+                        imageUrl={setItem.thumbnailUrl}
+                        key={setItem.id}
+                        metaPills={[
+                          `${fmt(setItem.totalTracks)} tracks`,
+                          `${Math.round(setItem.recognitionRate ?? 0)}% match`,
+                          setItem.duration >= 3600
+                            ? `${Math.floor(setItem.duration / 3600)}h ${Math.floor((setItem.duration % 3600) / 60)}m`
+                            : `${Math.floor(setItem.duration / 60)}m`,
+                          `H:${setItem.confidenceCounts.HIGH} M:${setItem.confidenceCounts.MEDIUM} L:${setItem.confidenceCounts.LOW} U:${setItem.confidenceCounts.UNCERTAIN}`,
+                        ]}
+                        miniTimeline={setItem.miniTimeline.map((segment) => ({
+                          confidence: segment.confidence,
+                          leftPct: segment.startPct,
+                          widthPct: segment.widthPct,
+                        }))}
+                        setHref={buildSetHref({ slug: setItem.slug })}
+                        sourceHref={setItem.sourceUrl}
+                        title={setItem.title}
+                        toggleTracklist={() => toggleSetTracklist(setItem.slug)}
+                        tracklist={tracklist.map((track) => ({
+                          confidence: track.confidence,
+                          href: buildTrackSetHref({
+                            setSlug: track.setSlug,
+                            trackPosition: track.position,
+                          }),
+                          id: `${setItem.id}-${track.trackKey}-${track.position}`,
+                          label: `${track.artist} - ${track.title}`,
+                          startTimeFormatted: track.startTimeFormatted,
+                        }))}
+                        tracklistEmptyLabel="No recognized tracks in this set."
+                        tracklistExpanded={expanded}
+                        tracklistLoading={tracklistLoading}
+                      />
                     );
                   })
                 ) : (
