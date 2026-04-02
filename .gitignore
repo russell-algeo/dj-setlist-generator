@@ -42,6 +42,14 @@ env/
 assets/
 checkpoints/
 output/
+.playwright-mcp/
+apps/web/.next.corrupt-*/
+
+# Local scratch files from ad-hoc debugging
+/artist_profile_image
+/image_url
+/mixInfo
+/thumbnail_url
 
 # IDE
 .vscode/
