@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 
-import { getDb } from "@/lib/db/client";
+import { getWorkerDb } from "@/lib/db/client";
 
 const REFRESH_STATEMENTS = [
   sql`REFRESH MATERIALIZED VIEW CONCURRENTLY "app"."archive_home_artist_atlas_mv"`,
@@ -9,7 +9,9 @@ const REFRESH_STATEMENTS = [
 ] as const;
 
 export const refreshArchiveHomeMaterializedViews = async () => {
-  const db = getDb();
+  // The public app role cannot refresh these archive-home MVs. Use the
+  // internal worker connection, which is granted MAINTAIN on them.
+  const db = getWorkerDb();
 
   for (const statement of REFRESH_STATEMENTS) {
     await db.execute(statement);

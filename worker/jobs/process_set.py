@@ -34,6 +34,14 @@ class WorkflowSupersededError(RuntimeError):
     """Raised when a newer workflow run takes ownership of the set run."""
 
 
+class PublishSetRunPartialError(RuntimeError):
+    """Raised when publish writes set data but fails a later server-side step."""
+
+    def __init__(self, message: str, *, published_row: dict[str, object]) -> None:
+        super().__init__(message)
+        self.published_row = published_row
+
+
 def _dispatch_pending() -> None:
     import requests
 
@@ -87,8 +95,28 @@ def _publish_set_run_payload(
         },
         timeout=120,
     )
+
+    response_payload: dict[str, object] | None = None
+    try:
+        parsed_payload = response.json()
+        if isinstance(parsed_payload, dict):
+            response_payload = dict(parsed_payload)
+    except ValueError:
+        response_payload = None
+
+    if response.ok:
+        return response_payload or {}
+
+    if response_payload and response_payload.get("setId"):
+        error_message = (
+            str(response_payload.get("error"))
+            if response_payload.get("error")
+            else f"Publish failed with HTTP {response.status_code}"
+        )
+        raise PublishSetRunPartialError(error_message, published_row=response_payload)
+
     response.raise_for_status()
-    return dict(response.json())
+    raise RuntimeError("Publish failed without a response body")
 
 
 def _detect_source_platform(source_url: str) -> str:
@@ -196,6 +224,73 @@ def _mark_failed(run_row: dict[str, object], error: Exception | str, *, stage: s
         event_type="set_run.failed",
         message=message,
     )
+
+
+def _mark_published_with_errors(
+    run_row: dict[str, object],
+    error: Exception | str,
+    *,
+    published_row: dict[str, object] | None = None,
+    published_set_id: str | None = None,
+) -> str | None:
+    message = str(error)
+    resolved_published_set_id = published_set_id
+    if not resolved_published_set_id and published_row:
+        resolved_published_set_id = str(published_row.get("setId") or "") or None
+
+    try:
+        mark_set_run(
+            str(run_row["id"]),
+            status="completed",
+            stage="published_with_errors",
+            error_summary=message,
+            published_set_id=resolved_published_set_id,
+        )
+    except Exception:
+        pass
+
+    if published_row:
+        try:
+            update_set_run_metadata(
+                str(run_row["id"]),
+                {
+                    "published": {
+                        "set_id": published_row.get("setId"),
+                        "slug": published_row.get("slug"),
+                        "legacy_path": published_row.get("legacyPath"),
+                    }
+                },
+            )
+        except Exception:
+            pass
+
+    try:
+        finalize_submission_from_runs(str(run_row["submission_id"]))
+    except Exception:
+        pass
+
+    details: dict[str, object] | None = None
+    if published_row:
+        details = {
+            "published_set_id": resolved_published_set_id,
+            "slug": published_row.get("slug"),
+            "legacy_path": published_row.get("legacyPath"),
+        }
+    elif resolved_published_set_id:
+        details = {"published_set_id": resolved_published_set_id}
+
+    try:
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]),
+            set_run_id=str(run_row["id"]),
+            event_type="set_run.post_publish_error",
+            message=message,
+            details=details,
+        )
+    except Exception:
+        pass
+
+    return resolved_published_set_id
 
 
 async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
@@ -429,24 +524,11 @@ async def publish_phase(set_run_id: str) -> str | None:
             _revalidate(["/", "/artists", "/sets", "/archive-preview"], ["archive:home", "archive:lists"])
             mark_set_run(set_run_id, status="completed", stage="published")
         except Exception as bookkeeping_error:
-            try:
-                mark_set_run(
-                    set_run_id,
-                    status="completed",
-                    stage="published_with_errors",
-                    error_summary=str(bookkeeping_error),
-                )
-            except Exception:
-                pass
-            try:
-                insert_worker_event(
-                    submission_id=str(run_row["submission_id"]),
-                    set_run_id=set_run_id,
-                    event_type="set_run.post_publish_error",
-                    message=str(bookkeeping_error),
-                )
-            except Exception:
-                pass
+            _mark_published_with_errors(
+                run_row,
+                bookkeeping_error,
+                published_set_id=existing_published_set_id,
+            )
         return existing_published_set_id
 
     source_metadata = dict(run_row.get("source_metadata") or {})
@@ -563,6 +645,9 @@ async def publish_phase(set_run_id: str) -> str | None:
             html=set_html,
             legacy_path=_output_legacy_path(context.checkpoint_manager.output_dir, filename),
         )
+    except PublishSetRunPartialError as error:
+        _mark_published_with_errors(run_row, error, published_row=error.published_row)
+        raise
     except WorkflowSupersededError as error:
         insert_worker_event(
             submission_id=str(run_row["submission_id"]),
@@ -640,24 +725,7 @@ async def publish_phase(set_run_id: str) -> str | None:
             revalidate_paths.append(str(published_row["legacyPath"]))
         _revalidate(sorted(set(revalidate_paths)), sorted(set(revalidate_tags)))
     except Exception as bookkeeping_error:
-        try:
-            mark_set_run(
-                set_run_id,
-                status="completed",
-                stage="published_with_errors",
-                error_summary=str(bookkeeping_error),
-            )
-        except Exception:
-            pass
-        try:
-            insert_worker_event(
-                submission_id=str(run_row["submission_id"]),
-                set_run_id=set_run_id,
-                event_type="set_run.post_publish_error",
-                message=str(bookkeeping_error),
-            )
-        except Exception:
-            pass
+        _mark_published_with_errors(run_row, bookkeeping_error, published_row=published_row)
 
     return published_set_id
 

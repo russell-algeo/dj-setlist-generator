@@ -30,7 +30,23 @@ export async function POST(request: Request) {
       setRunId: body.setRunId,
     },
   });
-  await refreshArchiveHomeMaterializedViews();
+  try {
+    await refreshArchiveHomeMaterializedViews();
+  } catch (error) {
+    const refreshError = error instanceof Error ? error.message : String(error);
+    console.error("archive_home_materialized_view_refresh_failed", {
+      setRunId: body.setRunId,
+      refreshError,
+    });
+    return NextResponse.json(
+      {
+        ...published,
+        error: refreshError,
+        errorCode: "archive_home_materialized_view_refresh_failed",
+      },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json(published);
 }

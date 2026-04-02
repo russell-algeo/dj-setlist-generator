@@ -6,11 +6,18 @@ import * as schema from "@/lib/db/schema";
 
 neonConfig.poolQueryViaFetch = true;
 
-export const getDb = () => {
-  const connectionString = env.databaseUrl ?? requireEnv("databaseUrl");
+const createDb = (connectionString: string) => {
   const client = neon(connectionString);
 
   return drizzle(client, { schema });
 };
 
-export type AppDb = ReturnType<typeof getDb>;
+export const getDb = () => createDb(env.databaseUrl ?? requireEnv("databaseUrl"));
+
+export const getWorkerDb = () =>
+  createDb(env.databaseUrlDirect ?? requireEnv("databaseUrlDirect"));
+
+export const getMigrationsDb = () =>
+  createDb(env.databaseUrlMigrations ?? requireEnv("databaseUrlMigrations"));
+
+export type AppDb = ReturnType<typeof createDb>;

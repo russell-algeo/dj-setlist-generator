@@ -77,6 +77,7 @@ def _build_role_sql(
         DECLARE
           schema_name text;
           object_table_name text;
+          object_materialized_view_name text;
           object_sequence_name text;
           object_function_name text;
         BEGIN
@@ -94,6 +95,18 @@ def _build_role_sql(
                   'ALTER TABLE %I.%I OWNER TO {migrator_role}',
                   schema_name,
                   object_table_name
+                );
+              END LOOP;
+
+              FOR object_materialized_view_name IN
+                SELECT matviewname
+                FROM pg_matviews
+                WHERE schemaname = schema_name
+              LOOP
+                EXECUTE format(
+                  'ALTER MATERIALIZED VIEW %I.%I OWNER TO {migrator_role}',
+                  schema_name,
+                  object_materialized_view_name
                 );
               END LOOP;
 
@@ -141,6 +154,7 @@ def _build_role_sql(
             GRANT USAGE ON SCHEMA app TO {app_role}, {worker_role};
             GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO {app_role};
             GRANT SELECT ON ALL TABLES IN SCHEMA app TO {worker_role};
+            GRANT MAINTAIN ON ALL TABLES IN SCHEMA app TO {worker_role};
             GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app TO {app_role}, {worker_role};
             GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO {app_role};
           END IF;
@@ -187,6 +201,8 @@ def _build_role_sql(
                       GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {app_role};
                     ALTER DEFAULT PRIVILEGES FOR ROLE {grantor} IN SCHEMA app
                       GRANT SELECT ON TABLES TO {worker_role};
+                    ALTER DEFAULT PRIVILEGES FOR ROLE {grantor} IN SCHEMA app
+                      GRANT MAINTAIN ON TABLES TO {worker_role};
                     ALTER DEFAULT PRIVILEGES FOR ROLE {grantor} IN SCHEMA app
                       GRANT USAGE, SELECT ON SEQUENCES TO {app_role}, {worker_role};
                     ALTER DEFAULT PRIVILEGES FOR ROLE {grantor} IN SCHEMA app
