@@ -714,7 +714,6 @@ export function ArchiveHomeExplorer({
   const [networkSearch, setNetworkSearch] = useState("");
   const [networkSelectedArtistSlugs, setNetworkSelectedArtistSlugs] = useState<string[]>([]);
   const [networkLensEnabled, setNetworkLensEnabled] = useState(false);
-  const [networkHoveredArtistSlug, setNetworkHoveredArtistSlug] = useState<string | null>(null);
   const [networkPointer, setNetworkPointer] = useState<NetworkPointerState>({
     active: false,
     x: 0,
@@ -1482,6 +1481,50 @@ export function ArchiveHomeExplorer({
     [networkPayload],
   );
 
+  const networkPinnedArtistSlug = useMemo(() => {
+    if (!networkLensEnabled || !networkPointer.active) {
+      return null;
+    }
+
+    let pinned: { distance: number; slug: string } | null = null;
+
+    for (const artist of networkArtists) {
+      const position = networkPositions.positions.get(artist.slug);
+      if (!position) {
+        continue;
+      }
+
+      const selected = networkSelectedArtistSlugs.includes(artist.slug);
+      const distance = Math.hypot(position.x - networkPointer.x, position.y - networkPointer.y);
+      const proximity = clamp(1 - distance / NETWORK_LENS_RADIUS, 0, 1);
+      let visualWeight = proximity > 0 ? Math.pow(proximity, NETWORK_LENS_FALLOFF) : 0;
+
+      if (selected) {
+        visualWeight = Math.max(visualWeight, NETWORK_SELECTED_LENS_FLOOR);
+      }
+
+      const visibleRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
+      if (distance > visibleRadius) {
+        continue;
+      }
+
+      if (!pinned || distance < pinned.distance) {
+        pinned = {
+          distance,
+          slug: artist.slug,
+        };
+      }
+    }
+
+    return pinned ? pinned.slug : null;
+  }, [
+    networkArtists,
+    networkLensEnabled,
+    networkPointer,
+    networkPositions,
+    networkSelectedArtistSlugs,
+  ]);
+
   const networkNodeVisuals = useMemo(() => {
     const centerX = networkPositions.width / 2;
     const centerY = networkPositions.height / 2;
@@ -1507,7 +1550,7 @@ export function ArchiveHomeExplorer({
         }
 
         const circleVisualWeight =
-          networkLensEnabled && networkHoveredArtistSlug === artist.slug
+          networkLensEnabled && networkPinnedArtistSlug === artist.slug
             ? Math.max(visualWeight, 1)
             : visualWeight;
 
@@ -1516,9 +1559,10 @@ export function ArchiveHomeExplorer({
         const directionLength = Math.hypot(directionXRaw, directionYRaw) || 1;
         const directionX = directionXRaw / directionLength;
         const directionY = directionYRaw / directionLength;
+        const labelRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
         const circleRadius = position.r * (1 + circleVisualWeight * (NETWORK_NODE_MAX_SCALE - 1));
         const fontSize = NETWORK_LABEL_BASE_SIZE + visualWeight * NETWORK_LABEL_SIZE_RANGE;
-        const labelOffset = circleRadius + NETWORK_LABEL_OUTSET + visualWeight * NETWORK_LABEL_OUTSET_RANGE;
+        const labelOffset = labelRadius + NETWORK_LABEL_OUTSET + visualWeight * NETWORK_LABEL_OUTSET_RANGE;
         const textAnchor: "start" | "end" = directionX >= 0 ? "start" : "end";
         const estimatedLabelWidth = artist.name.length * fontSize * 0.62;
         let labelX = position.x + directionX * labelOffset;
@@ -1555,8 +1599,8 @@ export function ArchiveHomeExplorer({
       });
   }, [
     networkArtists,
-    networkHoveredArtistSlug,
     networkLensEnabled,
+    networkPinnedArtistSlug,
     networkPointer,
     networkPositions,
     networkSelectedArtistSlugs,
@@ -2230,7 +2274,6 @@ export function ArchiveHomeExplorer({
                       });
                     }}
                     onPointerLeave={() => {
-                      setNetworkHoveredArtistSlug(null);
                       setNetworkPointer((current) =>
                         current.active
                           ? {
@@ -2286,12 +2329,6 @@ export function ArchiveHomeExplorer({
                       <g
                         key={node.artist.id}
                         onClick={() => toggleNetworkArtistSelection(node.artist.slug)}
-                        onPointerEnter={() => setNetworkHoveredArtistSlug(node.artist.slug)}
-                        onPointerLeave={() => {
-                          setNetworkHoveredArtistSlug((current) =>
-                            current === node.artist.slug ? null : current,
-                          );
-                        }}
                         style={{ cursor: "pointer" }}
                       >
                         <circle
