@@ -714,6 +714,7 @@ export function ArchiveHomeExplorer({
   const [networkSearch, setNetworkSearch] = useState("");
   const [networkSelectedArtistSlugs, setNetworkSelectedArtistSlugs] = useState<string[]>([]);
   const [networkLensEnabled, setNetworkLensEnabled] = useState(false);
+  const [networkHoveredArtistSlug, setNetworkHoveredArtistSlug] = useState<string | null>(null);
   const [networkPointer, setNetworkPointer] = useState<NetworkPointerState>({
     active: false,
     x: 0,
@@ -1505,6 +1506,10 @@ export function ArchiveHomeExplorer({
           }
         }
 
+        if (networkLensEnabled && networkHoveredArtistSlug === artist.slug) {
+          visualWeight = Math.max(visualWeight, 1);
+        }
+
         const directionXRaw = position.x - centerX;
         const directionYRaw = position.y - centerY;
         const directionLength = Math.hypot(directionXRaw, directionYRaw) || 1;
@@ -1548,6 +1553,7 @@ export function ArchiveHomeExplorer({
       });
   }, [
     networkArtists,
+    networkHoveredArtistSlug,
     networkLensEnabled,
     networkPointer,
     networkPositions,
@@ -2222,6 +2228,7 @@ export function ArchiveHomeExplorer({
                       });
                     }}
                     onPointerLeave={() => {
+                      setNetworkHoveredArtistSlug(null);
                       setNetworkPointer((current) =>
                         current.active
                           ? {
@@ -2277,6 +2284,12 @@ export function ArchiveHomeExplorer({
                       <g
                         key={node.artist.id}
                         onClick={() => toggleNetworkArtistSelection(node.artist.slug)}
+                        onPointerEnter={() => setNetworkHoveredArtistSlug(node.artist.slug)}
+                        onPointerLeave={() => {
+                          setNetworkHoveredArtistSlug((current) =>
+                            current === node.artist.slug ? null : current,
+                          );
+                        }}
                         style={{ cursor: "pointer" }}
                       >
                         <circle
