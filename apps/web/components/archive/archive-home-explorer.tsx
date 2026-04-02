@@ -1506,16 +1506,17 @@ export function ArchiveHomeExplorer({
           }
         }
 
-        if (networkLensEnabled && networkHoveredArtistSlug === artist.slug) {
-          visualWeight = Math.max(visualWeight, 1);
-        }
+        const circleVisualWeight =
+          networkLensEnabled && networkHoveredArtistSlug === artist.slug
+            ? Math.max(visualWeight, 1)
+            : visualWeight;
 
         const directionXRaw = position.x - centerX;
         const directionYRaw = position.y - centerY;
         const directionLength = Math.hypot(directionXRaw, directionYRaw) || 1;
         const directionX = directionXRaw / directionLength;
         const directionY = directionYRaw / directionLength;
-        const circleRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
+        const circleRadius = position.r * (1 + circleVisualWeight * (NETWORK_NODE_MAX_SCALE - 1));
         const fontSize = NETWORK_LABEL_BASE_SIZE + visualWeight * NETWORK_LABEL_SIZE_RANGE;
         const labelOffset = circleRadius + NETWORK_LABEL_OUTSET + visualWeight * NETWORK_LABEL_OUTSET_RANGE;
         const textAnchor: "start" | "end" = directionX >= 0 ? "start" : "end";
@@ -1539,6 +1540,7 @@ export function ArchiveHomeExplorer({
           labelX,
           labelY,
           position,
+          renderWeight: Math.max(visualWeight, circleVisualWeight),
           selected,
           textAnchor,
           visualWeight,
@@ -1546,8 +1548,8 @@ export function ArchiveHomeExplorer({
       })
       .filter((value): value is NonNullable<typeof value> => value !== null)
       .sort((left, right) => {
-        if (left.visualWeight !== right.visualWeight) {
-          return left.visualWeight - right.visualWeight;
+        if (left.renderWeight !== right.renderWeight) {
+          return left.renderWeight - right.renderWeight;
         }
         return Number(left.selected) - Number(right.selected);
       });
