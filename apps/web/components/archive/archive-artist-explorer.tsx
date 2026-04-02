@@ -124,30 +124,8 @@ const formatGeneratedAt = (value: string | null) => {
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
-const arraysEqual = (left: string[], right: string[]) =>
-  left.length === right.length && left.every((value, index) => value === right[index]);
-
 const isHoverCapablePointer = () =>
   typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-
-const syncDockedSelection = (
-  currentDockedIds: string[],
-  nextSelectedIds: string[],
-  commitAdds: boolean,
-) => {
-  const nextSelectedIdSet = new Set(nextSelectedIds);
-  const nextDockedIds = currentDockedIds.filter((setId) => nextSelectedIdSet.has(setId));
-
-  if (commitAdds) {
-    for (const setId of nextSelectedIds) {
-      if (!nextDockedIds.includes(setId)) {
-        nextDockedIds.push(setId);
-      }
-    }
-  }
-
-  return arraysEqual(currentDockedIds, nextDockedIds) ? currentDockedIds : nextDockedIds;
-};
 
 const toggleSelectedSetIds = (currentSelectedIds: string[], setId: string) => {
   if (!setId) {
@@ -625,6 +603,7 @@ export function ArchiveArtistExplorer({
   const [atlasHoverLatchedSetId, setAtlasHoverLatchedSetId] = useState<string | null>(null);
   const pendingSetExplorerJumpRef = useRef(false);
   const pendingAtlasRailResetRef = useRef(false);
+  const latestAtlasSelectedSetIdsRef = useRef(atlasSelectedSetIds);
 
   const [setSearch, setSetSearch] = useState(initialQuery);
   const [setSort, setSetSort] = useState<SetSort>("default");
@@ -1098,14 +1077,8 @@ export function ArchiveArtistExplorer({
       : `${atlasRowsAll.length} / ${trackLensUniverse.length} matching tracks`;
 
   useEffect(() => {
-    setAtlasDockedSelectedSetIds((current) =>
-      syncDockedSelection(
-        current,
-        atlasScope === "artist" ? [] : effectiveAtlasSelectedIds,
-        atlasScope !== "artist" && !atlasPanePointerInside,
-      ),
-    );
-  }, [atlasPanePointerInside, atlasScope, effectiveAtlasSelectedIds]);
+    latestAtlasSelectedSetIdsRef.current = atlasSelectedSetIds;
+  }, [atlasSelectedSetIds]);
 
   useEffect(() => {
     if (atlasPanePointerInside || !pendingAtlasRailResetRef.current) {
@@ -1422,11 +1395,12 @@ export function ArchiveArtistExplorer({
                     "atlas-set-grid",
                     dockSelectedAtlasCards && "selected-dock",
                   )}
-                  onPointerEnter={() => {
+                  onPointerEnter={(event) => {
                     if (!isHoverCapablePointer()) {
                       return;
                     }
                     setAtlasPanePointerInside(true);
+                    event.currentTarget.scrollTo({ top: 0, behavior: "auto" });
                   }}
                   onPointerMove={(event) => {
                     if (!isHoverCapablePointer()) {
@@ -1450,6 +1424,7 @@ export function ArchiveArtistExplorer({
                       setAtlasPanePointerInside(false);
                     }
                     setAtlasHoverLatchedSetId(null);
+                    setAtlasDockedSelectedSetIds(latestAtlasSelectedSetIdsRef.current);
                     pendingAtlasRailResetRef.current = true;
                   }}
                   ref={atlasRailRef}
@@ -1478,6 +1453,10 @@ export function ArchiveArtistExplorer({
                           const nextSelectedIds = additive
                             ? toggleSelectedSetIds(atlasSelectedSetIds, setItem.id)
                             : [setItem.id];
+                          latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
+                          if (!atlasPanePointerInside) {
+                            setAtlasDockedSelectedSetIds(nextSelectedIds);
+                          }
                           setAtlasHoverLatchedSetId(hoverCapable ? setItem.id : null);
                           setAtlasScope("set");
                           setAtlasPage(0);
@@ -1493,12 +1472,17 @@ export function ArchiveArtistExplorer({
                             return;
                           }
                           event.preventDefault();
+                          const nextSelectedIds = [setItem.id];
+                          latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
+                          if (!atlasPanePointerInside) {
+                            setAtlasDockedSelectedSetIds(nextSelectedIds);
+                          }
                           setAtlasHoverLatchedSetId(null);
                           setAtlasScope("set");
                           setAtlasPage(0);
                           setAtlasEvidencePage(0);
                           setAtlasActiveName(null);
-                          setAtlasSelectedSetIds([setItem.id]);
+                          setAtlasSelectedSetIds(nextSelectedIds);
                         }}
                       >
                         {setItem.heroImageUrl ? (
@@ -1515,12 +1499,20 @@ export function ArchiveArtistExplorer({
                                   event.preventDefault();
                                   event.stopPropagation();
                                   const hoverCapable = isHoverCapablePointer();
+                                  const nextSelectedIds = toggleSelectedSetIds(
+                                    atlasSelectedSetIds,
+                                    setItem.id,
+                                  );
+                                  latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
+                                  if (!atlasPanePointerInside) {
+                                    setAtlasDockedSelectedSetIds(nextSelectedIds);
+                                  }
                                   setAtlasHoverLatchedSetId(hoverCapable ? setItem.id : null);
                                   setAtlasScope("set");
                                   setAtlasPage(0);
                                   setAtlasEvidencePage(0);
                                   setAtlasActiveName(null);
-                                  setAtlasSelectedSetIds(toggleSelectedSetIds(atlasSelectedSetIds, setItem.id));
+                                  setAtlasSelectedSetIds(nextSelectedIds);
                                 }}
                                 type="button"
                               >
@@ -1563,6 +1555,9 @@ export function ArchiveArtistExplorer({
                       <button
                         className={joinClasses("chip-btn", atlasScope === "set" && "active")}
                         onClick={() => {
+                          if (!atlasPanePointerInside) {
+                            setAtlasDockedSelectedSetIds(latestAtlasSelectedSetIdsRef.current);
+                          }
                           setAtlasScope("set");
                           setAtlasPage(0);
                           setAtlasEvidencePage(0);
