@@ -174,6 +174,29 @@ def _workflow_run_id() -> str | None:
     return value.strip() if value else None
 
 
+def _resume_mode() -> str | None:
+    value = os.getenv("SET_LIST_RESUME_MODE")
+    return value.strip() if value else None
+
+
+def _claim_workflow_ownership(set_run_id: str, *, force: bool = False) -> str | None:
+    workflow_run_id = _workflow_run_id()
+    if not workflow_run_id:
+        return None
+
+    previous_workflow_run_id = get_active_workflow_run_id(set_run_id)
+    if previous_workflow_run_id == workflow_run_id:
+        return previous_workflow_run_id
+    if previous_workflow_run_id and not force:
+        return previous_workflow_run_id
+
+    update_set_run_metadata(
+        set_run_id,
+        {"active_workflow_run_id": workflow_run_id},
+    )
+    return previous_workflow_run_id
+
+
 def _workflow_superseded(set_run_id: str) -> bool:
     workflow_run_id = _workflow_run_id()
     if not workflow_run_id:
@@ -297,12 +320,7 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
     from worker.pipeline.recognize import prepare_set_context, serialize_prepared_context
 
     run_row = _load_run(set_run_id)
-    workflow_run_id = _workflow_run_id()
-    if workflow_run_id:
-        update_set_run_metadata(
-            set_run_id,
-            {"active_workflow_run_id": workflow_run_id},
-        )
+    _claim_workflow_ownership(set_run_id, force=True)
     _record_stage_change(
         run_row,
         status="resolving",
@@ -498,6 +516,22 @@ async def publish_phase(set_run_id: str) -> str | None:
     from worker.pipeline.recognize import restore_set_context
 
     run_row = _load_run(set_run_id)
+    if _resume_mode() == "publish_only":
+        previous_workflow_run_id = _claim_workflow_ownership(set_run_id, force=True)
+        current_workflow_run_id = _workflow_run_id()
+        if previous_workflow_run_id and previous_workflow_run_id != current_workflow_run_id:
+            insert_worker_event(
+                submission_id=str(run_row["submission_id"]),
+                set_run_id=set_run_id,
+                event_type="set_run.workflow_reclaimed",
+                message="Publish-only retry reclaimed workflow ownership",
+                details={
+                    "phase": "publish",
+                    "resume_mode": "publish_only",
+                    "previous_workflow_run_id": previous_workflow_run_id,
+                    "workflow_run_id": current_workflow_run_id,
+                },
+            )
     _assert_workflow_ownership(set_run_id)
 
     # If this run already has a published_set_id the data is already in the DB (a prior attempt

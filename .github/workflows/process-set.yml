@@ -210,6 +210,7 @@ jobs:
       APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
       SET_LIST_ACTIVE_SET_RUN_ID: ${{ github.event.inputs.set_run_id }}
+      SET_LIST_RESUME_MODE: ${{ github.event.inputs.resume_mode }}
       SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
       SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
       SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
