@@ -45,6 +45,11 @@ type TrackCardOpenState = {
   spotifyOpen: boolean;
 };
 type TrackCardStyle = CSSProperties & Partial<Record<`--${string}`, string>>;
+type NetworkPointerState = {
+  active: boolean;
+  x: number;
+  y: number;
+};
 
 const CONF_FILTER_LEVELS: ConfidenceFilter[] = ["all", "HIGH", "MEDIUM", "LOW"];
 const THRESHOLD_LEVELS = [1, 2, 3, 5, 8, 12] as const;
@@ -54,6 +59,15 @@ const NETWORK_EDGE_ALPHA_FLOOR = 0.18;
 const NETWORK_EDGE_ALPHA_RANGE = 0.58;
 const NETWORK_EDGE_WIDTH_BASE = 1;
 const NETWORK_EDGE_WIDTH_RANGE = 2;
+const NETWORK_LENS_RADIUS = 140;
+const NETWORK_LENS_FALLOFF = 1.8;
+const NETWORK_NODE_MAX_SCALE = 1.8;
+const NETWORK_LABEL_BASE_SIZE = 11;
+const NETWORK_LABEL_SIZE_RANGE = 7;
+const NETWORK_LABEL_OUTSET = 4;
+const NETWORK_LABEL_OUTSET_RANGE = 10;
+const NETWORK_LABEL_HALO_RANGE = 6;
+const NETWORK_SELECTED_LENS_FLOOR = 0.2;
 const PAGE = {
   evidence: 9,
   pairRows: 10,
@@ -698,6 +712,12 @@ export function ArchiveHomeExplorer({
   const [networkMinScore, setNetworkMinScore] = useState(DEFAULT_NETWORK_MIN_SCORE);
   const [networkSearch, setNetworkSearch] = useState("");
   const [networkSelectedArtistSlugs, setNetworkSelectedArtistSlugs] = useState<string[]>([]);
+  const [networkLensEnabled, setNetworkLensEnabled] = useState(false);
+  const [networkPointer, setNetworkPointer] = useState<NetworkPointerState>({
+    active: false,
+    x: 0,
+    y: 0,
+  });
 
   const [pairPayload, setPairPayload] = useState<ArchiveHomePairSelectionPayload | null>(null);
   const [pairLens, setPairLens] = useState<PairLens>("genres");
@@ -891,6 +911,36 @@ export function ArchiveHomeExplorer({
       return buildSearchBlob(edge.artistA, edge.artistB).includes(normalizedSearch);
     });
   }, [networkMinScore, networkPayload, networkSearch, networkSelectedArtistSlugs]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const media = window.matchMedia(
+      "(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)",
+    );
+    const sync = () => {
+      setNetworkLensEnabled(media.matches);
+      if (!media.matches) {
+        setNetworkPointer({
+          active: false,
+          x: 0,
+          y: 0,
+        });
+      }
+    };
+
+    sync();
+
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", sync);
+      return () => media.removeEventListener("change", sync);
+    }
+
+    media.addListener(sync);
+    return () => media.removeListener(sync);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1421,6 +1471,139 @@ export function ArchiveHomeExplorer({
 
     return { height, positions, width };
   }, [networkLayoutVersion, networkPayload]);
+
+  const networkArtists = useMemo(
+    () =>
+      networkPayload
+        ? networkPayload.artists.slice().sort((left, right) => left.name.localeCompare(right.name))
+        : [],
+    [networkPayload],
+  );
+
+  const networkNodeVisuals = useMemo(() => {
+    const centerX = networkPositions.width / 2;
+    const centerY = networkPositions.height / 2;
+    const lensActive = networkLensEnabled && networkPointer.active;
+
+    return networkArtists
+      .map((artist) => {
+        const position = networkPositions.positions.get(artist.slug);
+        if (!position) {
+          return null;
+        }
+
+        const selected = networkSelectedArtistSlugs.includes(artist.slug);
+        let visualWeight = 0;
+
+        if (lensActive) {
+          const distance = Math.hypot(position.x - networkPointer.x, position.y - networkPointer.y);
+          const proximity = clamp(1 - distance / NETWORK_LENS_RADIUS, 0, 1);
+          visualWeight = proximity > 0 ? Math.pow(proximity, NETWORK_LENS_FALLOFF) : 0;
+          if (selected) {
+            visualWeight = Math.max(visualWeight, NETWORK_SELECTED_LENS_FLOOR);
+          }
+        }
+
+        const directionXRaw = position.x - centerX;
+        const directionYRaw = position.y - centerY;
+        const directionLength = Math.hypot(directionXRaw, directionYRaw) || 1;
+        const directionX = directionXRaw / directionLength;
+        const directionY = directionYRaw / directionLength;
+        const circleRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
+        const fontSize = NETWORK_LABEL_BASE_SIZE + visualWeight * NETWORK_LABEL_SIZE_RANGE;
+        const labelOffset = circleRadius + NETWORK_LABEL_OUTSET + visualWeight * NETWORK_LABEL_OUTSET_RANGE;
+        const textAnchor: "start" | "end" = directionX >= 0 ? "start" : "end";
+        const estimatedLabelWidth = artist.name.length * fontSize * 0.62;
+        let labelX = position.x + directionX * labelOffset;
+        let labelY = position.y + directionY * labelOffset;
+
+        if (textAnchor === "start") {
+          labelX = clamp(labelX, 8, networkPositions.width - estimatedLabelWidth - 8);
+        } else {
+          labelX = clamp(labelX, estimatedLabelWidth + 8, networkPositions.width - 8);
+        }
+
+        labelY = clamp(labelY, fontSize, networkPositions.height - fontSize);
+
+        return {
+          artist,
+          circleRadius,
+          labelFontSize: fontSize,
+          labelHaloWidth: visualWeight * NETWORK_LABEL_HALO_RANGE,
+          labelX,
+          labelY,
+          position,
+          selected,
+          textAnchor,
+          visualWeight,
+        };
+      })
+      .filter((value): value is NonNullable<typeof value> => value !== null)
+      .sort((left, right) => {
+        if (left.visualWeight !== right.visualWeight) {
+          return left.visualWeight - right.visualWeight;
+        }
+        return Number(left.selected) - Number(right.selected);
+      });
+  }, [
+    networkArtists,
+    networkLensEnabled,
+    networkPointer,
+    networkPositions,
+    networkSelectedArtistSlugs,
+  ]);
+
+  const toggleNetworkArtistSelection = (artistSlug: string) => {
+    setPairPage(0);
+    setPairActiveName(null);
+    setNetworkSelectedArtistSlugs((current) => {
+      if (current.includes(artistSlug)) {
+        return current.filter((slug) => slug !== artistSlug);
+      }
+      if (current.length >= 2) {
+        return [artistSlug];
+      }
+      return [...current, artistSlug];
+    });
+  };
+
+  const updateNetworkPointer = ({
+    clientX,
+    clientY,
+    currentTarget,
+  }: {
+    clientX: number;
+    clientY: number;
+    currentTarget: SVGSVGElement;
+  }) => {
+    if (!networkLensEnabled) {
+      return;
+    }
+
+    const rect = currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const nextX = ((clientX - rect.left) / rect.width) * networkPositions.width;
+    const nextY = ((clientY - rect.top) / rect.height) * networkPositions.height;
+
+    setNetworkPointer((current) => {
+      if (
+        current.active &&
+        Math.abs(current.x - nextX) < 0.5 &&
+        Math.abs(current.y - nextY) < 0.5
+      ) {
+        return current;
+      }
+
+      return {
+        active: true,
+        x: nextX,
+        y: nextY,
+      };
+    });
+  };
 
   return (
     <div ref={rootRef}>
@@ -2030,6 +2213,31 @@ export function ArchiveHomeExplorer({
                   <svg
                     aria-label="Artist connection map"
                     className="network-svg"
+                    onPointerEnter={(event) => {
+                      updateNetworkPointer({
+                        clientX: event.clientX,
+                        clientY: event.clientY,
+                        currentTarget: event.currentTarget,
+                      });
+                    }}
+                    onPointerLeave={() => {
+                      setNetworkPointer((current) =>
+                        current.active
+                          ? {
+                              active: false,
+                              x: current.x,
+                              y: current.y,
+                            }
+                          : current,
+                      );
+                    }}
+                    onPointerMove={(event) => {
+                      updateNetworkPointer({
+                        clientX: event.clientX,
+                        clientY: event.clientY,
+                        currentTarget: event.currentTarget,
+                      });
+                    }}
                     viewBox={`0 0 ${networkPositions.width} ${networkPositions.height}`}
                   >
                     <rect fill="#0f0f0f" height={networkPositions.height} width={networkPositions.width} x="0" y="0" />
@@ -2064,50 +2272,38 @@ export function ArchiveHomeExplorer({
                         />
                       );
                     })}
-                    {networkPayload.artists
-                      .slice()
-                      .sort((left, right) => left.name.localeCompare(right.name))
-                      .map((artist) => {
-                        const position = networkPositions.positions.get(artist.slug);
-                        if (!position) {
-                          return null;
-                        }
-                        const selected = networkSelectedArtistSlugs.includes(artist.slug);
-                        return (
-                          <g key={artist.id}>
-                            <circle
-                              className={joinClasses("network-node", selected && "selected")}
-                              cx={position.x}
-                              cy={position.y}
-                              fill={selected ? "#7f51ff" : "#d8ff5a"}
-                              onClick={() => {
-                                setPairPage(0);
-                                setPairActiveName(null);
-                                setNetworkSelectedArtistSlugs((current) => {
-                                  if (current.includes(artist.slug)) {
-                                    return current.filter((slug) => slug !== artist.slug);
-                                  }
-                                  if (current.length >= 2) {
-                                    return [artist.slug];
-                                  }
-                                  return [...current, artist.slug];
-                                });
-                              }}
-                              r={position.r}
-                            />
-                            <text
-                              fill="#f1f1f1"
-                              fontFamily="Space Mono, monospace"
-                              fontSize="11"
-                              letterSpacing="0.02em"
-                              x={position.x + position.r + 4}
-                              y={position.y + 3}
-                            >
-                              {artist.name}
-                            </text>
-                          </g>
-                        );
-                      })}
+                    {networkNodeVisuals.map((node) => (
+                      <g
+                        key={node.artist.id}
+                        onClick={() => toggleNetworkArtistSelection(node.artist.slug)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <circle
+                          className={joinClasses("network-node", node.selected && "selected")}
+                          cx={node.position.x}
+                          cy={node.position.y}
+                          fill={node.selected ? "#7f51ff" : "#d8ff5a"}
+                          r={node.circleRadius}
+                        />
+                        <text
+                          dominantBaseline="middle"
+                          fill="#f1f1f1"
+                          fontFamily="Space Mono, monospace"
+                          fontSize={node.labelFontSize}
+                          fontWeight={node.visualWeight > 0.1 ? 700 : 400}
+                          letterSpacing="0.02em"
+                          paintOrder="stroke fill"
+                          stroke="rgba(15,15,15,0.96)"
+                          strokeLinejoin="round"
+                          strokeWidth={node.labelHaloWidth}
+                          textAnchor={node.textAnchor as "start" | "end"}
+                          x={node.labelX}
+                          y={node.labelY}
+                        >
+                          {node.artist.name}
+                        </text>
+                      </g>
+                    ))}
                   </svg>
                 ) : (
                   <div className="empty">No network graph data available.</div>
