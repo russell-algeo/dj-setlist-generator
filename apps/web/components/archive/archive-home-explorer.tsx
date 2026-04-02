@@ -47,6 +47,7 @@ type TrackCardStyle = CSSProperties & Partial<Record<`--${string}`, string>>;
 
 const CONF_FILTER_LEVELS: ConfidenceFilter[] = ["all", "HIGH", "MEDIUM", "LOW"];
 const THRESHOLD_LEVELS = [1, 2, 3, 5, 8, 12] as const;
+const DEFAULT_NETWORK_MIN_SCORE = 5;
 const PAGE = {
   evidence: 9,
   pairRows: 10,
@@ -676,7 +677,7 @@ export function ArchiveHomeExplorer({
 
   const networkPayload = initial.initialNetwork as ArchiveHomeNetworkIndexPayload;
   const [networkLayoutVersion, setNetworkLayoutVersion] = useState(0);
-  const [networkMinScore, setNetworkMinScore] = useState(10);
+  const [networkMinScore, setNetworkMinScore] = useState(DEFAULT_NETWORK_MIN_SCORE);
   const [networkSearch, setNetworkSearch] = useState("");
   const [networkSelectedArtistSlugs, setNetworkSelectedArtistSlugs] = useState<string[]>([]);
 
