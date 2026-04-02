@@ -12,12 +12,12 @@ const createDb = (connectionString: string) => {
   return drizzle(client, { schema });
 };
 
-export const getDb = () => createDb(env.databaseUrl ?? requireEnv("databaseUrl"));
+export const getDb = () => createDb((env.databaseUrl ?? requireEnv("databaseUrl")) as string);
 
 export const getWorkerDb = () =>
-  createDb(env.databaseUrlDirect ?? requireEnv("databaseUrlDirect"));
+  createDb((env.databaseUrlDirect ?? requireEnv("databaseUrlDirect")) as string);
 
 export const getMigrationsDb = () =>
-  createDb(env.databaseUrlMigrations ?? requireEnv("databaseUrlMigrations"));
+  createDb((env.databaseUrlMigrations ?? requireEnv("databaseUrlMigrations")) as string);
 
 export type AppDb = ReturnType<typeof createDb>;
