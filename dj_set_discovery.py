@@ -175,6 +175,10 @@ _MONTH_NAMES_TO_NUM: dict[str, int] = {
     "nov": 11, "november": 11,
     "dec": 12, "december": 12,
 }
+_PLATFORM_PREFERENCE = {
+    "youtube": 0,
+    "soundcloud": 1,
+}
 
 
 def _tokenize_title(title: str, artist_name: str) -> set[str]:
@@ -339,10 +343,15 @@ def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, artist_name: str) -
     return True
 
 
+def _platform_preference(platform: str) -> int:
+    """Return a stable platform preference for discovery dedupe."""
+    return _PLATFORM_PREFERENCE.get(platform, len(_PLATFORM_PREFERENCE))
+
+
 def _deduplicate_near_duplicates(
     sets: list[DiscoveredSet], artist_name: str
 ) -> list[DiscoveredSet]:
-    """Remove near-duplicate sets, preferring SoundCloud over YouTube.
+    """Remove near-duplicate sets, preferring YouTube over SoundCloud.
 
     Uses Union-Find to find candidate clusters, then applies a clique check:
     each non-winner member must directly match the winner to be dropped.
@@ -388,9 +397,8 @@ def _deduplicate_near_duplicates(
             winners.append(sets[members[0]])
             continue
 
-        # Prefer SoundCloud; otherwise keep first by original order
-        sc_members = [idx for idx in members if sets[idx].platform == "soundcloud"]
-        winner_idx = sc_members[0] if sc_members else members[0]
+        # Prefer YouTube, then SoundCloud; otherwise keep first by original order.
+        winner_idx = min(members, key=lambda idx: (_platform_preference(sets[idx].platform), idx))
         winner = sets[winner_idx]
         winners.append(winner)
         w_plat = winner.platform.upper()[:2]
@@ -481,7 +489,7 @@ def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[Discovere
     """Filter raw yt-dlp results and map to DiscoveredSet instances."""
     min_duration_seconds = Config.MIN_SET_DURATION_MINUTES * 60
     artist_norm = _normalize(artist_name)
-    seen_titles: set[str] = set()
+    seen_titles: dict[str, int] = {}
     sets: list[DiscoveredSet] = []
 
     for entry in raw_results:
@@ -511,12 +519,6 @@ def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[Discovere
         if not url:
             continue
 
-        # Cross-platform dedup by normalized title
-        title_norm = _normalize(title)
-        if title_norm in seen_titles:
-            continue
-        seen_titles.add(title_norm)
-
         # Extract year from upload_date (YYYYMMDD)
         upload_date = entry.get("upload_date") or ""
         year = upload_date[:4] if len(upload_date) >= 4 else None
@@ -527,14 +529,25 @@ def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[Discovere
         # Try to extract event/venue from uploader or channel
         event = entry.get("channel") or entry.get("uploader")
 
-        sets.append(DiscoveredSet(
+        discovered_set = DiscoveredSet(
             url=url,
             title=title or "Unknown Set",
             platform=_detect_platform(url),
             event=event,
             year=year,
             duration_minutes=duration_minutes,
-        ))
+        )
+
+        # Cross-platform dedup by normalized title, explicitly preferring YouTube.
+        title_norm = _normalize(title)
+        if title_norm in seen_titles:
+            existing_idx = seen_titles[title_norm]
+            if _platform_preference(discovered_set.platform) < _platform_preference(sets[existing_idx].platform):
+                sets[existing_idx] = discovered_set
+            continue
+
+        seen_titles[title_norm] = len(sets)
+        sets.append(discovered_set)
 
     return sets
 
@@ -546,4 +559,3 @@ def _detect_platform(url: str) -> str:
     elif "soundcloud.com" in url:
         return "soundcloud"
     return "unknown"
-

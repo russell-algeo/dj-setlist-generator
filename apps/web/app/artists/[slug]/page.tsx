@@ -14,8 +14,8 @@ const loadArchiveData = async () => import("@/lib/archive/data");
 
 export async function generateMetadata({ params }: ArtistDetailPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const { getArchiveArtistSummaryBySlug } = await loadArchiveData();
-  const artist = await getArchiveArtistSummaryBySlug(slug);
+  const { getArchiveArtistIdentityBySlug } = await loadArchiveData();
+  const artist = await getArchiveArtistIdentityBySlug(slug);
   return buildArchiveMetadata({
     title: artist ? `${artist.name} | Set Signal Archive` : "Artist Archive",
     description: "React-rendered artist archive page driven by normalized sets and tracks.",

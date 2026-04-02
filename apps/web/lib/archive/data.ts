@@ -41,6 +41,10 @@ import type {
   ArchiveSetTrack,
 } from "@/lib/archive/types";
 import {
+  isArtistImageDuplicate,
+  resolveSetSpecificImageUrl,
+} from "@/lib/archive/set-images";
+import {
   asRecord,
   buildArchiveEmbed,
   buildTrackKey,
@@ -62,6 +66,21 @@ const ARCHIVE_TAGS = {
   lists: "archive:lists",
   set: (slug: string) => `archive:set:${slug}`,
 } as const;
+
+const NEXT_DATA_CACHE_LIMIT_BYTES = 2 * 1024 * 1024;
+
+type ArchiveArtistIdentity = {
+  name: string;
+};
+
+type ArchiveArtistSummaryCacheRecord =
+  | {
+      status: "ready";
+      artist: ArchiveArtistSummary | null;
+    }
+  | {
+      status: "oversized";
+    };
 
 const emptyConfidenceCounts = (): Record<ArchiveConfidence, number> => ({
   HIGH: 0,
@@ -217,21 +236,18 @@ const resolveDirectSetImage = (value: {
 }) => {
   const setMetadata = asRecord(value.metadata);
   const mixInfo = asRecord(setMetadata.mixInfo);
+  const persistedImage =
+    value.imageUrl && !isArtistImageDuplicate(mixInfo, value.imageUrl) ? value.imageUrl : null;
 
   return (
-    getString(mixInfo.thumbnail_url) ??
-    getString(mixInfo.thumbnail) ??
-    getString(mixInfo.image_url) ??
-    getString(mixInfo.image) ??
-    getString(mixInfo.artwork_url) ??
-    getString(mixInfo.artwork) ??
-    getString(mixInfo.cover_image) ??
-    getString(mixInfo.coverUrl) ??
-    getString(mixInfo.poster_url) ??
-    value.imageUrl ??
+    resolveSetSpecificImageUrl(mixInfo) ??
+    persistedImage ??
     (value.sourcePlatform === "youtube" ? buildYouTubeThumbnail(value.sourceUrl ?? null) : null)
   );
 };
+
+const getArchiveArtistPayloadSize = (artist: ArchiveArtistSummary) =>
+  Buffer.byteLength(JSON.stringify(artist), "utf8");
 
 const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDetail | null> => {
   const db = getDb();
@@ -403,6 +419,25 @@ export const getArchiveSetDetailBySlug = async (slug: string) =>
     ["archive-set-detail-v2", slug],
     { tags: [ARCHIVE_TAGS.set(slug)] },
   )();
+
+const getArtistIdentityUncached = async (
+  slug: string,
+): Promise<ArchiveArtistIdentity | null> => {
+  const db = getDb();
+  const [artistRecord] = await db
+    .select({ name: artists.name })
+    .from(artists)
+    .where(eq(artists.slug, slug))
+    .limit(1);
+
+  if (!artistRecord) {
+    return null;
+  }
+
+  return {
+    name: artistRecord.name,
+  };
+};
 
 const getArtistSummaryUncached = async (
   slug: string,
@@ -748,12 +783,51 @@ const getArtistSummaryUncached = async (
   };
 };
 
-export const getArchiveArtistSummaryBySlug = async (slug: string) =>
+export const getArchiveArtistIdentityBySlug = async (slug: string) =>
   unstable_cache(
-    async () => getArtistSummaryUncached(slug),
-    ["archive-artist-summary-v2", slug],
+    async () => getArtistIdentityUncached(slug),
+    ["archive-artist-identity-v1", slug],
     { tags: [ARCHIVE_TAGS.artist(slug)] },
   )();
+
+const getArchiveArtistSummaryCacheRecord = async (
+  slug: string,
+): Promise<ArchiveArtistSummaryCacheRecord> =>
+  unstable_cache(
+    async () => {
+      const artist = await getArtistSummaryUncached(slug);
+
+      if (!artist) {
+        return {
+          status: "ready",
+          artist: null,
+        } satisfies ArchiveArtistSummaryCacheRecord;
+      }
+
+      if (getArchiveArtistPayloadSize(artist) > NEXT_DATA_CACHE_LIMIT_BYTES) {
+        return {
+          status: "oversized",
+        } satisfies ArchiveArtistSummaryCacheRecord;
+      }
+
+      return {
+        status: "ready",
+        artist,
+      } satisfies ArchiveArtistSummaryCacheRecord;
+    },
+    ["archive-artist-summary-v3", slug],
+    { tags: [ARCHIVE_TAGS.artist(slug)] },
+  )();
+
+export const getArchiveArtistSummaryBySlug = async (slug: string) => {
+  const cachedRecord = await getArchiveArtistSummaryCacheRecord(slug);
+
+  if (cachedRecord.status === "oversized") {
+    return getArtistSummaryUncached(slug);
+  }
+
+  return cachedRecord.artist;
+};
 
 // Workspace variant: returns only sets submitted by the given user for this artist.
 // Not cached — user-specific and must not be shared across requests.

@@ -25,6 +25,7 @@ import type {
   ArchiveHomeTrackCatalogItem,
   ArchiveHomeTrackSetRef,
 } from "@/lib/archive/home-explorer-types";
+import { ARCHIVE_SET_LIBRARY_PAGE_SIZE } from "@/lib/archive/constants";
 import type { ArchiveConfidence } from "@/lib/archive/types";
 import {
   asRecord,
@@ -47,7 +48,7 @@ const HOME_TAGS = {
   setTracklist: (slug: string) => `archive:home-set-tracklist:${slug}`,
 } as const;
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE = ARCHIVE_SET_LIBRARY_PAGE_SIZE;
 const THRESHOLD_LEVELS = [1, 2, 3, 5, 8, 12] as const;
 
 type HomeArtistCardRow = {
@@ -1130,7 +1131,7 @@ export const getArchiveHomeSetLibraryPayload = async ({
         query,
         sort,
       }),
-    ["archive-home-set-library-v1", artistFilter, String(page), query, sort],
+    ["archive-home-set-library-v2", String(PAGE_SIZE), artistFilter, String(page), query, sort],
     { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
   )();
 

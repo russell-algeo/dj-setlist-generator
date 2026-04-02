@@ -1,12 +1,23 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { startTransition, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import {
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from "react";
 
 import { buildSetHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
+import { ARCHIVE_SET_LIBRARY_PAGE_SIZE } from "@/lib/archive/constants";
 import type {
   ArchiveArtistAtlasTrack,
   ArchiveArtistSet,
@@ -77,7 +88,11 @@ type TrackCardInlineStyle = CSSProperties & Partial<Record<`--${string}`, string
 
 const TRACK_CONFIDENCE_LEVELS: ConfidenceFilter[] = ["all", "HIGH", "MEDIUM", "LOW"];
 const ATLAS_PAGE_SIZE = 10;
+const SETS_PAGE_SIZE = ARCHIVE_SET_LIBRARY_PAGE_SIZE;
 const FOCUS_TITLE_NBSP = "\u00a0";
+const HERO_TITLE_FIT_VAR = "--artist-hero-title-fit-size";
+const HERO_TITLE_MIN_SIZE = 24;
+const HERO_TITLE_SAFE_PADDING = 6;
 const CONFIDENCE_RANK: Record<ArchiveConfidence, number> = {
   HIGH: 4,
   MEDIUM: 3,
@@ -108,6 +123,45 @@ const formatGeneratedAt = (value: string | null) => {
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+
+const arraysEqual = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const isHoverCapablePointer = () =>
+  typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+const syncDockedSelection = (
+  currentDockedIds: string[],
+  nextSelectedIds: string[],
+  commitAdds: boolean,
+) => {
+  const nextSelectedIdSet = new Set(nextSelectedIds);
+  const nextDockedIds = currentDockedIds.filter((setId) => nextSelectedIdSet.has(setId));
+
+  if (commitAdds) {
+    for (const setId of nextSelectedIds) {
+      if (!nextDockedIds.includes(setId)) {
+        nextDockedIds.push(setId);
+      }
+    }
+  }
+
+  return arraysEqual(currentDockedIds, nextDockedIds) ? currentDockedIds : nextDockedIds;
+};
+
+const toggleSelectedSetIds = (currentSelectedIds: string[], setId: string) => {
+  if (!setId) {
+    return currentSelectedIds;
+  }
+
+  if (currentSelectedIds.includes(setId)) {
+    return currentSelectedIds.length > 1
+      ? currentSelectedIds.filter((currentSetId) => currentSetId !== setId)
+      : [setId];
+  }
+
+  return [...currentSelectedIds, setId];
+};
 
 const formatMatch = (rate: number | null) => `${Math.round(rate ?? 0)}% match`;
 
@@ -523,6 +577,8 @@ export function ArchiveArtistExplorer({
   artist: ArchiveArtistSummary;
   initialQuery: string;
 }) {
+  const heroVisualRef = useRef<HTMLDivElement | null>(null);
+  const heroTitleRef = useRef<HTMLHeadingElement | null>(null);
   const heroRailViewportRef = useRef<HTMLDivElement | null>(null);
   const heroRailTrackRef = useRef<HTMLDivElement | null>(null);
   const atlasRailRef = useRef<HTMLDivElement | null>(null);
@@ -562,11 +618,18 @@ export function ArchiveArtistExplorer({
   const [openAtlasSources, setOpenAtlasSources] = useState<string[]>([]);
   const [openAtlasSpotify, setOpenAtlasSpotify] = useState<string[]>([]);
   const [atlasCardStyles, setAtlasCardStyles] = useState<Record<string, TrackCardInlineStyle>>({});
+  const [atlasDockedSelectedSetIds, setAtlasDockedSelectedSetIds] = useState<string[]>(
+    setCards[0] ? [setCards[0].id] : [],
+  );
+  const [atlasPanePointerInside, setAtlasPanePointerInside] = useState(false);
   const [atlasHoverLatchedSetId, setAtlasHoverLatchedSetId] = useState<string | null>(null);
+  const pendingSetExplorerJumpRef = useRef(false);
+  const pendingAtlasRailResetRef = useRef(false);
 
   const [setSearch, setSetSearch] = useState(initialQuery);
   const [setSort, setSetSort] = useState<SetSort>("default");
   const deferredSetSearch = useDeferredValue(setSearch);
+  const [setPage, setSetPage] = useState(0);
   const [compareSelection, setCompareSelection] = useState<string[]>([]);
   const [expandedSetCards, setExpandedSetCards] = useState<string[]>([]);
 
@@ -597,6 +660,118 @@ export function ArchiveArtistExplorer({
       window.cancelAnimationFrame(frame);
     };
   }, []);
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const visual = heroVisualRef.current;
+    const title = heroTitleRef.current;
+    if (!visual || !title) {
+      return;
+    }
+
+    let frame = 0;
+    let disposed = false;
+
+    const applyFontSize = (size?: number) => {
+      if (typeof size === "number" && Number.isFinite(size) && size > 0) {
+        title.style.setProperty(HERO_TITLE_FIT_VAR, `${size}px`);
+      } else {
+        title.style.removeProperty(HERO_TITLE_FIT_VAR);
+      }
+    };
+
+    const titleFits = () => {
+      const visualRect = visual.getBoundingClientRect();
+      const titleRect = title.getBoundingClientRect();
+
+      return (
+        titleRect.top >= visualRect.top + HERO_TITLE_SAFE_PADDING &&
+        titleRect.left >= visualRect.left + HERO_TITLE_SAFE_PADDING &&
+        titleRect.right <= visualRect.right - HERO_TITLE_SAFE_PADDING &&
+        titleRect.bottom <= visualRect.bottom - HERO_TITLE_SAFE_PADDING
+      );
+    };
+
+    // Shrink the display title only when the rendered text actually clips inside the hero box.
+    const fitTitle = () => {
+      applyFontSize();
+
+      const baseSize = Number.parseFloat(window.getComputedStyle(title).fontSize);
+      if (!Number.isFinite(baseSize) || baseSize <= HERO_TITLE_MIN_SIZE) {
+        return;
+      }
+
+      if (titleFits()) {
+        return;
+      }
+
+      let low = HERO_TITLE_MIN_SIZE;
+      let high = baseSize;
+      let best = HERO_TITLE_MIN_SIZE;
+
+      applyFontSize(HERO_TITLE_MIN_SIZE);
+      if (!titleFits()) {
+        return;
+      }
+
+      for (let iteration = 0; iteration < 12; iteration += 1) {
+        const mid = (low + high) / 2;
+        applyFontSize(mid);
+
+        if (titleFits()) {
+          best = mid;
+          low = mid;
+        } else {
+          high = mid;
+        }
+      }
+
+      applyFontSize(Math.floor(best * 10) / 10);
+    };
+
+    const scheduleFit = () => {
+      if (disposed) {
+        return;
+      }
+
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        fitTitle();
+      });
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => scheduleFit());
+    resizeObserver?.observe(visual);
+
+    const heroImage = visual.querySelector("img") as HTMLImageElement | null;
+    if (heroImage && !heroImage.complete) {
+      heroImage.addEventListener("load", scheduleFit);
+    }
+
+    void document.fonts?.ready.then(() => {
+      scheduleFit();
+    });
+
+    scheduleFit();
+
+    return () => {
+      disposed = true;
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      resizeObserver?.disconnect();
+      heroImage?.removeEventListener("load", scheduleFit);
+      applyFontSize();
+    };
+  }, [artist.name, heroVisualImageUrl]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -760,15 +935,20 @@ export function ArchiveArtistExplorer({
   const visibleAtlasSetCards = setCards.filter((setItem) =>
     atlasSetQuery ? setItem.searchBlob.includes(atlasSetQuery) : true,
   );
-  const visibleAtlasSetIds = new Set(visibleAtlasSetCards.map((setItem) => setItem.id));
-  const effectiveAtlasSelectedIds =
-    atlasScope === "artist"
-      ? []
-      : atlasSelectedSetIds.filter((setId) => visibleAtlasSetIds.has(setId)).length > 0
-        ? atlasSelectedSetIds.filter((setId) => visibleAtlasSetIds.has(setId))
-        : visibleAtlasSetCards[0]
-          ? [visibleAtlasSetCards[0].id]
-          : [];
+  const effectiveAtlasSelectedIds = useMemo(() => {
+    if (atlasScope === "artist") {
+      return [];
+    }
+
+    const visibleAtlasSetIdSet = new Set(visibleAtlasSetCards.map((setItem) => setItem.id));
+    const visibleSelectedIds = atlasSelectedSetIds.filter((setId) => visibleAtlasSetIdSet.has(setId));
+
+    if (visibleSelectedIds.length > 0) {
+      return visibleSelectedIds;
+    }
+
+    return visibleAtlasSetCards[0] ? [visibleAtlasSetCards[0].id] : [];
+  }, [atlasScope, atlasSelectedSetIds, visibleAtlasSetCards]);
   const scopedAtlasSetIds = new Set(
     atlasScope === "artist"
       ? visibleAtlasSetCards.map((setItem) => setItem.id)
@@ -819,7 +999,7 @@ export function ArchiveArtistExplorer({
   const evidenceTracks = activeAtlasRow?.tracks ?? [];
 
   const setQuery = normalizeSearchText(deferredSetSearch);
-  const visibleSetCards = [...setCards]
+  const filteredSetCards = [...setCards]
     .filter((setItem) => (setQuery ? setItem.searchBlob.includes(setQuery) : true))
     .sort((left, right) => {
       if (setSort === "rate") {
@@ -833,8 +1013,18 @@ export function ArchiveArtistExplorer({
       }
       return 0;
     });
+  const maxSetPage = Math.max(0, Math.ceil(filteredSetCards.length / SETS_PAGE_SIZE) - 1);
+  const currentSetPage = clamp(setPage, 0, maxSetPage);
+  const visibleSetCards = filteredSetCards.slice(
+    currentSetPage * SETS_PAGE_SIZE,
+    currentSetPage * SETS_PAGE_SIZE + SETS_PAGE_SIZE,
+  );
   const compareCards = compareSelection
-    .map((setId) => visibleSetCards.find((setItem) => setItem.id === setId) ?? setCards.find((setItem) => setItem.id === setId))
+    .map(
+      (setId) =>
+        filteredSetCards.find((setItem) => setItem.id === setId) ??
+        setCards.find((setItem) => setItem.id === setId),
+    )
     .filter((value): value is SetCardModel => Boolean(value));
   const sharedTrackNames =
     compareCards.length === 2
@@ -855,11 +1045,15 @@ export function ArchiveArtistExplorer({
         })()
       : null;
   const sharedTrackKeySet = new Set(sharedTrackNames);
-  const dockSelectedAtlasCards = atlasScope !== "artist" && effectiveAtlasSelectedIds.length > 0;
+  const visibleDockedAtlasSetCards = visibleAtlasSetCards.filter((setItem) =>
+    atlasDockedSelectedSetIds.includes(setItem.id),
+  );
+  const dockSelectedAtlasCards =
+    atlasScope !== "artist" && visibleDockedAtlasSetCards.length > 0;
   const orderedAtlasSetCards = dockSelectedAtlasCards
     ? [
-        ...visibleAtlasSetCards.filter((setItem) => effectiveAtlasSelectedIds.includes(setItem.id)),
-        ...visibleAtlasSetCards.filter((setItem) => !effectiveAtlasSelectedIds.includes(setItem.id)),
+        ...visibleDockedAtlasSetCards,
+        ...visibleAtlasSetCards.filter((setItem) => !atlasDockedSelectedSetIds.includes(setItem.id)),
       ]
     : visibleAtlasSetCards;
   const selectedAtlasSet =
@@ -903,6 +1097,63 @@ export function ArchiveArtistExplorer({
       ? `${atlasRowsAll.length} matching tracks`
       : `${atlasRowsAll.length} / ${trackLensUniverse.length} matching tracks`;
 
+  useEffect(() => {
+    setAtlasDockedSelectedSetIds((current) =>
+      syncDockedSelection(
+        current,
+        atlasScope === "artist" ? [] : effectiveAtlasSelectedIds,
+        atlasScope !== "artist" && !atlasPanePointerInside,
+      ),
+    );
+  }, [atlasPanePointerInside, atlasScope, effectiveAtlasSelectedIds]);
+
+  useEffect(() => {
+    if (atlasPanePointerInside || !pendingAtlasRailResetRef.current) {
+      return;
+    }
+
+    pendingAtlasRailResetRef.current = false;
+    const rail = atlasRailRef.current;
+    if (!rail) {
+      return;
+    }
+
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        rail.scrollTo({
+          top: 0,
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+        });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [atlasDockedSelectedSetIds, atlasPanePointerInside]);
+
+  useEffect(() => {
+    setSetPage((current) => Math.min(current, maxSetPage));
+  }, [maxSetPage]);
+
+  const jumpToSetExplorer = () => {
+    document.getElementById("sets-section")?.scrollIntoView({
+      behavior: "auto",
+      block: "start",
+    });
+  };
+
+  useEffect(() => {
+    if (!pendingSetExplorerJumpRef.current) {
+      return;
+    }
+
+    pendingSetExplorerJumpRef.current = false;
+    jumpToSetExplorer();
+  }, [currentSetPage]);
+
   return (
     <div className={styles.root}>
       <ArchiveScrollRoot />
@@ -921,13 +1172,13 @@ export function ArchiveArtistExplorer({
             <div className="kicker">Artist Intelligence Deck</div>
             <div className="artist-hero">
               <div className="artist-hero-main">
-                <div className="artist-hero-visual">
+                <div className="artist-hero-visual" ref={heroVisualRef}>
                   {heroVisualImageUrl ? (
                     <img alt={`${artist.name} artist image`} src={heroVisualImageUrl} />
                   ) : (
                     <div className="artist-hero-image-fallback" />
                   )}
-                  <h1 className="artist-hero-title">
+                  <h1 className="artist-hero-title" ref={heroTitleRef}>
                     {artist.name.split(/\s+/u).map((word) => (
                       <span key={word}>{word}</span>
                     ))}
@@ -1172,11 +1423,34 @@ export function ArchiveArtistExplorer({
                     dockSelectedAtlasCards && "selected-dock",
                   )}
                   onPointerEnter={() => {
+                    if (!isHoverCapablePointer()) {
+                      return;
+                    }
+                    setAtlasPanePointerInside(true);
+                  }}
+                  onPointerMove={(event) => {
+                    if (!isHoverCapablePointer()) {
+                      return;
+                    }
+                    setAtlasPanePointerInside(true);
+                    if (!atlasHoverLatchedSetId) {
+                      return;
+                    }
+                    const target = event.target;
+                    const card = target instanceof Element ? target.closest(".atlas-set-card") : null;
+                    const hoveredSetId =
+                      card instanceof HTMLElement ? card.dataset.atlasSetId ?? null : null;
+                    if (hoveredSetId === atlasHoverLatchedSetId) {
+                      return;
+                    }
                     setAtlasHoverLatchedSetId(null);
                   }}
                   onPointerLeave={() => {
+                    if (isHoverCapablePointer()) {
+                      setAtlasPanePointerInside(false);
+                    }
                     setAtlasHoverLatchedSetId(null);
-                    atlasRailRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                    pendingAtlasRailResetRef.current = true;
                   }}
                   ref={atlasRailRef}
                 >
@@ -1192,30 +1466,24 @@ export function ArchiveArtistExplorer({
                           isSelected && "selected",
                           atlasHoverLatchedSetId === setItem.id && "hover-latched",
                         )}
+                        data-atlas-set-id={setItem.id}
                         key={setItem.id}
-                        onPointerEnter={() => {
-                          setAtlasHoverLatchedSetId(setItem.id);
-                        }}
                         onClick={(event) => {
                           if ((event.target as HTMLElement).closest("a,button")) {
                             return;
                           }
 
                           const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+                          const hoverCapable = isHoverCapablePointer();
+                          const nextSelectedIds = additive
+                            ? toggleSelectedSetIds(atlasSelectedSetIds, setItem.id)
+                            : [setItem.id];
+                          setAtlasHoverLatchedSetId(hoverCapable ? setItem.id : null);
                           setAtlasScope("set");
                           setAtlasPage(0);
                           setAtlasEvidencePage(0);
                           setAtlasActiveName(null);
-                          setAtlasSelectedSetIds((current) => {
-                            if (!additive) {
-                              return [setItem.id];
-                            }
-
-                            const nextSelection = current.includes(setItem.id)
-                              ? current.filter((value) => value !== setItem.id)
-                              : [...current, setItem.id];
-                            return nextSelection.length > 0 ? nextSelection : [setItem.id];
-                          });
+                          setAtlasSelectedSetIds(nextSelectedIds);
                         }}
                         role="button"
                         style={{ zIndex: orderedAtlasSetCards.length - index }}
@@ -1225,6 +1493,7 @@ export function ArchiveArtistExplorer({
                             return;
                           }
                           event.preventDefault();
+                          setAtlasHoverLatchedSetId(null);
                           setAtlasScope("set");
                           setAtlasPage(0);
                           setAtlasEvidencePage(0);
@@ -1245,15 +1514,13 @@ export function ArchiveArtistExplorer({
                                 onClick={(event) => {
                                   event.preventDefault();
                                   event.stopPropagation();
+                                  const hoverCapable = isHoverCapablePointer();
+                                  setAtlasHoverLatchedSetId(hoverCapable ? setItem.id : null);
                                   setAtlasScope("set");
                                   setAtlasPage(0);
                                   setAtlasEvidencePage(0);
                                   setAtlasActiveName(null);
-                                  setAtlasSelectedSetIds((current) =>
-                                    current.includes(setItem.id)
-                                      ? current.filter((value) => value !== setItem.id)
-                                      : [...current, setItem.id],
-                                  );
+                                  setAtlasSelectedSetIds(toggleSelectedSetIds(atlasSelectedSetIds, setItem.id));
                                 }}
                                 type="button"
                               >
@@ -1750,6 +2017,7 @@ export function ArchiveArtistExplorer({
                     onChange={(event) => {
                       const next = event.target.value;
                       startTransition(() => {
+                        setSetPage(0);
                         setSetSearch(next);
                       });
                     }}
@@ -1762,7 +2030,10 @@ export function ArchiveArtistExplorer({
                   <select
                     aria-label="Sort sets"
                     id="setSort"
-                    onChange={(event) => setSetSort((event.target.value as SetSort) ?? "default")}
+                    onChange={(event) => {
+                      setSetPage(0);
+                      setSetSort((event.target.value as SetSort) ?? "default");
+                    }}
                     value={setSort}
                   >
                     <option value="default">Default</option>
@@ -1952,9 +2223,31 @@ export function ArchiveArtistExplorer({
               </div>
 
               <div className="pager compact">
+                <button
+                  className="btn"
+                  disabled={currentSetPage === 0}
+                  onClick={() => {
+                    pendingSetExplorerJumpRef.current = true;
+                    setSetPage((current) => Math.max(0, current - 1));
+                  }}
+                  type="button"
+                >
+                  Prev
+                </button>
                 <span>
-                  Page 1 / 1 | {visibleSetCards.length} sets
+                  Page {currentSetPage + 1} / {Math.max(1, maxSetPage + 1)} | {filteredSetCards.length} sets
                 </span>
+                <button
+                  className="btn"
+                  disabled={currentSetPage >= maxSetPage}
+                  onClick={() => {
+                    pendingSetExplorerJumpRef.current = true;
+                    setSetPage((current) => Math.min(maxSetPage, current + 1));
+                  }}
+                  type="button"
+                >
+                  Next
+                </button>
               </div>
             </div>
           </div>

@@ -634,6 +634,7 @@ export function ArchiveHomeExplorer({
 }) {
   const scope = initial.scope ?? "global";
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const artistGridRef = useRef<HTMLDivElement | null>(null);
   const heroVisualRef = useRef<HTMLDivElement | null>(null);
   const heroStatsRef = useRef<HTMLDivElement | null>(null);
   const heroSideRef = useRef<HTMLDivElement | null>(null);
@@ -659,6 +660,8 @@ export function ArchiveHomeExplorer({
   );
   const [hoverLatchedArtistSlug, setHoverLatchedArtistSlug] = useState<string | null>(null);
   const [artistPanePointerInside, setArtistPanePointerInside] = useState(false);
+  const latestSelectedArtistSlugsRef = useRef(selectedArtistSlugs);
+  const pendingArtistGridResetRef = useRef(false);
 
   const [taxonomyLens, setTaxonomyLens] = useState<ArchiveHomeTaxonomyLens>("genres");
   const [taxonomyQuery, setTaxonomyQuery] = useState("");
@@ -713,6 +716,7 @@ export function ArchiveHomeExplorer({
         ]),
   );
   const pairCacheRef = useRef(new Map<string, ArchiveHomePairSelectionPayload | null>());
+  const pendingSetLibraryJumpRef = useRef(false);
   // In workspace mode, do not pre-populate the cache with server-rendered data so the
   // useEffect always fires a fresh workspace-scoped fetch on mount.
   const setLibraryCacheRef = useRef(
@@ -745,6 +749,37 @@ export function ArchiveHomeExplorer({
 
   const allArtistsSelected =
     selectedArtistSlugs.length > 0 && selectedArtistSlugs.length === artistCards.length;
+
+  useEffect(() => {
+    latestSelectedArtistSlugsRef.current = selectedArtistSlugs;
+  }, [selectedArtistSlugs]);
+
+  useEffect(() => {
+    if (artistPanePointerInside || !pendingArtistGridResetRef.current) {
+      return;
+    }
+
+    pendingArtistGridResetRef.current = false;
+    const grid = artistGridRef.current;
+    if (!grid) {
+      return;
+    }
+
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        grid.scrollTo({
+          top: 0,
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+        });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [artistPanePointerInside, dockedSelectedArtistSlugs]);
 
   const orderedArtists = useMemo(() => {
     if (allArtistsSelected) {
@@ -1269,6 +1304,22 @@ export function ArchiveHomeExplorer({
       });
   };
 
+  const jumpToSetLibrary = () => {
+    document.getElementById("sets")?.scrollIntoView({
+      behavior: "auto",
+      block: "start",
+    });
+  };
+
+  useEffect(() => {
+    if (!pendingSetLibraryJumpRef.current) {
+      return;
+    }
+
+    pendingSetLibraryJumpRef.current = false;
+    jumpToSetLibrary();
+  }, [setLibrary.page]);
+
   const taxonomyMaxCount = taxonomyRows.length
     ? Math.max(...taxonomyRows.map((row) => row.count))
     : 1;
@@ -1296,6 +1347,7 @@ export function ArchiveHomeExplorer({
     setFocusArtistSlug(artistSlug);
     setSelectedArtistSlugs((current) => {
       const next = additive ? Array.from(new Set([...current, artistSlug])) : [artistSlug];
+      latestSelectedArtistSlugsRef.current = next;
       if (!artistPanePointerInside) {
         setDockedSelectedArtistSlugs(next);
       }
@@ -1312,6 +1364,7 @@ export function ArchiveHomeExplorer({
       if (!next.length) {
         next = [artistSlug];
       }
+      latestSelectedArtistSlugsRef.current = next;
       if (!artistPanePointerInside) {
         setDockedSelectedArtistSlugs(next);
       }
@@ -1471,11 +1524,16 @@ export function ArchiveHomeExplorer({
                     dockedSelectedArtistSlugs.length > 0 && !allArtistsSelected && "selected-dock",
                   )}
                   id="artistGrid"
-                  onPointerEnter={() => setArtistPanePointerInside(true)}
+                  ref={artistGridRef}
+                  onPointerEnter={(event) => {
+                    setArtistPanePointerInside(true);
+                    event.currentTarget.scrollTo({ top: 0, behavior: "auto" });
+                  }}
                   onPointerLeave={() => {
                     setArtistPanePointerInside(false);
                     setHoverLatchedArtistSlug(null);
-                    setDockedSelectedArtistSlugs(selectedArtistSlugs);
+                    setDockedSelectedArtistSlugs(latestSelectedArtistSlugsRef.current);
+                    pendingArtistGridResetRef.current = true;
                   }}
                 >
                   {orderedArtists.length ? (
@@ -1611,6 +1669,7 @@ export function ArchiveHomeExplorer({
                         className={joinClasses("chip-btn", allArtistsSelected && "active")}
                         onClick={() => {
                           const allSlugs = artistCards.map((artistCard) => artistCard.slug);
+                          latestSelectedArtistSlugsRef.current = allSlugs;
                           setSelectedArtistSlugs(allSlugs);
                           setDockedSelectedArtistSlugs(allSlugs);
                           setFocusArtistSlug(null);
@@ -1628,6 +1687,7 @@ export function ArchiveHomeExplorer({
                             if (!focusArtistSlug) {
                               return;
                             }
+                            latestSelectedArtistSlugsRef.current = [focusArtistSlug];
                             setSelectedArtistSlugs([focusArtistSlug]);
                             setDockedSelectedArtistSlugs([focusArtistSlug]);
                             setTaxonomyActiveName(null);
@@ -2426,7 +2486,10 @@ export function ArchiveHomeExplorer({
               <div className="pager" id="setPager">
                 <button
                   disabled={setLibrary.page <= 1}
-                  onClick={() => setSetPage((current) => current - 1)}
+                  onClick={() => {
+                    pendingSetLibraryJumpRef.current = true;
+                    setSetPage((current) => current - 1);
+                  }}
                   type="button"
                 >
                   Prev
@@ -2436,7 +2499,10 @@ export function ArchiveHomeExplorer({
                 </span>
                 <button
                   disabled={setLibrary.page >= setLibrary.totalPages}
-                  onClick={() => setSetPage((current) => current + 1)}
+                  onClick={() => {
+                    pendingSetLibraryJumpRef.current = true;
+                    setSetPage((current) => current + 1);
+                  }}
                   type="button"
                 >
                   Next

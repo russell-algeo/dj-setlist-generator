@@ -377,7 +377,7 @@
   bottom: clamp(14px, 3vw, 34px);
   margin: 0;
   max-width: calc(100% - clamp(22px, 4vw, 68px));
-  font-size: clamp(52px, 11.8vw, 170px);
+  font-size: var(--artist-hero-title-fit-size, clamp(52px, 11.8vw, 170px));
   line-height: 0.86;
   text-transform: uppercase;
   letter-spacing: -0.05em;
@@ -386,13 +386,13 @@
   font-weight: 800;
   z-index: 3;
   pointer-events: none;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  text-wrap: balance;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .root :global(.artist-hero-title span) {
   display: block;
+  white-space: nowrap;
 }
 
 .root :global(.artist-hero-stats) {

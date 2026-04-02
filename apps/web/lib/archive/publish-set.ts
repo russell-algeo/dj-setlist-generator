@@ -15,6 +15,7 @@ import {
   makeSlug,
   normalizeText,
 } from "@/lib/archive/import-helpers";
+import { resolveSetSpecificImageUrl } from "@/lib/archive/set-images";
 
 export type ArchiveSetPayload = {
   mix_info: Record<string, unknown>;
@@ -174,7 +175,7 @@ export const upsertArchiveSet = async ({
     sourceUrl,
     durationSeconds: Math.round(Number(mixInfo.duration ?? 0)),
     uploader: (mixInfo.uploader as string | undefined) ?? null,
-    imageUrl: (mixInfo.artist_profile_image as string | undefined) ?? null,
+    imageUrl: resolveSetSpecificImageUrl(mixInfo),
     recognitionRate,
     metadata: {
       mixInfo,
