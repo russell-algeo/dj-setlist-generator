@@ -1113,7 +1113,7 @@ export function ArchiveArtistExplorer({
 
   const jumpToSetExplorer = () => {
     document.getElementById("sets-section")?.scrollIntoView({
-      behavior: "auto",
+      behavior: "smooth",
       block: "start",
     });
   };
@@ -1123,8 +1123,24 @@ export function ArchiveArtistExplorer({
       return;
     }
 
-    pendingSetExplorerJumpRef.current = false;
-    jumpToSetExplorer();
+    let outerFrame = 0;
+    let innerFrame = 0;
+
+    outerFrame = window.requestAnimationFrame(() => {
+      innerFrame = window.requestAnimationFrame(() => {
+        pendingSetExplorerJumpRef.current = false;
+        jumpToSetExplorer();
+      });
+    });
+
+    return () => {
+      if (outerFrame) {
+        window.cancelAnimationFrame(outerFrame);
+      }
+      if (innerFrame) {
+        window.cancelAnimationFrame(innerFrame);
+      }
+    };
   }, [currentSetPage]);
 
   return (
