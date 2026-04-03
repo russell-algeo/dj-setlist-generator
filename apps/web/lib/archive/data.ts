@@ -951,7 +951,7 @@ const getHomeSummaryUncached = async ({
     title: row.title,
     artistName: row.artistName ?? null,
     sourceUrl: row.sourceUrl,
-    thumbnailUrl: resolveDirectSetImage(row),
+    thumbnailUrl: resolveSetVisualImageUrl(row),
     duration: Number(row.durationSeconds ?? 0),
     durationFmt: formatCompactDuration(Number(row.durationSeconds ?? 0)),
     totalTracks: trackCountMap.get(row.id) ?? 0,
