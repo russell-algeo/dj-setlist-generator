@@ -34,13 +34,13 @@ export function RunRow({
   title,
   stage,
   status,
+  displayStatus,
   errorSummary,
   publishedSetId,
   attemptCount,
   updatedAt,
   lastActivityAt,
   lastActivityMessage,
-  progress,
   workflowSteps,
   recentEvents,
   actions,
@@ -119,7 +119,7 @@ export function RunRow({
             <span style={{ color: "#5a4747", fontSize: 9 }}>Max retries</span>
           ) : null}
         </div>
-        <StatusPill align="right" status={status} />
+        <StatusPill align="right" status={displayStatus} />
         <span style={{ color: "#444", fontSize: 11 }}>{expanded ? "∨" : "›"}</span>
       </div>
 
@@ -211,50 +211,6 @@ export function RunRow({
             </div>
             <RunWorkflowTimeline steps={workflowSteps} />
           </div>
-
-          {progress ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                gap: 16,
-                marginBottom: 16,
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    color: "#444",
-                    fontSize: 9,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    marginBottom: 4,
-                  }}
-                >
-                  Recognition
-                </div>
-                <div style={{ color: "#888", fontSize: 11 }}>
-                  {progress.recognizedCount}/{progress.hitCount} tracks recognized
-                </div>
-              </div>
-              <div>
-                <div
-                  style={{
-                    color: "#444",
-                    fontSize: 9,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    marginBottom: 4,
-                  }}
-                >
-                  Lease progress
-                </div>
-                <div style={{ color: "#888", fontSize: 11 }}>
-                  {progress.completedLeases}/{progress.totalLeases} leases completed
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           {recentEvents.length > 0 ? (
             <div

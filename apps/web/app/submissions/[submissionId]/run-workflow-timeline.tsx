@@ -1,26 +1,22 @@
-import type { SubmissionRunWorkflowStepDto } from "@/lib/jobs/public";
+import type { CSSProperties } from "react";
 
-type RunWorkflowTimelineProps = {
-  steps: SubmissionRunWorkflowStepDto[];
+import type { WorkflowStepDto } from "@/lib/jobs/public";
+
+type WorkflowTimelineProps = {
+  steps: WorkflowStepDto[];
 };
 
-const stateColors: Record<SubmissionRunWorkflowStepDto["state"], string> = {
-  pending: "#2a2a2a",
-  active: "#8f8a47",
-  complete: "#2f7a42",
-  failed: "#8a3a3a",
+const stateColors: Record<WorkflowStepDto["state"], string> = {
+  pending: "#262626",
+  active: "#d2ae32",
+  complete: "#2f8a4d",
+  failed: "#9a3e3e",
   cancelled: "#666",
 };
 
-const progressFillColors: Record<SubmissionRunWorkflowStepDto["state"], string> = {
-  pending: "#2a2a2a",
-  active: "#8f8a47",
-  complete: "#2f7a42",
-  failed: "#8a3a3a",
-  cancelled: "#666",
-};
+const baseRailColor = "#1c1c1c";
 
-const getStateLabel = (state: SubmissionRunWorkflowStepDto["state"]) => {
+const getStateLabel = (state: WorkflowStepDto["state"]) => {
   switch (state) {
     case "active":
       return "In progress";
@@ -35,123 +31,347 @@ const getStateLabel = (state: SubmissionRunWorkflowStepDto["state"]) => {
   }
 };
 
-export function RunWorkflowTimeline({ steps }: RunWorkflowTimelineProps) {
-  return (
-    <div style={{ display: "grid", gap: 12 }}>
-      {steps.map((step, index) => {
-        const color = stateColors[step.state];
-        const progressRatio =
-          step.progress && step.progress.total > 0
-            ? Math.max(0, Math.min(1, step.progress.current / step.progress.total))
-            : 0;
+const getSegmentBackground = (leftStep: WorkflowStepDto, rightStep: WorkflowStepDto) => {
+  if (leftStep.state === "complete" && rightStep.state === "complete") {
+    return stateColors.complete;
+  }
 
-        return (
+  if (leftStep.state === "complete" && rightStep.state === "active") {
+    return `linear-gradient(90deg, ${stateColors.complete} 0%, ${stateColors.complete} 42%, ${stateColors.active} 100%)`;
+  }
+
+  if (leftStep.state === "active" && rightStep.state === "pending") {
+    return baseRailColor;
+  }
+
+  if (leftStep.state === "complete" && rightStep.state === "failed") {
+    return `linear-gradient(90deg, ${stateColors.complete} 0%, ${stateColors.complete} 42%, ${stateColors.failed} 100%)`;
+  }
+
+  if (leftStep.state === "complete" && rightStep.state === "cancelled") {
+    return `linear-gradient(90deg, ${stateColors.complete} 0%, ${stateColors.complete} 42%, ${stateColors.cancelled} 100%)`;
+  }
+
+  if (leftStep.state === "failed" || rightStep.state === "failed") {
+    return stateColors.failed;
+  }
+
+  if (leftStep.state === "cancelled" || rightStep.state === "cancelled") {
+    return stateColors.cancelled;
+  }
+
+  if (leftStep.state === "active" || rightStep.state === "active") {
+    return stateColors.active;
+  }
+
+  return baseRailColor;
+};
+
+export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
+  const nodeCenters = steps.map((_, index) =>
+    steps.length === 1 ? 50 : ((index + 0.5) / steps.length) * 100,
+  );
+  const activeProgressStepIndex = steps.findIndex((step) => step.state === "active" && step.progress);
+  const activeProgressStep = activeProgressStepIndex >= 0 ? steps[activeProgressStepIndex] : null;
+  const progressRatio =
+    activeProgressStep?.progress && activeProgressStep.progress.total > 0
+      ? Math.max(
+          0,
+          Math.min(1, activeProgressStep.progress.current / activeProgressStep.progress.total),
+        )
+      : 0;
+  const connectorLeftPercent =
+    activeProgressStepIndex >= 0 ? nodeCenters[activeProgressStepIndex] ?? null : null;
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ overflowX: "auto", paddingBottom: 2 }}>
+        <div
+          style={{
+            minWidth: 680,
+            display: "grid",
+            gap: 16,
+          }}
+        >
           <div
-            key={step.key}
             style={{
               display: "grid",
-              gridTemplateColumns: "18px minmax(0, 1fr)",
-              columnGap: 12,
-              alignItems: "flex-start",
+              gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`,
+              gap: 16,
             }}
           >
-            <div style={{ display: "grid", justifyItems: "center", height: "100%" }}>
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  marginTop: 4,
-                  background: step.state === "pending" ? "transparent" : color,
-                  border: `1px solid ${color}`,
-                  boxShadow: step.state === "active" ? `0 0 0 3px ${color}22` : "none",
-                }}
-              />
-              {index < steps.length - 1 ? (
-                <span
+            {steps.map((step) => (
+              <div key={`${step.key}:label`} style={{ textAlign: "center", minWidth: 0 }}>
+                <div
                   style={{
-                    width: 1,
-                    minHeight: 36,
-                    marginTop: 4,
-                    background: step.state === "pending" ? "#1f1f1f" : `${color}66`,
-                  }}
-                />
-              ) : null}
-            </div>
-
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
-                  alignItems: "baseline",
-                }}
-              >
-                <span
-                  style={{
-                    color: step.state === "pending" ? "#666" : "#b5b5b5",
+                    color: step.state === "pending" ? "#666" : "#b9b9b9",
                     fontSize: 10,
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
+                    whiteSpace: "nowrap",
                   }}
                 >
                   {step.label}
-                </span>
-                <span style={{ color, fontSize: 9, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                  {getStateLabel(step.state)}
-                </span>
-              </div>
-
-              {step.detail ? (
-                <div style={{ marginTop: 4, color: "#6e6e6e", fontSize: 10, lineHeight: 1.5 }}>
-                  {step.detail}
                 </div>
-              ) : null}
+              </div>
+            ))}
+          </div>
 
-              {step.progress ? (
-                <div style={{ marginTop: 8 }}>
+          <div style={{ position: "relative", height: 22 }}>
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+              }}
+            >
+              {steps.slice(0, -1).map((step, index) => {
+                const left = nodeCenters[index] ?? 0;
+                const right = nodeCenters[index + 1] ?? left;
+                const nextStep = steps[index + 1];
+
+                if (!nextStep) {
+                  return null;
+                }
+
+                return (
                   <div
+                    key={`${step.key}:${nextStep.key}:segment`}
+                    style={{
+                      position: "absolute",
+                      left: `${left}%`,
+                      width: `${Math.max(right - left, 0)}%`,
+                      top: 10,
+                      height: 2,
+                      background: getSegmentBackground(step, nextStep),
+                    }}
+                  />
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "grid",
+                gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`,
+                gap: 16,
+                alignItems: "center",
+              }}
+            >
+              {steps.map((step) => {
+                const color = stateColors[step.state];
+                const isActive = step.state === "active";
+
+                return (
+                  <div
+                    key={`${step.key}:node`}
                     style={{
                       display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      color: "#5e5e5e",
-                      fontSize: 9,
-                      marginBottom: 4,
+                      justifyContent: "center",
+                      alignItems: "center",
                     }}
                   >
-                    <span style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                      {step.progress.label}
+                    <span
+                      className={isActive ? "timelineNode timelineNodeActive" : "timelineNode"}
+                      style={
+                        {
+                          "--timeline-node-color": color,
+                          "--timeline-node-background":
+                            step.state === "pending" ? "#0f0f0f" : color,
+                        } as CSSProperties
+                      }
+                    >
+                      <span className="timelineNodeInner" />
                     </span>
-                    <span>
-                      {step.progress.current}/{step.progress.total}
-                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`,
+              gap: 16,
+              alignItems: "start",
+            }}
+          >
+            {steps.map((step) => (
+              <div key={`${step.key}:detail`} style={{ textAlign: "center", minWidth: 0 }}>
+                <div
+                  style={{
+                    color: stateColors[step.state],
+                    fontSize: 9,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {getStateLabel(step.state)}
+                </div>
+                {step.detail ? (
+                  <div
+                    style={{
+                      marginTop: 5,
+                      color: "#6e6e6e",
+                      fontSize: 10,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {step.detail}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+
+          {activeProgressStep?.progress && connectorLeftPercent !== null ? (
+            <div
+              style={{
+                position: "relative",
+                marginTop: 4,
+                paddingTop: 14,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: `${connectorLeftPercent}%`,
+                  width: 1,
+                  height: 12,
+                  background: `${stateColors.active}88`,
+                  transform: "translateX(-50%)",
+                }}
+              />
+
+              <div
+                style={{
+                  borderRadius: 6,
+                  border: `1px solid ${stateColors.active}44`,
+                  background: "#131108",
+                  padding: "12px 14px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    alignItems: "baseline",
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ color: "#7d7a66", fontSize: 10, lineHeight: 1.5 }}>
+                    {activeProgressStep.detail}
                   </div>
                   <div
                     style={{
-                      height: 5,
-                      borderRadius: 999,
-                      background: "#151515",
-                      overflow: "hidden",
+                      color: stateColors.active,
+                      fontSize: 9,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
                     }}
                   >
-                    <div
-                      style={{
-                        width: `${progressRatio * 100}%`,
-                        height: "100%",
-                        borderRadius: 999,
-                        background: progressFillColors[step.state],
-                      }}
-                    />
+                    {activeProgressStep.progress.current}/{activeProgressStep.progress.total}{" "}
+                    {activeProgressStep.progress.label} complete
                   </div>
                 </div>
-              ) : null}
+
+                <div
+                  style={{
+                    height: 6,
+                    borderRadius: 999,
+                    background: "#1a1a1a",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${progressRatio * 100}%`,
+                      height: "100%",
+                      borderRadius: 999,
+                      background:
+                        "linear-gradient(90deg, #d2ae32 0%, #d6b735 28%, #8eb248 68%, #2f8a4d 100%)",
+                    }}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        );
-      })}
+          ) : null}
+        </div>
+      </div>
+
+      <style jsx>{`
+        .timelineNode {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 16px;
+          height: 16px;
+          border-radius: 999px;
+          border: 1px solid var(--timeline-node-color);
+          background: #0f0f0f;
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+          z-index: 1;
+        }
+
+        .timelineNodeInner {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: var(--timeline-node-background);
+        }
+
+        .timelineNodeActive {
+          animation: timelinePulse 1.25s ease-in-out infinite;
+          box-shadow:
+            0 0 0 3px rgba(210, 174, 50, 0.16),
+            inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+        }
+
+        .timelineNodeActive::before {
+          content: "";
+          position: absolute;
+          inset: -5px;
+          border-radius: 999px;
+          border: 2px solid rgba(210, 174, 50, 0.55);
+          animation: timelineRing 1.25s ease-in-out infinite;
+        }
+
+        @keyframes timelinePulse {
+          0%,
+          100% {
+            transform: scale(1);
+          }
+
+          50% {
+            transform: scale(1.08);
+          }
+        }
+
+        @keyframes timelineRing {
+          0% {
+            transform: scale(0.72);
+            opacity: 0.85;
+          }
+
+          70% {
+            transform: scale(1.1);
+            opacity: 0.25;
+          }
+
+          100% {
+            transform: scale(1.18);
+            opacity: 0;
+          }
+        }
+      `}</style>
     </div>
   );
 }
+
+export const RunWorkflowTimeline = WorkflowTimeline;

@@ -12,6 +12,7 @@ import {
 import { RunRow } from "./run-row";
 import { usePolledJson } from "../use-polled-json";
 import { StatusPill } from "../status-pill";
+import { WorkflowTimeline } from "./run-workflow-timeline";
 
 type SubmissionDetailClientProps = {
   initialDetail: SubmissionDetailDto;
@@ -378,6 +379,31 @@ export function SubmissionDetailClient({
               <strong style={{ color: "#888" }}>Discovery candidates:</strong> {detail.discoveryCandidateCount}
             </span>
           ) : null}
+        </div>
+      ) : null}
+
+      {detail.submission.mode === "artist" && detail.workflowSteps ? (
+        <div
+          style={{
+            marginBottom: 20,
+            padding: "12px 14px",
+            borderRadius: 6,
+            border: "1px solid #1c1c1c",
+            background: "#0f0f0f",
+          }}
+        >
+          <div
+            style={{
+              color: "#666",
+              fontSize: 9,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              marginBottom: 12,
+            }}
+          >
+            Submission timeline
+          </div>
+          <WorkflowTimeline steps={detail.workflowSteps} />
         </div>
       ) : null}
 

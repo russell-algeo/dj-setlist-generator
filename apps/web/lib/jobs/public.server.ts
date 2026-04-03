@@ -7,7 +7,9 @@ import { getDb } from "@/lib/db/client";
 import { setRuns, submissions, workerEvents } from "@/lib/db/schema";
 import { setRunRetryAttemptLimit } from "./policy";
 import {
+  buildArtistSubmissionWorkflowSteps,
   buildRunWorkflowSteps,
+  getRunDisplayStatus,
   getTimelineSummary,
   getTimelineTone,
   normalizePublicSubmissionFilter,
@@ -336,6 +338,7 @@ export const serializeSubmissionDetail = (
     0,
   );
   const latestEvent = detail.events[0] ?? null;
+  const submissionEventTypes = new Set(detail.events.map((event) => event.eventType));
 
   return {
     submission: {
@@ -356,6 +359,23 @@ export const serializeSubmissionDetail = (
     lastActivityAt: (latestEvent?.createdAt ?? detail.submission.updatedAt).toISOString(),
     lastActivityMessage: latestEvent?.message ?? null,
     discoveryCandidateCount: detail.discoveryCandidates.length,
+    workflowSteps:
+      detail.submission.mode === "artist"
+        ? buildArtistSubmissionWorkflowSteps({
+            submissionStatus: detail.submission.status,
+            runCounts: counts,
+            runCount: detail.runs.length,
+            discoveryCandidateCount: detail.discoveryCandidates.length,
+            hasDiscoveryStarted:
+              submissionEventTypes.has("submission.discovery.started") ||
+              detail.runs.length > 0,
+            hasDiscoveryCompleted:
+              submissionEventTypes.has("submission.discovery.completed") ||
+              detail.runs.length > 0,
+            hasDiscoveryEmpty: submissionEventTypes.has("submission.discovery.empty"),
+            hasDiscoveryFailed: submissionEventTypes.has("submission.discovery.failed"),
+          })
+        : null,
     runs: detail.runs.map((run) => {
       const progress =
         run.leaseRollup || run.segmentHitRollup
@@ -370,6 +390,13 @@ export const serializeSubmissionDetail = (
       const currentAttemptEvents = selectCurrentAttemptEvents(allRunEvents);
       const recentEvents = buildTimelineItems(currentAttemptEvents).slice(0, 10);
       const latestRunEvent = currentAttemptEvents[0] ?? allRunEvents[0] ?? null;
+      const workflowSteps = buildRunWorkflowSteps({
+        status: run.status,
+        stage: run.stage,
+        progress,
+        recognitionSlotCount: getRecognitionSlotCount(run.sourceMetadata),
+        completedRecognitionSlots: countCompletedRecognitionSlots(currentAttemptEvents),
+      });
 
       return {
         id: run.id,
@@ -378,6 +405,7 @@ export const serializeSubmissionDetail = (
         title: run.setTitle,
         stage: run.stage,
         status: run.status,
+        displayStatus: getRunDisplayStatus(run.status, workflowSteps),
         errorSummary: run.errorSummary,
         publishedSetId: run.publishedSetId,
         attemptCount: run.attemptCount,
@@ -388,13 +416,7 @@ export const serializeSubmissionDetail = (
           ? getTimelineSummary(latestRunEvent.eventType, latestRunEvent.message)
           : null,
         progress,
-        workflowSteps: buildRunWorkflowSteps({
-          status: run.status,
-          stage: run.stage,
-          progress,
-          recognitionSlotCount: getRecognitionSlotCount(run.sourceMetadata),
-          completedRecognitionSlots: countCompletedRecognitionSlots(currentAttemptEvents),
-        }),
+        workflowSteps,
         recentEvents,
         actions: buildRunActionSummary(run.status, run.attemptCount),
       };

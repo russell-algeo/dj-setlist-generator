@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildArtistSubmissionWorkflowSteps,
   buildRunWorkflowSteps,
+  getRunDisplayStatus,
   getTimelineSummary,
   getTimelineTone,
   normalizePublicSubmissionFilter,
@@ -89,5 +91,63 @@ describe("public submission helpers", () => {
       "complete",
       "complete",
     ]);
+  });
+
+  it("advances the visible workflow to publish when recognition is fully complete", () => {
+    const waitingForPublish = buildRunWorkflowSteps({
+      status: "recognizing",
+      stage: "slot_1_recognizing",
+      progress: {
+        totalLeases: 9,
+        completedLeases: 9,
+        hitCount: 86,
+        recognizedCount: 9,
+      },
+      recognitionSlotCount: 9,
+      completedRecognitionSlots: 9,
+    });
+
+    expect(waitingForPublish.map((step) => step.state)).toEqual([
+      "complete",
+      "complete",
+      "active",
+      "pending",
+    ]);
+    expect(waitingForPublish[2]?.detail).toBe("Waiting for publish workers");
+    expect(getRunDisplayStatus("recognizing", waitingForPublish)).toBe("publishing");
+  });
+
+  it("builds a top-level artist submission timeline from discovery through completion", () => {
+    const steps = buildArtistSubmissionWorkflowSteps({
+      submissionStatus: "running",
+      runCounts: {
+        totalCount: 12,
+        queuedCount: 4,
+        inFlightCount: 5,
+        activeCount: 9,
+        completedCount: 3,
+        failedCount: 0,
+        cancelledCount: 0,
+        terminalCount: 3,
+      },
+      runCount: 12,
+      discoveryCandidateCount: 12,
+      hasDiscoveryStarted: true,
+      hasDiscoveryCompleted: true,
+      hasDiscoveryEmpty: false,
+      hasDiscoveryFailed: false,
+    });
+
+    expect(steps.map((step) => step.state)).toEqual([
+      "complete",
+      "complete",
+      "active",
+      "pending",
+    ]);
+    expect(steps[2]?.progress).toEqual({
+      current: 3,
+      total: 12,
+      label: "sets",
+    });
   });
 });

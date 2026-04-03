@@ -51,8 +51,8 @@ export type SubmissionRunWorkflowStepState =
   | "failed"
   | "cancelled";
 
-export type SubmissionRunWorkflowStepDto = {
-  key: "bootstrap" | "recognize" | "publish" | "complete";
+export type WorkflowStepDto = {
+  key: string;
   label: string;
   state: SubmissionRunWorkflowStepState;
   detail: string | null;
@@ -64,6 +64,8 @@ export type SubmissionRunWorkflowStepDto = {
       }
     | null;
 };
+
+export type SubmissionRunWorkflowStepDto = WorkflowStepDto;
 
 export type SubmissionRunEventDto = TimelineItemDto;
 
@@ -79,6 +81,7 @@ export type SubmissionRunDto = {
   title: string | null;
   stage: string | null;
   status: string;
+  displayStatus: string;
   errorSummary: string | null;
   publishedSetId: string | null;
   attemptCount: number;
@@ -126,6 +129,7 @@ export type SubmissionDetailDto = {
   lastActivityAt: string;
   lastActivityMessage: string | null;
   discoveryCandidateCount: number;
+  workflowSteps: WorkflowStepDto[] | null;
   runs: SubmissionRunDto[];
 };
 
@@ -219,6 +223,9 @@ const publishStageDetails: Record<string, string> = {
   publish_failed: "Publish failed",
 };
 
+const terminalSubmissionStatuses = ["completed", "partial", "failed", "cancelled"] as const;
+const rawPublishPhaseStatuses = new Set(["aggregating", "enriching", "publishing"]);
+
 export const buildRunWorkflowSteps = ({
   status,
   stage,
@@ -278,7 +285,7 @@ export const buildRunWorkflowSteps = ({
       normalizedStage === "publish_failed" ||
       status === "completed" ||
       Boolean(progress && progress.totalLeases > 0 && progress.completedLeases >= progress.totalLeases));
-  const publishStarted =
+  const rawPublishStarted =
     normalizedStage === "aggregating" ||
     normalizedStage === "enriching" ||
     normalizedStage === "publishing" ||
@@ -287,6 +294,8 @@ export const buildRunWorkflowSteps = ({
     normalizedStage === "publish_failed" ||
     normalizedStage === "workflow_incomplete" ||
     status === "completed";
+  const publishStarted =
+    rawPublishStarted || (recognizeComplete && status !== "failed" && status !== "cancelled");
   const publishComplete =
     status === "completed" ||
     normalizedStage === "published" ||
@@ -378,7 +387,12 @@ export const buildRunWorkflowSteps = ({
 
   const publishDetail =
     publishState === "active" || publishState === "complete" || publishState === "failed"
-      ? publishStageDetails[normalizedStage] ?? (publishState === "complete" ? "Published to archive" : null)
+      ? publishStageDetails[normalizedStage] ??
+        (publishState === "active"
+          ? "Waiting for publish workers"
+          : publishState === "complete"
+            ? "Published to archive"
+            : null)
       : publishState === "cancelled"
         ? "Publish cancelled"
         : null;
@@ -434,6 +448,183 @@ export const buildRunWorkflowSteps = ({
           : completeState === "active"
             ? "Final bookkeeping"
             : null,
+      progress: null,
+    },
+  ];
+};
+
+export const getRunDisplayStatus = (
+  status: string,
+  workflowSteps: readonly SubmissionRunWorkflowStepDto[],
+) => {
+  const activeStep = workflowSteps.find((step) => step.state === "active");
+  if (!activeStep) {
+    return status;
+  }
+
+  if (activeStep.key === "publish") {
+    return rawPublishPhaseStatuses.has(status) ? status : "publishing";
+  }
+
+  if (activeStep.key === "recognize") {
+    return "recognizing";
+  }
+
+  if (activeStep.key === "bootstrap") {
+    return status === "queued" ? "queued" : "resolving";
+  }
+
+  if (activeStep.key === "complete") {
+    return "publishing";
+  }
+
+  return status;
+};
+
+type BuildArtistSubmissionWorkflowStepsInput = {
+  submissionStatus: string;
+  runCounts: SubmissionCountsDto;
+  runCount: number;
+  discoveryCandidateCount: number;
+  hasDiscoveryStarted: boolean;
+  hasDiscoveryCompleted: boolean;
+  hasDiscoveryEmpty: boolean;
+  hasDiscoveryFailed: boolean;
+};
+
+export const buildArtistSubmissionWorkflowSteps = ({
+  submissionStatus,
+  runCounts,
+  runCount,
+  discoveryCandidateCount,
+  hasDiscoveryStarted,
+  hasDiscoveryCompleted,
+  hasDiscoveryEmpty,
+  hasDiscoveryFailed,
+}: BuildArtistSubmissionWorkflowStepsInput): WorkflowStepDto[] => {
+  const isTerminalSubmission = terminalSubmissionStatuses.includes(
+    submissionStatus as (typeof terminalSubmissionStatuses)[number],
+  );
+  const discoveryComplete = hasDiscoveryCompleted || hasDiscoveryEmpty || hasDiscoveryFailed || runCount > 0;
+  const queueComplete = runCount > 0 || hasDiscoveryEmpty || hasDiscoveryFailed;
+  const processActive = runCount > 0 && runCounts.activeCount > 0;
+  const processComplete = runCount > 0 && runCounts.terminalCount >= runCount && runCounts.activeCount === 0;
+
+  const discoverState: SubmissionRunWorkflowStepState =
+    hasDiscoveryFailed
+      ? "failed"
+      : discoveryComplete
+        ? "complete"
+        : hasDiscoveryStarted || submissionStatus === "queued" || submissionStatus === "running"
+          ? "active"
+          : "pending";
+
+  const queueState: SubmissionRunWorkflowStepState =
+    submissionStatus === "cancelled" && !queueComplete
+      ? "cancelled"
+      : queueComplete
+        ? "complete"
+        : discoveryComplete && !isTerminalSubmission
+          ? "active"
+          : "pending";
+
+  const processState: SubmissionRunWorkflowStepState =
+    submissionStatus === "failed" && runCounts.completedCount === 0 && runCounts.failedCount > 0
+      ? "failed"
+      : submissionStatus === "cancelled" && runCounts.activeCount === 0 && runCount > 0
+        ? "cancelled"
+        : processComplete
+          ? "complete"
+          : processActive || (runCount > 0 && runCounts.queuedCount > 0)
+            ? "active"
+            : "pending";
+
+  const completeState: SubmissionRunWorkflowStepState =
+    submissionStatus === "failed"
+      ? "failed"
+      : submissionStatus === "cancelled"
+        ? "cancelled"
+        : submissionStatus === "partial" || submissionStatus === "completed"
+          ? "complete"
+          : "pending";
+
+  const processDetailParts = [
+    runCount > 0 ? `${runCounts.terminalCount}/${runCount} sets finished` : null,
+    runCounts.inFlightCount > 0 ? `${runCounts.inFlightCount} active` : null,
+    runCounts.queuedCount > 0 ? `${runCounts.queuedCount} queued` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return [
+    {
+      key: "discover",
+      label: "Discover",
+      state: discoverState,
+      detail:
+        discoverState === "active"
+          ? "Searching source platforms for matching sets"
+          : hasDiscoveryEmpty
+            ? "No candidate sets found"
+            : hasDiscoveryFailed
+              ? "Discovery failed"
+              : discoveryComplete
+                ? `${Math.max(discoveryCandidateCount, runCount)} candidate sets identified`
+                : null,
+      progress: null,
+    },
+    {
+      key: "queue",
+      label: "Queue",
+      state: queueState,
+      detail:
+        queueState === "active"
+          ? "Creating set runs from discovered candidates"
+          : queueState === "complete"
+            ? runCount > 0
+              ? `${runCount} sets queued for processing`
+              : "No sets needed queueing"
+            : queueState === "cancelled"
+              ? "Queueing cancelled"
+              : null,
+      progress: null,
+    },
+    {
+      key: "process",
+      label: "Process",
+      state: processState,
+      detail:
+        processDetailParts.join(" · ") ||
+        (processState === "active"
+          ? "Processing discovered sets"
+          : processState === "complete"
+            ? "All set runs reached a terminal state"
+            : processState === "failed"
+              ? "Processing failed before any set completed"
+              : processState === "cancelled"
+                ? "Processing cancelled"
+                : null),
+      progress:
+        runCount > 0
+          ? {
+              current: runCounts.terminalCount,
+              total: runCount,
+              label: "sets",
+            }
+          : null,
+    },
+    {
+      key: "complete",
+      label: "Complete",
+      state: completeState,
+      detail:
+        submissionStatus === "completed"
+          ? "All discovered sets are ready"
+          : submissionStatus === "partial"
+            ? "Completed with some failed or cancelled sets"
+            : submissionStatus === "failed"
+              ? "Submission ended in failure"
+              : submissionStatus === "cancelled"
+                ? "Submission was cancelled"
+                : null,
       progress: null,
     },
   ];
