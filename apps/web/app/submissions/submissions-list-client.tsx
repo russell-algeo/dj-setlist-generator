@@ -9,6 +9,7 @@ import type {
 } from "@/lib/jobs/public";
 
 import { usePolledJson } from "./use-polled-json";
+import { StatusPill } from "./status-pill";
 
 type SubmissionsListClientProps = {
   filterStatus: PublicSubmissionFilter;
@@ -21,18 +22,14 @@ const MODE_LABEL: Record<string, string> = {
   curated_artist: "Curated Artist",
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  queued: "#555",
-  running: "#7a7a3a",
-  partial: "#7a5a3a",
-  completed: "#3a7a3a",
-  failed: "#8a3a3a",
-  cancelled: "#555",
-  cancelling: "#7a5a3a",
-};
-
 const submissionsHaveActiveWork = (items: SubmissionListItemDto[]) =>
   items.some((submission) => submission.hasActiveWork);
+
+const getListActivityToken = (items: SubmissionListItemDto[]) =>
+  items
+    .filter((submission) => submission.hasActiveWork)
+    .map((submission) => `${submission.id}:${submission.lastActivityAt}`)
+    .join("|");
 
 const describeCounts = (submission: SubmissionListItemDto) => {
   const parts = [`${submission.counts.completedCount}/${submission.counts.totalCount} complete`];
@@ -65,10 +62,13 @@ export function SubmissionsListClient({
     isRefreshing,
     refreshError,
     lastUpdatedAt,
+    isPollingPausedForInactivity,
+    resumePolling,
   } = usePolledJson<SubmissionListItemDto[]>({
     initialData: initialSubmissions,
     url: filterStatus === "all" ? "/api/jobs" : `/api/jobs?status=${filterStatus}`,
     shouldPoll: submissionsHaveActiveWork,
+    getActivityToken: getListActivityToken,
     parseResponse: async (response) => {
       const body = await response.json();
       return (body as { submissions: SubmissionListItemDto[] }).submissions;
@@ -89,9 +89,36 @@ export function SubmissionsListClient({
           textTransform: "uppercase",
         }}
       >
-        <span>{submissionsHaveActiveWork(submissions) ? "Live updates active" : "Snapshot"}</span>
+        <span>
+          {submissionsHaveActiveWork(submissions)
+            ? isPollingPausedForInactivity
+              ? "Live updates paused after 5 minutes without new activity"
+              : "Live updates active"
+            : "Snapshot"}
+        </span>
         <span>{isRefreshing ? "Refreshing…" : `Updated ${formatTimestamp(lastUpdatedAt)}`}</span>
       </div>
+
+      {submissionsHaveActiveWork(submissions) && isPollingPausedForInactivity ? (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button
+            onClick={() => void resumePolling()}
+            style={{
+              border: "1px solid #2a2a2a",
+              borderRadius: 4,
+              background: "#111",
+              color: "#b5b5b5",
+              fontSize: 9,
+              letterSpacing: "0.08em",
+              padding: "5px 9px",
+              textTransform: "uppercase",
+            }}
+            type="button"
+          >
+            Resume live updates
+          </button>
+        </div>
+      ) : null}
 
       {refreshError ? (
         <div
@@ -154,30 +181,11 @@ export function SubmissionsListClient({
             <div>
               <div style={{ color: "#ccc", fontSize: 11 }}>{submission.displayTitle}</div>
               <div style={{ color: "#333", fontSize: 9, marginTop: 2 }}>{submission.id.slice(0, 8)}…</div>
-              {submission.lastActivityMessage ? (
-                <div style={{ color: "#4a4a4a", fontSize: 9, marginTop: 6 }}>
-                  {submission.lastActivityMessage} · {formatTimestamp(submission.lastActivityAt)}
-                </div>
-              ) : null}
             </div>
             <span style={{ color: "#666", fontSize: 10 }}>{MODE_LABEL[submission.mode] ?? submission.mode}</span>
             <div style={{ color: "#666", fontSize: 10, lineHeight: 1.6 }}>{describeCounts(submission)}</div>
             <span style={{ color: "#555", fontSize: 10 }}>{formatTimestamp(submission.createdAt)}</span>
-            <div style={{ textAlign: "right" }}>
-              <span
-                style={{
-                  fontSize: 9,
-                  letterSpacing: "0.08em",
-                  padding: "2px 8px",
-                  borderRadius: 3,
-                  border: "1px solid",
-                  color: STATUS_COLOR[submission.status] ?? "#555",
-                  borderColor: STATUS_COLOR[submission.status] ?? "#555",
-                }}
-              >
-                {submission.status}
-              </span>
-            </div>
+            <StatusPill align="right" status={submission.status} />
           </Link>
         ))
       )}

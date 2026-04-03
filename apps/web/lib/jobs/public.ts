@@ -44,6 +44,29 @@ export type SubmissionRunProgressDto = {
   recognizedCount: number;
 } | null;
 
+export type SubmissionRunWorkflowStepState =
+  | "pending"
+  | "active"
+  | "complete"
+  | "failed"
+  | "cancelled";
+
+export type SubmissionRunWorkflowStepDto = {
+  key: "bootstrap" | "recognize" | "publish" | "complete";
+  label: string;
+  state: SubmissionRunWorkflowStepState;
+  detail: string | null;
+  progress:
+    | {
+        current: number;
+        total: number;
+        label: string;
+      }
+    | null;
+};
+
+export type SubmissionRunEventDto = TimelineItemDto;
+
 export type SubmissionRunActionSummary = SubmissionActionSummary & {
   retryBudgetRemaining: number;
   retryExhausted: boolean;
@@ -61,7 +84,11 @@ export type SubmissionRunDto = {
   attemptCount: number;
   createdAt: string;
   updatedAt: string | null;
+  lastActivityAt: string;
+  lastActivityMessage: string | null;
   progress: SubmissionRunProgressDto;
+  workflowSteps: SubmissionRunWorkflowStepDto[];
+  recentEvents: SubmissionRunEventDto[];
   actions: SubmissionRunActionSummary;
 };
 
@@ -100,7 +127,6 @@ export type SubmissionDetailDto = {
   lastActivityMessage: string | null;
   discoveryCandidateCount: number;
   runs: SubmissionRunDto[];
-  timeline: TimelineItemDto[];
 };
 
 const timelineEventSummaries: Record<string, string> = {
@@ -115,6 +141,16 @@ const timelineEventSummaries: Record<string, string> = {
   "set_run.retried": "Set retried",
   "set_run.cancel_requested": "Run cancellation requested",
   "set_run.requeued": "Set requeued",
+  "set_run.bootstrap.started": "Bootstrap started",
+  "set_run.bootstrap.completed": "Bootstrap completed",
+  "set_run.recognition.started": "Recognition started",
+  "set_run.recognition.completed": "Recognition completed",
+  "set_run.aggregate.started": "Aggregation started",
+  "set_run.enrich.started": "Enrichment started",
+  "set_run.publish.started": "Publish started",
+  "set_run.publish.deferred": "Publish deferred",
+  "set_run.dispatch_failed": "Dispatch failed",
+  "set_run.completed": "Set completed",
   "set_run.failed": "Set failed",
   "set_run.cancelled": "Set cancelled",
   "set_run.publish_retry_dispatched": "Publish retry started",
@@ -132,6 +168,11 @@ const timelineEventTones: Record<string, TimelineItemTone> = {
   "set_run.retried": "success",
   "set_run.cancel_requested": "neutral",
   "set_run.requeued": "neutral",
+  "set_run.bootstrap.completed": "success",
+  "set_run.recognition.completed": "success",
+  "set_run.completed": "success",
+  "set_run.dispatch_failed": "danger",
+  "set_run.publish.deferred": "neutral",
   "set_run.publish_retry_dispatched": "success",
 };
 
@@ -160,6 +201,243 @@ export const getTimelineSummary = (eventType: string, message: string) =>
 
 export const getTimelineTone = (eventType: string): TimelineItemTone =>
   timelineEventTones[eventType] ?? "neutral";
+
+type BuildRunWorkflowStepsInput = {
+  status: string;
+  stage: string | null;
+  progress: SubmissionRunProgressDto;
+  recognitionSlotCount: number | null;
+  completedRecognitionSlots: number;
+};
+
+const publishStageDetails: Record<string, string> = {
+  aggregating: "Aggregating recognized tracks",
+  enriching: "Enriching track metadata",
+  publishing: "Publishing canonical set data",
+  published: "Published to archive",
+  published_with_errors: "Published with follow-up bookkeeping errors",
+  publish_failed: "Publish failed",
+};
+
+export const buildRunWorkflowSteps = ({
+  status,
+  stage,
+  progress,
+  recognitionSlotCount,
+  completedRecognitionSlots,
+}: BuildRunWorkflowStepsInput): SubmissionRunWorkflowStepDto[] => {
+  const normalizedStage = stage ?? "";
+  const stageStartsWithSlot = normalizedStage.startsWith("slot_");
+  const bootstrapFailed = normalizedStage === "bootstrap_failed";
+  const publishFailed = normalizedStage === "publish_failed";
+  const bootstrapStarted =
+    status !== "queued" ||
+    normalizedStage === "dispatching" ||
+    normalizedStage === "resolving" ||
+    normalizedStage === "queued_recognition" ||
+    stageStartsWithSlot ||
+    normalizedStage === "aggregating" ||
+    normalizedStage === "enriching" ||
+    normalizedStage === "publishing" ||
+    normalizedStage === "published" ||
+    normalizedStage === "published_with_errors";
+  const bootstrapComplete =
+    !bootstrapFailed &&
+    (normalizedStage === "queued_recognition" ||
+      stageStartsWithSlot ||
+      normalizedStage === "aggregating" ||
+      normalizedStage === "enriching" ||
+      normalizedStage === "publishing" ||
+      normalizedStage === "published" ||
+      normalizedStage === "published_with_errors" ||
+      normalizedStage === "publish_failed" ||
+      normalizedStage === "workflow_incomplete" ||
+      Boolean(progress && (progress.totalLeases > 0 || progress.hitCount > 0)) ||
+      (status === "failed" && normalizedStage !== "bootstrap_failed") ||
+      status === "completed");
+  const recognizeStarted =
+    normalizedStage === "queued_recognition" ||
+    stageStartsWithSlot ||
+    normalizedStage === "aggregating" ||
+    normalizedStage === "enriching" ||
+    normalizedStage === "publishing" ||
+    normalizedStage === "published" ||
+    normalizedStage === "published_with_errors" ||
+    normalizedStage === "publish_failed" ||
+    normalizedStage === "workflow_incomplete" ||
+    Boolean(progress && (progress.totalLeases > 0 || progress.hitCount > 0)) ||
+    (status === "failed" && normalizedStage !== "bootstrap_failed") ||
+    status === "completed";
+  const recognizeComplete =
+    !bootstrapFailed &&
+    (normalizedStage === "aggregating" ||
+      normalizedStage === "enriching" ||
+      normalizedStage === "publishing" ||
+      normalizedStage === "published" ||
+      normalizedStage === "published_with_errors" ||
+      normalizedStage === "publish_failed" ||
+      status === "completed" ||
+      Boolean(progress && progress.totalLeases > 0 && progress.completedLeases >= progress.totalLeases));
+  const publishStarted =
+    normalizedStage === "aggregating" ||
+    normalizedStage === "enriching" ||
+    normalizedStage === "publishing" ||
+    normalizedStage === "published" ||
+    normalizedStage === "published_with_errors" ||
+    normalizedStage === "publish_failed" ||
+    normalizedStage === "workflow_incomplete" ||
+    status === "completed";
+  const publishComplete =
+    status === "completed" ||
+    normalizedStage === "published" ||
+    normalizedStage === "published_with_errors";
+
+  const failedStepKey =
+    bootstrapFailed
+      ? "bootstrap"
+      : publishFailed
+        ? "publish"
+        : status === "failed"
+          ? publishStarted
+            ? "publish"
+            : bootstrapComplete
+              ? "recognize"
+              : "bootstrap"
+          : null;
+  const cancelledStepKey =
+    status === "cancelled"
+      ? publishStarted && !publishComplete
+        ? "publish"
+        : recognizeStarted && !recognizeComplete
+          ? "recognize"
+          : "bootstrap"
+      : null;
+
+  const baseBootstrapState: SubmissionRunWorkflowStepState = bootstrapComplete
+    ? "complete"
+    : bootstrapStarted
+      ? "active"
+      : "pending";
+  const baseRecognizeState: SubmissionRunWorkflowStepState = recognizeComplete
+    ? "complete"
+    : recognizeStarted
+      ? "active"
+      : "pending";
+  const basePublishState: SubmissionRunWorkflowStepState = publishComplete
+    ? "complete"
+    : publishStarted
+      ? "active"
+      : "pending";
+
+  const bootstrapState =
+    failedStepKey === "bootstrap"
+      ? "failed"
+      : cancelledStepKey === "bootstrap"
+        ? "cancelled"
+        : baseBootstrapState;
+  const recognizeState =
+    failedStepKey === "recognize"
+      ? "failed"
+      : cancelledStepKey === "recognize"
+        ? "cancelled"
+        : baseRecognizeState;
+  const publishState =
+    failedStepKey === "publish"
+      ? "failed"
+      : cancelledStepKey === "publish"
+        ? "cancelled"
+        : basePublishState;
+  const completeState: SubmissionRunWorkflowStepState =
+    status === "completed" ? "complete" : publishComplete ? "active" : "pending";
+
+  const recognitionProgress =
+    recognitionSlotCount && recognitionSlotCount > 0
+      ? {
+          current: recognizeState === "complete"
+            ? recognitionSlotCount
+            : Math.min(completedRecognitionSlots, recognitionSlotCount),
+          total: recognitionSlotCount,
+          label: "slots",
+        }
+      : progress && progress.totalLeases > 0
+        ? {
+            current: recognizeState === "complete" ? progress.totalLeases : progress.completedLeases,
+            total: progress.totalLeases,
+            label: "leases",
+          }
+        : null;
+
+  const recognitionDetailParts = [
+    progress && progress.totalLeases > 0
+      ? `${progress.completedLeases}/${progress.totalLeases} leases complete`
+      : null,
+    progress && progress.hitCount > 0
+      ? `${progress.recognizedCount}/${progress.hitCount} tracks recognized`
+      : null,
+  ].filter((value): value is string => Boolean(value));
+
+  const publishDetail =
+    publishState === "active" || publishState === "complete" || publishState === "failed"
+      ? publishStageDetails[normalizedStage] ?? (publishState === "complete" ? "Published to archive" : null)
+      : publishState === "cancelled"
+        ? "Publish cancelled"
+        : null;
+
+  return [
+    {
+      key: "bootstrap",
+      label: "Bootstrap",
+      state: bootstrapState,
+      detail:
+        bootstrapState === "active"
+          ? "Preparing audio and scheduler plan"
+          : bootstrapState === "complete"
+            ? "Bootstrap complete"
+            : bootstrapState === "failed"
+              ? "Bootstrap failed"
+              : bootstrapState === "cancelled"
+                ? "Cancelled before recognition"
+                : null,
+      progress: null,
+    },
+    {
+      key: "recognize",
+      label: "Recognize",
+      state: recognizeState,
+      detail:
+        recognitionDetailParts.join(" · ") ||
+        (recognizeState === "active"
+          ? "Recognition slots are running"
+          : recognizeState === "complete"
+            ? "Recognition complete"
+            : recognizeState === "failed"
+              ? "Recognition failed"
+              : recognizeState === "cancelled"
+                ? "Recognition cancelled"
+                : null),
+      progress: recognitionProgress,
+    },
+    {
+      key: "publish",
+      label: "Publish",
+      state: publishState,
+      detail: publishDetail,
+      progress: null,
+    },
+    {
+      key: "complete",
+      label: "Complete",
+      state: completeState,
+      detail:
+        completeState === "complete"
+          ? "Set is ready in the archive"
+          : completeState === "active"
+            ? "Final bookkeeping"
+            : null,
+      progress: null,
+    },
+  ];
+};
 
 export const sortSubmissionRuns = (
   runs: readonly SubmissionRunDto[],

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRunWorkflowSteps,
   getTimelineSummary,
   getTimelineTone,
   normalizePublicSubmissionFilter,
@@ -39,6 +40,54 @@ describe("public submission helpers", () => {
       "queued",
       "failed",
       "done",
+    ]);
+  });
+
+  it("builds workflow steps that reflect active recognition progress and publish completion", () => {
+    const activeRecognition = buildRunWorkflowSteps({
+      status: "recognizing",
+      stage: "slot_1_recognizing",
+      progress: {
+        totalLeases: 24,
+        completedLeases: 12,
+        hitCount: 24,
+        recognizedCount: 9,
+      },
+      recognitionSlotCount: 6,
+      completedRecognitionSlots: 2,
+    });
+
+    expect(activeRecognition.map((step) => step.state)).toEqual([
+      "complete",
+      "active",
+      "pending",
+      "pending",
+    ]);
+    expect(activeRecognition[1]?.progress).toEqual({
+      current: 2,
+      total: 6,
+      label: "slots",
+    });
+    expect(activeRecognition[1]?.detail).toContain("12/24 leases complete");
+
+    const completedRun = buildRunWorkflowSteps({
+      status: "completed",
+      stage: "published",
+      progress: {
+        totalLeases: 8,
+        completedLeases: 8,
+        hitCount: 8,
+        recognizedCount: 8,
+      },
+      recognitionSlotCount: 2,
+      completedRecognitionSlots: 2,
+    });
+
+    expect(completedRun.map((step) => step.state)).toEqual([
+      "complete",
+      "complete",
+      "complete",
+      "complete",
     ]);
   });
 });

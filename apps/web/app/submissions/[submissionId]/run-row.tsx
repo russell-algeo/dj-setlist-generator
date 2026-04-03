@@ -5,29 +5,15 @@ import { useState } from "react";
 
 import { formatTimestamp } from "@/lib/format";
 import type { SubmissionRunDto } from "@/lib/jobs/public";
-import { isActiveSetRunStatus } from "@/lib/jobs/status";
+
+import { StatusPill } from "../status-pill";
+import { RunWorkflowTimeline } from "./run-workflow-timeline";
 
 type RunRowProps = SubmissionRunDto & {
   retryPending: boolean;
   cancelPending: boolean;
   onRetry: (runId: string) => void;
   onCancel: (runId: string) => void;
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  queued: "#555",
-  running: "#7a7a3a",
-  dispatched: "#7a7a3a",
-  resolving: "#7a7a3a",
-  recognizing: "#7a7a3a",
-  aggregating: "#7a7a3a",
-  enriching: "#7a7a3a",
-  publishing: "#7a7a3a",
-  cancelling: "#7a5a3a",
-  completed: "#3a7a3a",
-  failed: "#8a3a3a",
-  cancelled: "#555",
-  claimed: "#7a7a3a",
 };
 
 const actionButtonStyle = {
@@ -52,7 +38,11 @@ export function RunRow({
   publishedSetId,
   attemptCount,
   updatedAt,
+  lastActivityAt,
+  lastActivityMessage,
   progress,
+  workflowSteps,
+  recentEvents,
   actions,
   retryPending,
   cancelPending,
@@ -60,7 +50,7 @@ export function RunRow({
   onCancel,
 }: RunRowProps) {
   const [expanded, setExpanded] = useState(false);
-  const color = isActiveSetRunStatus(status) ? "#7a7a3a" : (STATUS_COLOR[status] ?? "#555");
+  const [eventsOpen, setEventsOpen] = useState(false);
 
   return (
     <>
@@ -68,7 +58,7 @@ export function RunRow({
         onClick={() => setExpanded((value) => !value)}
         style={{
           display: "grid",
-          gridTemplateColumns: "2.2fr 0.8fr 0.8fr 90px 160px 16px",
+          gridTemplateColumns: "2.2fr 0.8fr 0.8fr 160px 90px 16px",
           gap: 10,
           padding: "10px 0",
           borderBottom: "1px solid #0f0f0f",
@@ -95,21 +85,6 @@ export function RunRow({
         </div>
         <span style={{ color: "#555", fontSize: 10 }}>{sourcePlatform ?? "—"}</span>
         <span style={{ color: "#555", fontSize: 10 }}>{stage ?? "—"}</span>
-        <span
-          style={{
-            textAlign: "right",
-            fontSize: 9,
-            letterSpacing: "0.08em",
-            padding: "2px 8px",
-            borderRadius: 3,
-            border: "1px solid",
-            color,
-            borderColor: color,
-            background: `${color}18`,
-          }}
-        >
-          {status}
-        </span>
         <div
           onClick={(event) => event.stopPropagation()}
           style={{ display: "flex", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}
@@ -144,6 +119,7 @@ export function RunRow({
             <span style={{ color: "#5a4747", fontSize: 9 }}>Max retries</span>
           ) : null}
         </div>
+        <StatusPill align="right" status={status} />
         <span style={{ color: "#444", fontSize: 11 }}>{expanded ? "∨" : "›"}</span>
       </div>
 
@@ -162,12 +138,12 @@ export function RunRow({
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
               gap: 16,
-              marginBottom: 14,
+              marginBottom: 16,
             }}
           >
             {[
               { label: "Attempts", value: String(attemptCount) },
-              { label: "Last activity", value: formatTimestamp(updatedAt) },
+              { label: "Last activity", value: formatTimestamp(lastActivityAt ?? updatedAt) },
               { label: "Stage", value: stage ?? "—" },
               { label: "Retry budget", value: `${actions.retryBudgetRemaining} remaining` },
             ].map(({ label, value }) => (
@@ -188,13 +164,61 @@ export function RunRow({
             ))}
           </div>
 
+          {lastActivityMessage ? (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: "10px 12px",
+                borderRadius: 6,
+                background: "#101010",
+                border: "1px solid #1c1c1c",
+              }}
+            >
+              <div
+                style={{
+                  color: "#444",
+                  fontSize: 9,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  marginBottom: 4,
+                }}
+              >
+                Latest update
+              </div>
+              <div style={{ color: "#7a7a7a", fontSize: 10, lineHeight: 1.5 }}>{lastActivityMessage}</div>
+            </div>
+          ) : null}
+
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "12px 14px",
+              borderRadius: 6,
+              border: "1px solid #1c1c1c",
+              background: "#0f0f0f",
+            }}
+          >
+            <div
+              style={{
+                color: "#666",
+                fontSize: 9,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                marginBottom: 12,
+              }}
+            >
+              Processing timeline
+            </div>
+            <RunWorkflowTimeline steps={workflowSteps} />
+          </div>
+
           {progress ? (
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
                 gap: 16,
-                marginBottom: 14,
+                marginBottom: 16,
               }}
             >
               <div>
@@ -229,6 +253,85 @@ export function RunRow({
                   {progress.completedLeases}/{progress.totalLeases} leases completed
                 </div>
               </div>
+            </div>
+          ) : null}
+
+          {recentEvents.length > 0 ? (
+            <div
+              style={{
+                marginBottom: errorSummary || (status === "completed" && publishedSetId) ? 16 : 0,
+                padding: "12px 14px",
+                borderRadius: 6,
+                border: "1px solid #1c1c1c",
+                background: "#0f0f0f",
+              }}
+            >
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setEventsOpen((value) => !value);
+                }}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  color: "#8a8a8a",
+                  fontSize: 10,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+                type="button"
+              >
+                {eventsOpen ? "Hide recent events" : "Show recent events"}
+              </button>
+
+              {eventsOpen ? (
+                <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+                  {recentEvents.map((event) => (
+                    <div
+                      key={event.id}
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: 6,
+                        border:
+                          event.tone === "danger"
+                            ? "1px solid #3a1a1a"
+                            : event.tone === "success"
+                              ? "1px solid #1f3a22"
+                              : "1px solid #202020",
+                        background:
+                          event.tone === "danger"
+                            ? "#120a0a"
+                            : event.tone === "success"
+                              ? "#0d130d"
+                              : "#111",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color:
+                            event.tone === "danger"
+                              ? "#b97a7a"
+                              : event.tone === "success"
+                                ? "#88b08a"
+                                : "#9a9a9a",
+                          fontSize: 10,
+                          marginBottom: 4,
+                        }}
+                      >
+                        {event.summary}
+                      </div>
+                      {event.message !== event.summary ? (
+                        <div style={{ color: "#666", fontSize: 10, lineHeight: 1.5 }}>{event.message}</div>
+                      ) : null}
+                      <div style={{ color: "#444", fontSize: 9, marginTop: 6 }}>
+                        {formatTimestamp(event.createdAt)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 

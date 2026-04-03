@@ -1,12 +1,13 @@
 import "server-only";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import type { SessionActor } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { setRuns, submissions, workerEvents } from "@/lib/db/schema";
 import { setRunRetryAttemptLimit } from "./policy";
 import {
+  buildRunWorkflowSteps,
   getTimelineSummary,
   getTimelineTone,
   normalizePublicSubmissionFilter,
@@ -49,28 +50,32 @@ const emptyActions: SubmissionActionSummary = {
   canCancel: false,
 };
 
-const publicTimelineEventTypes = new Set([
-  "submission.created",
-  "submission.dispatch",
-  "submission.dispatch_failed",
-  "submission.discovery.started",
-  "submission.discovery.completed",
-  "submission.discovery.empty",
-  "submission.discovery.failed",
-  "submission.retried",
-  "submission.cancel_requested",
+const publicRunTimelineEventTypes = new Set([
   "set_run.dispatch",
-  "set_run.retried",
-  "set_run.cancel_requested",
   "set_run.dispatch_failed",
   "set_run.bootstrap.started",
+  "set_run.bootstrap.completed",
   "set_run.recognition.started",
+  "set_run.recognition.completed",
+  "set_run.aggregate.started",
+  "set_run.enrich.started",
   "set_run.publish.started",
+  "set_run.publish.deferred",
+  "set_run.retried",
+  "set_run.cancel_requested",
   "set_run.requeued",
   "set_run.failed",
   "set_run.cancelled",
   "set_run.completed",
   "set_run.publish_retry_dispatched",
+]);
+
+const currentAttemptBoundaryEventTypes = new Set([
+  "set_run.retried",
+  "set_run.requeued",
+  "set_run.dispatch",
+  "set_run.publish_retry_dispatched",
+  "set_run.bootstrap.started",
 ]);
 
 const getFilterClause = (filter: PublicSubmissionFilter) => {
@@ -108,11 +113,11 @@ const buildTimelineItems = (
     message: string;
     createdAt: Date;
     setRunId: string | null;
+    details?: unknown;
   }>,
 ): TimelineItemDto[] =>
   events
-    .filter((event) => publicTimelineEventTypes.has(event.eventType))
-    .slice(0, 15)
+    .filter((event) => publicRunTimelineEventTypes.has(event.eventType))
     .map((event) => ({
       id: event.id,
       eventType: event.eventType,
@@ -122,6 +127,73 @@ const buildTimelineItems = (
       setRunId: event.setRunId,
       tone: getTimelineTone(event.eventType),
     }));
+
+const toPositiveInt = (value: unknown): number | null => {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
+};
+
+const getRecognitionSlotCount = (sourceMetadata: unknown): number | null => {
+  if (!sourceMetadata || typeof sourceMetadata !== "object") {
+    return null;
+  }
+
+  const metadata = sourceMetadata as Record<string, unknown>;
+  const schedulerPlan =
+    metadata.scheduler_plan && typeof metadata.scheduler_plan === "object"
+      ? (metadata.scheduler_plan as Record<string, unknown>)
+      : null;
+
+  return toPositiveInt(metadata.recognition_slot_count) ?? toPositiveInt(schedulerPlan?.slot_count);
+};
+
+const selectCurrentAttemptEvents = <
+  T extends {
+    eventType: string;
+    createdAt: Date;
+  },
+>(
+  events: readonly T[],
+) => {
+  const boundary = events.find((event) => currentAttemptBoundaryEventTypes.has(event.eventType));
+  if (!boundary) {
+    return [...events];
+  }
+
+  const boundaryTimestamp = boundary.createdAt.getTime();
+  return events.filter((event) => event.createdAt.getTime() >= boundaryTimestamp);
+};
+
+const countCompletedRecognitionSlots = (
+  events: Array<{
+    eventType: string;
+    details?: unknown;
+  }>,
+) => {
+  const slotIndexes = new Set<string>();
+  let fallbackCount = 0;
+
+  for (const event of events) {
+    if (event.eventType !== "set_run.recognition.completed") {
+      continue;
+    }
+
+    const details =
+      event.details && typeof event.details === "object"
+        ? (event.details as Record<string, unknown>)
+        : null;
+    const slotIndex = details ? toPositiveInt(details.slot_index) : null;
+
+    if (slotIndex !== null) {
+      slotIndexes.add(String(slotIndex));
+      continue;
+    }
+
+    fallbackCount += 1;
+  }
+
+  return slotIndexes.size > 0 ? slotIndexes.size : fallbackCount;
+};
 
 export const listPublicSubmissionsForActor = async (
   actor: SessionActor,
@@ -244,6 +316,17 @@ export const listPublicSubmissionsForActor = async (
 
 export const serializeSubmissionDetail = (
   detail: NonNullable<Awaited<ReturnType<typeof getSubmissionDetail>>>,
+  runEventsByRun = new Map<
+    string,
+    Array<{
+      id: string;
+      eventType: string;
+      message: string;
+      createdAt: Date;
+      setRunId: string | null;
+      details: unknown;
+    }>
+  >(),
 ): SubmissionDetailDto => {
   const counts = summarizeSetRunCounts(detail.runs);
   const actions = summarizeSubmissionActions(detail.runs);
@@ -273,19 +356,8 @@ export const serializeSubmissionDetail = (
     lastActivityAt: (latestEvent?.createdAt ?? detail.submission.updatedAt).toISOString(),
     lastActivityMessage: latestEvent?.message ?? null,
     discoveryCandidateCount: detail.discoveryCandidates.length,
-    runs: detail.runs.map((run) => ({
-      id: run.id,
-      sourceUrl: run.sourceUrl,
-      sourcePlatform: run.sourcePlatform,
-      title: run.setTitle,
-      stage: run.stage,
-      status: run.status,
-      errorSummary: run.errorSummary,
-      publishedSetId: run.publishedSetId,
-      attemptCount: run.attemptCount,
-      createdAt: run.createdAt.toISOString(),
-      updatedAt: (run.heartbeatAt ?? run.updatedAt)?.toISOString() ?? null,
-      progress:
+    runs: detail.runs.map((run) => {
+      const progress =
         run.leaseRollup || run.segmentHitRollup
           ? {
               totalLeases: Number(run.leaseRollup?.totalCount ?? 0),
@@ -293,22 +365,87 @@ export const serializeSubmissionDetail = (
               hitCount: Number(run.segmentHitRollup?.hitCount ?? 0),
               recognizedCount: Number(run.segmentHitRollup?.recognizedCount ?? 0),
             }
+          : null;
+      const allRunEvents = runEventsByRun.get(run.id) ?? [];
+      const currentAttemptEvents = selectCurrentAttemptEvents(allRunEvents);
+      const recentEvents = buildTimelineItems(currentAttemptEvents).slice(0, 10);
+      const latestRunEvent = currentAttemptEvents[0] ?? allRunEvents[0] ?? null;
+
+      return {
+        id: run.id,
+        sourceUrl: run.sourceUrl,
+        sourcePlatform: run.sourcePlatform,
+        title: run.setTitle,
+        stage: run.stage,
+        status: run.status,
+        errorSummary: run.errorSummary,
+        publishedSetId: run.publishedSetId,
+        attemptCount: run.attemptCount,
+        createdAt: run.createdAt.toISOString(),
+        updatedAt: (run.heartbeatAt ?? run.updatedAt)?.toISOString() ?? null,
+        lastActivityAt: (latestRunEvent?.createdAt ?? run.heartbeatAt ?? run.updatedAt ?? run.createdAt).toISOString(),
+        lastActivityMessage: latestRunEvent
+          ? getTimelineSummary(latestRunEvent.eventType, latestRunEvent.message)
           : null,
-      actions: buildRunActionSummary(run.status, run.attemptCount),
-    })),
-    timeline: buildTimelineItems(
-      detail.events.map((event) => ({
-        id: event.id,
-        eventType: event.eventType,
-        message: event.message,
-        createdAt: event.createdAt,
-        setRunId: event.setRunId,
-      })),
-    ),
+        progress,
+        workflowSteps: buildRunWorkflowSteps({
+          status: run.status,
+          stage: run.stage,
+          progress,
+          recognitionSlotCount: getRecognitionSlotCount(run.sourceMetadata),
+          completedRecognitionSlots: countCompletedRecognitionSlots(currentAttemptEvents),
+        }),
+        recentEvents,
+        actions: buildRunActionSummary(run.status, run.attemptCount),
+      };
+    }),
   };
 };
 
 export const getPublicSubmissionDetail = async (submissionId: string) => {
   const detail = await getSubmissionDetail(submissionId);
-  return detail ? serializeSubmissionDetail(detail) : null;
+  if (!detail) {
+    return null;
+  }
+
+  const runIds = detail.runs.map((run) => run.id);
+  const runEvents = runIds.length
+    ? await db
+        .select({
+          id: workerEvents.id,
+          eventType: workerEvents.eventType,
+          message: workerEvents.message,
+          createdAt: workerEvents.createdAt,
+          setRunId: workerEvents.setRunId,
+          details: workerEvents.details,
+        })
+        .from(workerEvents)
+        .where(
+          and(
+            eq(workerEvents.submissionId, submissionId),
+            isNotNull(workerEvents.setRunId),
+            inArray(workerEvents.setRunId, runIds),
+            inArray(workerEvents.eventType, [...publicRunTimelineEventTypes]),
+          ),
+        )
+        .orderBy(desc(workerEvents.createdAt))
+        .limit(400)
+    : [];
+
+  const runEventsByRun = new Map<string, typeof runEvents>();
+  for (const event of runEvents) {
+    if (!event.setRunId) {
+      continue;
+    }
+
+    const existing = runEventsByRun.get(event.setRunId);
+    if (existing) {
+      existing.push(event);
+      continue;
+    }
+
+    runEventsByRun.set(event.setRunId, [event]);
+  }
+
+  return serializeSubmissionDetail(detail, runEventsByRun);
 };

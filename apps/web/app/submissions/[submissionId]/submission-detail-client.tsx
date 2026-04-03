@@ -11,6 +11,7 @@ import {
 
 import { RunRow } from "./run-row";
 import { usePolledJson } from "../use-polled-json";
+import { StatusPill } from "../status-pill";
 
 type SubmissionDetailClientProps = {
   initialDetail: SubmissionDetailDto;
@@ -20,16 +21,6 @@ const MODE_LABEL: Record<string, string> = {
   url: "Single Set URL",
   artist: "Artist Discovery",
   curated_artist: "Curated Artist",
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  queued: "#555",
-  running: "#7a7a3a",
-  partial: "#7a5a3a",
-  completed: "#3a7a3a",
-  failed: "#8a3a3a",
-  cancelled: "#555",
-  cancelling: "#7a5a3a",
 };
 
 const detailHasActiveWork = (detail: SubmissionDetailDto) => detail.hasActiveWork;
@@ -77,7 +68,6 @@ export function SubmissionDetailClient({
   initialDetail,
 }: SubmissionDetailClientProps) {
   const [sortMode, setSortMode] = useState<SubmissionRunSortMode>("status_first");
-  const [timelineOpen, setTimelineOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
 
@@ -87,10 +77,13 @@ export function SubmissionDetailClient({
     refreshError,
     lastUpdatedAt,
     refreshNow,
+    isPollingPausedForInactivity,
+    resumePolling,
   } = usePolledJson<SubmissionDetailDto>({
     initialData: initialDetail,
     url: `/api/jobs/${initialDetail.submission.id}`,
     shouldPoll: detailHasActiveWork,
+    getActivityToken: (nextDetail) => nextDetail.lastActivityAt,
   });
 
   const sortedRuns = sortSubmissionRuns(detail.runs, sortMode);
@@ -170,33 +163,49 @@ export function SubmissionDetailClient({
               {formatTimestamp(detail.submission.createdAt)}
             </span>
           </div>
-          <div style={{ color: "#444", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            {detail.hasActiveWork ? "Live updates active" : "Snapshot"} ·{" "}
-            {isRefreshing ? "Refreshing…" : `Updated ${formatTimestamp(lastUpdatedAt)}`}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 10,
+              color: "#444",
+              fontSize: 9,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            <span>
+              {detail.hasActiveWork
+                ? isPollingPausedForInactivity
+                  ? "Live updates paused after 5 minutes without new activity"
+                  : "Live updates active"
+                : "Snapshot"}{" "}
+              · {isRefreshing ? "Refreshing…" : `Updated ${formatTimestamp(lastUpdatedAt)}`}
+            </span>
+            {detail.hasActiveWork && isPollingPausedForInactivity ? (
+              <button
+                onClick={() => void resumePolling()}
+                style={{
+                  border: "1px solid #2a2a2a",
+                  borderRadius: 4,
+                  background: "#111",
+                  color: "#b5b5b5",
+                  fontSize: 9,
+                  letterSpacing: "0.08em",
+                  padding: "5px 9px",
+                  textTransform: "uppercase",
+                }}
+                type="button"
+              >
+                Resume live updates
+              </button>
+            ) : null}
           </div>
-          {detail.lastActivityMessage ? (
-            <div style={{ color: "#4d4d4d", fontSize: 10, marginTop: 8 }}>
-              Latest activity: {detail.lastActivityMessage} · {formatTimestamp(detail.lastActivityAt)}
-            </div>
-          ) : null}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
-          <span
-            style={{
-              fontSize: 10,
-              letterSpacing: "0.08em",
-              padding: "4px 12px",
-              borderRadius: 3,
-              border: "1px solid",
-              color: STATUS_COLOR[detail.submission.status] ?? "#555",
-              borderColor: STATUS_COLOR[detail.submission.status] ?? "#555",
-              background: `${STATUS_COLOR[detail.submission.status] ?? "#555"}18`,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {detail.submission.status}
-          </span>
+          <StatusPill status={detail.submission.status} />
 
           {detail.hasActiveWork ? (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -445,7 +454,7 @@ export function SubmissionDetailClient({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "2.2fr 0.8fr 0.8fr 90px 160px 16px",
+            gridTemplateColumns: "2.2fr 0.8fr 0.8fr 160px 90px 16px",
             gap: 10,
             padding: "0 0 8px",
             borderBottom: "1px solid #1a1a1a",
@@ -460,8 +469,8 @@ export function SubmissionDetailClient({
           <span>Set Title</span>
           <span>Platform</span>
           <span>Stage</span>
-          <span style={{ textAlign: "right" }}>Status</span>
           <span style={{ textAlign: "right" }}>Actions</span>
+          <span style={{ textAlign: "right" }}>Status</span>
           <span />
         </div>
 
@@ -492,84 +501,6 @@ export function SubmissionDetailClient({
           No set runs yet.
         </div>
       ) : null}
-
-      <div
-        style={{
-          marginTop: 24,
-          padding: "14px 16px",
-          border: "1px solid #1c1c1c",
-          borderRadius: 6,
-          background: "#0d0d0d",
-        }}
-      >
-        <button
-          onClick={() => setTimelineOpen((value) => !value)}
-          style={{
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            color: "#8a8a8a",
-            fontSize: 10,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            cursor: "pointer",
-          }}
-          type="button"
-        >
-          {timelineOpen ? "Hide recent activity" : "Show recent activity"}
-        </button>
-
-        {timelineOpen ? (
-          detail.timeline.length > 0 ? (
-            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-              {detail.timeline.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 6,
-                    border:
-                      item.tone === "danger"
-                        ? "1px solid #3a1a1a"
-                        : item.tone === "success"
-                          ? "1px solid #1f3a22"
-                          : "1px solid #202020",
-                    background:
-                      item.tone === "danger"
-                        ? "#120a0a"
-                        : item.tone === "success"
-                          ? "#0d130d"
-                          : "#111",
-                  }}
-                >
-                  <div
-                    style={{
-                      color:
-                        item.tone === "danger"
-                          ? "#b97a7a"
-                          : item.tone === "success"
-                            ? "#88b08a"
-                            : "#9a9a9a",
-                      fontSize: 10,
-                      marginBottom: 4,
-                    }}
-                  >
-                    {item.summary}
-                  </div>
-                  {item.message !== item.summary ? (
-                    <div style={{ color: "#666", fontSize: 10, lineHeight: 1.5 }}>{item.message}</div>
-                  ) : null}
-                  <div style={{ color: "#444", fontSize: 9, marginTop: 6 }}>
-                    {formatTimestamp(item.createdAt)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ marginTop: 14, color: "#555", fontSize: 10 }}>No recent activity yet.</div>
-          )
-        ) : null}
-      </div>
     </>
   );
 }
