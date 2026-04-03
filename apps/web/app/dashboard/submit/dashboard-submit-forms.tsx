@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 
+import { ArtistAliasFields } from "@/components/forms/artist-alias-fields";
 import { ArtistNameField } from "@/components/forms/artist-name-field";
 
 type DashboardSubmitFormsProps = {
@@ -14,6 +15,7 @@ export function DashboardSubmitForms({
   curatedHelperText,
 }: DashboardSubmitFormsProps) {
   const [discoveryName, setDiscoveryName] = useState("");
+  const [discoveryAliases, setDiscoveryAliases] = useState<string[]>([]);
   const [curatedName, setCuratedName] = useState("");
   const curatedUrlsRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -41,6 +43,12 @@ export function DashboardSubmitForms({
             placeholder="Artist name"
             required
             value={discoveryName}
+          />
+          <ArtistAliasFields
+            inputClassName="field"
+            name="artistAliases"
+            onChange={setDiscoveryAliases}
+            values={discoveryAliases}
           />
           <input min="1" name="maxSetsOverride" placeholder="Max sets override (optional)" type="number" />
           <label>

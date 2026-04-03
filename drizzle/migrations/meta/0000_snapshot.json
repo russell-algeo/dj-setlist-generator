@@ -1701,6 +1701,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "artist_aliases": {
+          "name": "artist_aliases",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
         "source_url": {
           "name": "source_url",
           "type": "text",

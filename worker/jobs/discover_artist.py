@@ -27,7 +27,7 @@ def _dispatch_pending() -> None:
 def run(submission_id: str) -> None:
     submission = fetch_one(
         """
-        select id, artist_name, max_sets_override
+        select id, artist_name, artist_aliases, max_sets_override
         from ops.submissions
         where id = %s
         """,
@@ -39,6 +39,10 @@ def run(submission_id: str) -> None:
     artist_name = submission.get("artist_name")
     if not artist_name:
         raise RuntimeError(f"Submission {submission_id} is missing artist_name")
+    artist_aliases = submission.get("artist_aliases") or []
+    if not isinstance(artist_aliases, list):
+        artist_aliases = []
+    search_names = [artist_name, *[str(alias).strip() for alias in artist_aliases if str(alias).strip()]]
 
     insert_worker_event(
         submission_id=submission_id,
@@ -53,7 +57,7 @@ def run(submission_id: str) -> None:
             Config.MAX_SETS_PER_ARTIST = int(submission["max_sets_override"])
 
         artist_manager = ArtistManager(artist_name)
-        sets = DjSetDiscoverer(artist_manager=artist_manager).discover()
+        sets = DjSetDiscoverer(artist_manager=artist_manager, search_names=search_names).discover()
 
         execute("delete from ops.discovery_candidates where submission_id = %s", (submission_id,))
 

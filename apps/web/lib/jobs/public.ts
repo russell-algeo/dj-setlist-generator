@@ -116,6 +116,7 @@ export type SubmissionDetailDto = {
     mode: string;
     status: string;
     artistName: string | null;
+    artistAliases: string[];
     sourceUrl: string | null;
     createdAt: string;
     updatedAt: string;

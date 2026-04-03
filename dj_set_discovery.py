@@ -9,7 +9,7 @@ import re
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass, asdict
-from typing import Optional
+from typing import Optional, Sequence
 from config import Config
 
 
@@ -38,9 +38,10 @@ class DiscoveredSet:
 class DjSetDiscoverer:
     """Discover DJ sets for an artist using yt-dlp search."""
 
-    def __init__(self, artist_manager):
+    def __init__(self, artist_manager, search_names: Optional[Sequence[str]] = None):
         self._artist_name = artist_manager.artist_name
         self._cache_dir = artist_manager.checkpoint_dir
+        self._search_names = _unique_search_names(search_names or [self._artist_name])
 
     def discover(self) -> list[DiscoveredSet]:
         """Discover DJ sets, print results, and return them.
@@ -54,14 +55,18 @@ class DjSetDiscoverer:
             print(f"  Found cached discovery results: {cache_file}")
             with open(cache_file) as f:
                 cached = json.load(f)
-            print(f"  Loaded {len(cached['sets'])} previously discovered sets")
-            sets = [DiscoveredSet.from_dict(s) for s in cached["sets"]]
-            self._print_results(sets)
-            return sets
+            if _should_reuse_cached_results(cached.get("search_terms"), self._search_names):
+                print(f"  Loaded {len(cached['sets'])} previously discovered sets")
+                sets = [DiscoveredSet.from_dict(s) for s in cached["sets"]]
+                self._print_results(sets)
+                return sets
+            print("  Ignoring cached discovery results because the alias set changed")
 
-        queries = _build_search_queries(self._artist_name)
+        queries = _build_search_queries(self._search_names)
 
         print(f"  Searching YouTube & SoundCloud for DJ sets by '{self._artist_name}'...")
+        if len(self._search_names) > 1:
+            print(f"  Using aliases: {', '.join(self._search_names[1:])}")
         print(f"  Running {len(queries)} search queries...\n")
 
         seen_ids: set[str] = set()
@@ -79,10 +84,10 @@ class DjSetDiscoverer:
 
         print(f"\n  Found {len(all_results)} unique results before filtering")
 
-        sets = _filter_and_map(all_results, self._artist_name)
+        sets = _filter_and_map(all_results, self._search_names)
         print(f"  After filtering: {len(sets)} DJ sets")
 
-        sets = _deduplicate_near_duplicates(sets, self._artist_name)
+        sets = _deduplicate_near_duplicates(sets, self._search_names)
 
         if not sets:
             print("  No DJ sets found matching criteria.")
@@ -96,7 +101,15 @@ class DjSetDiscoverer:
         # Cache results
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         with open(cache_file, "w") as f:
-            json.dump({"artist": self._artist_name, "sets": [asdict(s) for s in sets]}, f, indent=2)
+            json.dump(
+                {
+                    "artist": self._artist_name,
+                    "search_terms": self._search_names,
+                    "sets": [asdict(s) for s in sets],
+                },
+                f,
+                indent=2,
+            )
         print(f"  Cached discovery results to {cache_file}")
 
         self._print_results(sets)
@@ -181,19 +194,51 @@ _PLATFORM_PREFERENCE = {
 }
 
 
-def _tokenize_title(title: str, artist_name: str) -> set[str]:
+def _unique_search_names(search_names: Sequence[str]) -> list[str]:
+    unique_names: list[str] = []
+    seen: set[str] = set()
+
+    for search_name in search_names:
+        cleaned = search_name.strip()
+        if not cleaned:
+            continue
+        normalized = _normalize(cleaned)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_names.append(cleaned)
+
+    return unique_names
+
+
+def _search_name_tokens(search_names: Sequence[str]) -> set[str]:
+    tokens: set[str] = set()
+    for search_name in search_names:
+        tokens.update(_normalize(search_name).split())
+    return tokens
+
+
+def _should_reuse_cached_results(cached_search_terms: object, current_search_terms: Sequence[str]) -> bool:
+    if not isinstance(cached_search_terms, list):
+        return False
+    cached_normalized = [_normalize(str(term)) for term in cached_search_terms if _normalize(str(term))]
+    current_normalized = [_normalize(term) for term in current_search_terms if _normalize(term)]
+    return cached_normalized == current_normalized
+
+
+def _tokenize_title(title: str, search_names: Sequence[str]) -> set[str]:
     """Tokenize title, removing artist name tokens and common stopwords."""
-    artist_tokens = set(_normalize(artist_name).split())
+    artist_tokens = _search_name_tokens(search_names)
     return set(_normalize(title).split()) - artist_tokens - _DEDUP_STOPWORDS
 
 
-def _content_tokens(title: str, artist_name: str) -> set[str]:
+def _content_tokens(title: str, search_names: Sequence[str]) -> set[str]:
     """Tokenize title, also stripping format-noise words.
 
     Used for the content-disjointness check: if both titles have non-empty,
     fully disjoint content token sets they describe different events.
     """
-    return _tokenize_title(title, artist_name) - _FORMAT_NOISE
+    return _tokenize_title(title, search_names) - _FORMAT_NOISE
 
 
 def _extract_title_months(title: str) -> set[int]:
@@ -261,7 +306,7 @@ def _extract_episode_numbers(title: str) -> set[int]:
     return nums
 
 
-def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, artist_name: str) -> bool:
+def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, search_names: Sequence[str]) -> bool:
     """Return True if a and b are near-duplicates (same set, differently titled).
 
     Rules applied in order:
@@ -313,8 +358,8 @@ def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, artist_name: str) -
     # differ between two titles are non-year integers that don't match, e.g.
     # "CruiseCast 001" vs "CruiseCast 002" or "DIM 324" vs "DIM 325".
     # Zero-padded and plain numbers compare equal after int() conversion.
-    tokens_a = _tokenize_title(a.title, artist_name)
-    tokens_b = _tokenize_title(b.title, artist_name)
+    tokens_a = _tokenize_title(a.title, search_names)
+    tokens_b = _tokenize_title(b.title, search_names)
     diff_a = tokens_a - tokens_b
     diff_b = tokens_b - tokens_a
     if diff_a and diff_b:
@@ -333,8 +378,8 @@ def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, artist_name: str) -
     # sets, two different promo mixes).
     # If either side is empty, there's not enough meaningful signal to confirm
     # a duplicate — default to keeping both.
-    content_a = _content_tokens(a.title, artist_name)
-    content_b = _content_tokens(b.title, artist_name)
+    content_a = _content_tokens(a.title, search_names)
+    content_b = _content_tokens(b.title, search_names)
     if not content_a or not content_b:
         return False
     if not (content_a & content_b):
@@ -349,7 +394,7 @@ def _platform_preference(platform: str) -> int:
 
 
 def _deduplicate_near_duplicates(
-    sets: list[DiscoveredSet], artist_name: str
+    sets: list[DiscoveredSet], search_names: Sequence[str]
 ) -> list[DiscoveredSet]:
     """Remove near-duplicate sets, preferring YouTube over SoundCloud.
 
@@ -375,7 +420,7 @@ def _deduplicate_near_duplicates(
 
     for i in range(n):
         for j in range(i + 1, n):
-            if _are_near_duplicates(sets[i], sets[j], artist_name):
+            if _are_near_duplicates(sets[i], sets[j], search_names):
                 union(i, j)
 
     clusters: dict[int, list[int]] = defaultdict(list)
@@ -412,7 +457,7 @@ def _deduplicate_near_duplicates(
                 continue
             candidate = sets[idx]
             plat = candidate.platform.upper()[:2]
-            if _are_near_duplicates(candidate, winner, artist_name):
+            if _are_near_duplicates(candidate, winner, search_names):
                 removed_count += 1
                 dropped_count += 1
                 print(f"  [dedup] Dropped [{plat}] '{candidate.title}'")
@@ -428,12 +473,13 @@ def _deduplicate_near_duplicates(
     return winners
 
 
-def _build_search_queries(artist_name: str) -> list[str]:
-    """Build the list of yt-dlp search queries for an artist."""
+def _build_search_queries(search_names: Sequence[str]) -> list[str]:
+    """Build the list of yt-dlp search queries for an artist and aliases."""
     n = Config.DISCOVERY_RESULTS_PER_QUERY
-    quoted = f'"{artist_name}"'
-
-    terms = [f"{quoted} {t}" for t in _GENERIC_TERMS + _CHANNELS]
+    terms: list[str] = []
+    for search_name in _unique_search_names(search_names):
+        quoted = f'"{search_name}"'
+        terms.extend(f"{quoted} {term}" for term in _GENERIC_TERMS + _CHANNELS)
 
     queries = [f"ytsearch{n}:{term}" for term in terms]
     queries += [f"scsearch{n}:{term}" for term in terms]
@@ -485,10 +531,10 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[DiscoveredSet]:
+def _filter_and_map(raw_results: list[dict], search_names: Sequence[str]) -> list[DiscoveredSet]:
     """Filter raw yt-dlp results and map to DiscoveredSet instances."""
     min_duration_seconds = Config.MIN_SET_DURATION_MINUTES * 60
-    artist_norm = _normalize(artist_name)
+    normalized_search_names = [_normalize(search_name) for search_name in search_names if _normalize(search_name)]
     seen_titles: dict[str, int] = {}
     sets: list[DiscoveredSet] = []
 
@@ -498,10 +544,11 @@ def _filter_and_map(raw_results: list[dict], artist_name: str) -> list[Discovere
         uploader = entry.get("uploader") or ""
         duration = entry.get("duration")
 
-        # Filter: artist name must appear in title, channel, or uploader
+        # Filter: a primary or alias name must appear in title, channel, or uploader
         if not any(
-            artist_norm in _normalize(field)
+            normalized_search_name in _normalize(field)
             for field in (title, channel, uploader)
+            for normalized_search_name in normalized_search_names
         ):
             continue
 

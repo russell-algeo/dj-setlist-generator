@@ -71,6 +71,13 @@
       "when": 1775132596079,
       "tag": "0010_process_set_dispatch_cap",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775238000000,
+      "tag": "0011_submission_artist_aliases",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,15 @@ const parseSourceUrls = (value: FormDataEntryValue | FormDataEntryValue[] | unde
     .filter(Boolean);
 };
 
+const parseArtistAliases = (value: unknown) => {
+  if (!value) {
+    return [];
+  }
+
+  const entries = Array.isArray(value) ? value : [value];
+  return entries.map((entry) => String(entry));
+};
+
 export async function GET(request: Request) {
   const actor = await getRequestActor(request);
   if (!actor) {
@@ -54,6 +63,7 @@ export async function POST(request: Request) {
       sourceUrl: body.sourceUrl ? String(body.sourceUrl) : undefined,
       sourceUrls: parseSourceUrls(body.sourceUrls),
       artistName: body.artistName ? String(body.artistName) : undefined,
+      artistAliases: parseArtistAliases(body.artistAliases),
       createPlaylist:
         body.createPlaylist === "true" || body.createPlaylist === "on",
       maxSetsOverride: body.maxSetsOverride ? Number(body.maxSetsOverride) : undefined,

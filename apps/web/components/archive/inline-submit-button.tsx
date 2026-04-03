@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 
+import { ArtistAliasFields } from "@/components/forms/artist-alias-fields";
 import { ArtistNameField } from "@/components/forms/artist-name-field";
 
 import styles from "./inline-submit-button.module.css";
@@ -22,7 +23,7 @@ type SubmitState =
   | { status: "submitting" }
   | { status: "error"; message: string };
 
-async function postSubmission(body: Record<string, string>): Promise<{ submissionId: string }> {
+async function postSubmission(body: Record<string, string | string[]>): Promise<{ submissionId: string }> {
   const res = await fetch("/api/jobs", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -51,6 +52,7 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
   const [open, setOpen] = useState(false);
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [discoveryName, setDiscoveryName] = useState("");
+  const [discoveryAliases, setDiscoveryAliases] = useState<string[]>([]);
   const [curatedName, setCuratedName] = useState("");
   const [urls, setUrls] = useState("");
   const [state, setState] = useState<SubmitState>({ status: "idle" });
@@ -58,7 +60,7 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
 
   const isAuthenticated = Boolean(session?.user);
 
-  const handleSubmit = async (payload: Record<string, string>) => {
+  const handleSubmit = async (payload: Record<string, string | string[]>) => {
     setState({ status: "submitting" });
     try {
       const { submissionId } = await postSubmission(payload);
@@ -119,11 +121,23 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
                   placeholder="e.g. Floating Points"
                   value={discoveryName}
                 />
+                <ArtistAliasFields
+                  className={styles.artistAliasTheme}
+                  inputClassName={styles.input}
+                  onChange={setDiscoveryAliases}
+                  values={discoveryAliases}
+                />
                 <div className={styles.btnRow}>
                   <button
                     className={styles.submitBtn}
                     disabled={!discoveryName.trim() || isSubmitting}
-                    onClick={() => handleSubmit({ mode: "artist", artistName: discoveryName })}
+                    onClick={() =>
+                      handleSubmit({
+                        mode: "artist",
+                        artistName: discoveryName,
+                        artistAliases: discoveryAliases,
+                      })
+                    }
                     type="button"
                   >
                     {isSubmitting ? "…" : "Start Scan"}

@@ -102,6 +102,8 @@ export function SubmissionDetailClient({
   }
 
   const outcomeBanner = getOutcomeBanner(detail);
+  const submissionAliases =
+    detail.submission.mode === "artist" ? detail.submission.artistAliases.filter(Boolean) : [];
 
   const runAction = async (url: string, actionKey: string) => {
     setPendingActionKey(actionKey);
@@ -164,6 +166,43 @@ export function SubmissionDetailClient({
               {formatTimestamp(detail.submission.createdAt)}
             </span>
           </div>
+          {submissionAliases.length > 0 ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 10,
+              }}
+            >
+              <span
+                style={{
+                  color: "#666",
+                  fontSize: 10,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Aliases
+              </span>
+              {submissionAliases.map((alias) => (
+                <span
+                  key={alias}
+                  style={{
+                    border: "1px solid #1f1f1f",
+                    borderRadius: 999,
+                    background: "#111",
+                    color: "#b5b5b5",
+                    fontSize: 10,
+                    padding: "6px 10px",
+                  }}
+                >
+                  {alias}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div
             style={{
               display: "flex",

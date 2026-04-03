@@ -4,13 +4,14 @@ import { type RefObject, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 
+import { ArtistAliasFields } from "@/components/forms/artist-alias-fields";
 import { ArtistNameField } from "@/components/forms/artist-name-field";
 
 import styles from "./submit-panel.module.css";
 
 type SubmitState = { status: "idle" } | { status: "submitting" } | { status: "error"; message: string };
 
-async function postSubmission(body: Record<string, string>): Promise<{ submissionId: string }> {
+async function postSubmission(body: Record<string, string | string[]>): Promise<{ submissionId: string }> {
   const res = await fetch("/api/jobs", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -34,12 +35,17 @@ function ArtistForm({
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [artistAliases, setArtistAliases] = useState<string[]>([]);
   const [state, setState] = useState<SubmitState>({ status: "idle" });
 
   const handleSubmit = async () => {
     setState({ status: "submitting" });
     try {
-      const { submissionId } = await postSubmission({ mode: "artist", artistName: name });
+      const { submissionId } = await postSubmission({
+        mode: "artist",
+        artistName: name,
+        artistAliases,
+      });
       onClose();
       router.push(`/submissions/${submissionId}`);
     } catch (err) {
@@ -57,6 +63,12 @@ function ArtistForm({
         onValueChange={setName}
         placeholder="e.g. Floating Points"
         value={name}
+      />
+      <ArtistAliasFields
+        className={styles.artistAliasTheme}
+        inputClassName={styles.input}
+        onChange={setArtistAliases}
+        values={artistAliases}
       />
       <div className={styles.btnRow}>
         <button

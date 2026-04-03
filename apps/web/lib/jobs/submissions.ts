@@ -21,6 +21,7 @@ import {
   isRetryableSetRun,
   summarizeSetRunCounts,
 } from "@/lib/jobs/status";
+import { prepareArtistAliases } from "@/lib/jobs/artist-aliases";
 
 const db = getDb();
 
@@ -30,6 +31,7 @@ const submissionSchema = z
     sourceUrl: z.string().url().optional(),
     sourceUrls: z.array(z.string().url()).default([]),
     artistName: z.string().trim().min(1).optional(),
+    artistAliases: z.array(z.string()).default([]),
     createPlaylist: z.boolean().default(false),
     maxSetsOverride: z.number().int().positive().optional(),
   })
@@ -59,7 +61,29 @@ const submissionSchema = z
         });
       }
     }
-  });
+
+    if (
+      prepareArtistAliases({
+        mode: value.mode,
+        artistName: value.artistName,
+        artistAliases: value.artistAliases,
+      }).exceedsLimit
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "You can add up to 5 aliases",
+        path: ["artistAliases"],
+      });
+    }
+  })
+  .transform((value) => ({
+    ...value,
+    artistAliases: prepareArtistAliases({
+      mode: value.mode,
+      artistName: value.artistName,
+      artistAliases: value.artistAliases,
+    }).aliases,
+  }));
 
 export type CreateSubmissionInput = z.infer<typeof submissionSchema>;
 
@@ -118,6 +142,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
     input.mode === "curated_artist"
       ? input.sourceUrls
       : [];
+  const normalizedArtistAliases = input.mode === "artist" ? input.artistAliases : [];
 
   // If the user asked for playlist creation, verify they have an active Spotify connection.
   // If not, accept the submission but downgrade createPlaylist and surface a warning.
@@ -152,6 +177,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
       mode: input.mode,
       status: "queued",
       artistName: input.artistName ?? null,
+      artistAliases: normalizedArtistAliases,
       sourceUrl: input.sourceUrl ?? null,
       sourceUrls: normalizedUrls,
       createPlaylist: effectiveCreatePlaylist,
@@ -168,6 +194,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
       sourceUrl: input.sourceUrl ?? null,
       sourceUrls: normalizedUrls,
       artistName: input.artistName ?? null,
+      artistAliases: normalizedArtistAliases.length > 0 ? normalizedArtistAliases : undefined,
       createPlaylist: effectiveCreatePlaylist,
       warnings: warnings.length > 0 ? warnings : undefined,
     },

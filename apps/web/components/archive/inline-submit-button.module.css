@@ -167,6 +167,15 @@
   --artist-suggest-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
+.artistAliasTheme {
+  --artist-alias-action: rgba(255, 255, 255, 0.72);
+  --artist-alias-bg: rgba(255, 255, 255, 0.04);
+  --artist-alias-border: #2a2a2a;
+  --artist-alias-hover: rgba(255, 255, 255, 0.08);
+  --artist-alias-ink: #d7d7d7;
+  --artist-alias-muted: rgba(255, 255, 255, 0.42);
+}
+
 .btnRow {
   display: flex;
   align-items: center;

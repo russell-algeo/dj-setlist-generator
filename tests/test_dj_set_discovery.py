@@ -1,6 +1,12 @@
 import unittest
 
-from dj_set_discovery import DiscoveredSet, _deduplicate_near_duplicates, _filter_and_map
+from dj_set_discovery import (
+    DiscoveredSet,
+    _build_search_queries,
+    _deduplicate_near_duplicates,
+    _filter_and_map,
+    _should_reuse_cached_results,
+)
 
 
 class DjSetDiscoveryDedupTests(unittest.TestCase):
@@ -22,7 +28,7 @@ class DjSetDiscoveryDedupTests(unittest.TestCase):
             },
         ]
 
-        discovered_sets = _filter_and_map(raw_results, "DJ Test")
+        discovered_sets = _filter_and_map(raw_results, ["DJ Test"])
 
         self.assertEqual(1, len(discovered_sets))
         self.assertEqual("youtube", discovered_sets[0].platform)
@@ -48,11 +54,76 @@ class DjSetDiscoveryDedupTests(unittest.TestCase):
             ),
         ]
 
-        deduped_sets = _deduplicate_near_duplicates(discovered_sets, "DJ Test")
+        deduped_sets = _deduplicate_near_duplicates(discovered_sets, ["DJ Test"])
 
         self.assertEqual(1, len(deduped_sets))
         self.assertEqual("youtube", deduped_sets[0].platform)
         self.assertEqual("https://www.youtube.com/watch?v=yt123", deduped_sets[0].url)
+
+    def test_filter_and_map_accepts_alias_matches(self):
+        raw_results = [
+            {
+                "title": "Danilo Plessow at Dekmantel 2024",
+                "channel": "Dekmantel",
+                "duration": 3600,
+                "webpage_url": "https://www.youtube.com/watch?v=alias123",
+                "upload_date": "20240801",
+            },
+        ]
+
+        discovered_sets = _filter_and_map(raw_results, ["Motor City Drum Ensemble", "Danilo Plessow"])
+
+        self.assertEqual(1, len(discovered_sets))
+        self.assertEqual("https://www.youtube.com/watch?v=alias123", discovered_sets[0].url)
+
+    def test_build_search_queries_includes_aliases(self):
+        queries = _build_search_queries(["Motor City Drum Ensemble", "Danilo Plessow"])
+
+        self.assertTrue(any('"Motor City Drum Ensemble"' in query for query in queries))
+        self.assertTrue(any('"Danilo Plessow"' in query for query in queries))
+
+    def test_near_duplicate_dedup_strips_alias_tokens(self):
+        discovered_sets = [
+            DiscoveredSet(
+                url="https://soundcloud.com/mcde/live-from-lost-village",
+                title="Live from Lost Village - Danilo Plessow [MCDE]",
+                platform="soundcloud",
+                event="Lost Village",
+                year="2024",
+                duration_minutes=60,
+            ),
+            DiscoveredSet(
+                url="https://www.youtube.com/watch?v=mcde123",
+                title="Motor City Drum Ensemble live from Lost Village",
+                platform="youtube",
+                event="Lost Village",
+                year="2024",
+                duration_minutes=61,
+            ),
+        ]
+
+        deduped_sets = _deduplicate_near_duplicates(
+            discovered_sets,
+            ["Motor City Drum Ensemble", "Danilo Plessow", "MCDE"],
+        )
+
+        self.assertEqual(1, len(deduped_sets))
+        self.assertEqual("youtube", deduped_sets[0].platform)
+
+    def test_cache_reuse_rejects_alias_mismatches(self):
+        self.assertTrue(
+            _should_reuse_cached_results(
+                ["Motor City Drum Ensemble", "Danilo Plessow"],
+                ["Motor City Drum Ensemble", "Danilo Plessow"],
+            )
+        )
+        self.assertFalse(
+            _should_reuse_cached_results(
+                ["Motor City Drum Ensemble"],
+                ["Motor City Drum Ensemble", "Danilo Plessow"],
+            )
+        )
+        self.assertFalse(_should_reuse_cached_results(None, ["Motor City Drum Ensemble"]))
 
 
 if __name__ == "__main__":

@@ -308,6 +308,7 @@ export const submissions = ops.table(
     mode: text("mode").notNull(),
     status: text("status").notNull(),
     artistName: text("artist_name"),
+    artistAliases: jsonb("artist_aliases").default(sql`'[]'::jsonb`).notNull(),
     sourceUrl: text("source_url"),
     sourceUrls: jsonb("source_urls").default(sql`'[]'::jsonb`).notNull(),
     createPlaylist: boolean("create_playlist").default(false).notNull(),

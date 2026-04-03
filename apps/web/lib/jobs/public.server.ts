@@ -197,6 +197,13 @@ const countCompletedRecognitionSlots = (
   return slotIndexes.size > 0 ? slotIndexes.size : fallbackCount;
 };
 
+const coerceArtistAliases = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value
+        .map((entry) => String(entry).trim())
+        .filter(Boolean)
+    : [];
+
 export const listPublicSubmissionsForActor = async (
   actor: SessionActor,
   requestedFilter?: string,
@@ -346,6 +353,7 @@ export const serializeSubmissionDetail = (
       mode: detail.submission.mode,
       status: detail.submission.status,
       artistName: detail.submission.artistName ?? null,
+      artistAliases: coerceArtistAliases(detail.submission.artistAliases),
       sourceUrl: detail.submission.sourceUrl ?? null,
       createdAt: detail.submission.createdAt.toISOString(),
       updatedAt: detail.submission.updatedAt.toISOString(),
