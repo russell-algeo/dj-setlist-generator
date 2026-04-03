@@ -2334,6 +2334,14 @@ export function ArchiveHomeExplorer({
                       <g
                         key={node.artist.id}
                         onClick={() => toggleNetworkArtistSelection(node.artist.slug)}
+                        onPointerEnter={() => {
+                          setNetworkPinnedArtistSlug(node.artist.slug);
+                        }}
+                        onPointerLeave={() => {
+                          setNetworkPinnedArtistSlug((current) =>
+                            current === node.artist.slug ? null : current,
+                          );
+                        }}
                         style={{ cursor: "pointer" }}
                       >
                         <circle
