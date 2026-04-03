@@ -714,6 +714,7 @@ export function ArchiveHomeExplorer({
   const [networkSearch, setNetworkSearch] = useState("");
   const [networkSelectedArtistSlugs, setNetworkSelectedArtistSlugs] = useState<string[]>([]);
   const [networkLensEnabled, setNetworkLensEnabled] = useState(false);
+  const [networkPinnedArtistSlug, setNetworkPinnedArtistSlug] = useState<string | null>(null);
   const [networkPointer, setNetworkPointer] = useState<NetworkPointerState>({
     active: false,
     x: 0,
@@ -924,6 +925,7 @@ export function ArchiveHomeExplorer({
     const sync = () => {
       setNetworkLensEnabled(media.matches);
       if (!media.matches) {
+        setNetworkPinnedArtistSlug(null);
         setNetworkPointer({
           active: false,
           x: 0,
@@ -1481,50 +1483,6 @@ export function ArchiveHomeExplorer({
     [networkPayload],
   );
 
-  const networkPinnedArtistSlug = useMemo(() => {
-    if (!networkLensEnabled || !networkPointer.active) {
-      return null;
-    }
-
-    let pinned: { distance: number; slug: string } | null = null;
-
-    for (const artist of networkArtists) {
-      const position = networkPositions.positions.get(artist.slug);
-      if (!position) {
-        continue;
-      }
-
-      const selected = networkSelectedArtistSlugs.includes(artist.slug);
-      const distance = Math.hypot(position.x - networkPointer.x, position.y - networkPointer.y);
-      const proximity = clamp(1 - distance / NETWORK_LENS_RADIUS, 0, 1);
-      let visualWeight = proximity > 0 ? Math.pow(proximity, NETWORK_LENS_FALLOFF) : 0;
-
-      if (selected) {
-        visualWeight = Math.max(visualWeight, NETWORK_SELECTED_LENS_FLOOR);
-      }
-
-      const visibleRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
-      if (distance > visibleRadius) {
-        continue;
-      }
-
-      if (!pinned || distance < pinned.distance) {
-        pinned = {
-          distance,
-          slug: artist.slug,
-        };
-      }
-    }
-
-    return pinned ? pinned.slug : null;
-  }, [
-    networkArtists,
-    networkLensEnabled,
-    networkPointer,
-    networkPositions,
-    networkSelectedArtistSlugs,
-  ]);
-
   const networkNodeVisuals = useMemo(() => {
     const centerX = networkPositions.width / 2;
     const centerY = networkPositions.height / 2;
@@ -1640,6 +1598,52 @@ export function ArchiveHomeExplorer({
 
     const nextX = ((clientX - rect.left) / rect.width) * networkPositions.width;
     const nextY = ((clientY - rect.top) / rect.height) * networkPositions.height;
+
+    setNetworkPinnedArtistSlug((currentPinnedSlug) => {
+      if (currentPinnedSlug) {
+        const pinnedPosition = networkPositions.positions.get(currentPinnedSlug);
+        if (pinnedPosition) {
+          const pinnedDistance = Math.hypot(pinnedPosition.x - nextX, pinnedPosition.y - nextY);
+          const pinnedRadius = pinnedPosition.r * NETWORK_NODE_MAX_SCALE;
+
+          if (pinnedDistance <= pinnedRadius) {
+            return currentPinnedSlug;
+          }
+        }
+      }
+
+      let nextPinned: { distance: number; slug: string } | null = null;
+
+      for (const artist of networkArtists) {
+        const position = networkPositions.positions.get(artist.slug);
+        if (!position) {
+          continue;
+        }
+
+        const selected = networkSelectedArtistSlugs.includes(artist.slug);
+        const distance = Math.hypot(position.x - nextX, position.y - nextY);
+        const proximity = clamp(1 - distance / NETWORK_LENS_RADIUS, 0, 1);
+        let visualWeight = proximity > 0 ? Math.pow(proximity, NETWORK_LENS_FALLOFF) : 0;
+
+        if (selected) {
+          visualWeight = Math.max(visualWeight, NETWORK_SELECTED_LENS_FLOOR);
+        }
+
+        const visibleRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
+        if (distance > visibleRadius) {
+          continue;
+        }
+
+        if (!nextPinned || distance < nextPinned.distance) {
+          nextPinned = {
+            distance,
+            slug: artist.slug,
+          };
+        }
+      }
+
+      return nextPinned ? nextPinned.slug : null;
+    });
 
     setNetworkPointer((current) => {
       if (
@@ -2274,6 +2278,7 @@ export function ArchiveHomeExplorer({
                       });
                     }}
                     onPointerLeave={() => {
+                      setNetworkPinnedArtistSlug(null);
                       setNetworkPointer((current) =>
                         current.active
                           ? {
