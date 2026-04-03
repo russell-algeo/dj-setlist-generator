@@ -714,7 +714,6 @@ export function ArchiveHomeExplorer({
   const [networkSearch, setNetworkSearch] = useState("");
   const [networkSelectedArtistSlugs, setNetworkSelectedArtistSlugs] = useState<string[]>([]);
   const [networkLensEnabled, setNetworkLensEnabled] = useState(false);
-  const [networkPinnedArtistSlug, setNetworkPinnedArtistSlug] = useState<string | null>(null);
   const [networkPointer, setNetworkPointer] = useState<NetworkPointerState>({
     active: false,
     x: 0,
@@ -925,7 +924,6 @@ export function ArchiveHomeExplorer({
     const sync = () => {
       setNetworkLensEnabled(media.matches);
       if (!media.matches) {
-        setNetworkPinnedArtistSlug(null);
         setNetworkPointer({
           active: false,
           x: 0,
@@ -1507,20 +1505,14 @@ export function ArchiveHomeExplorer({
           }
         }
 
-        const circleVisualWeight =
-          networkLensEnabled && networkPinnedArtistSlug === artist.slug
-            ? Math.max(visualWeight, 1)
-            : visualWeight;
-
         const directionXRaw = position.x - centerX;
         const directionYRaw = position.y - centerY;
         const directionLength = Math.hypot(directionXRaw, directionYRaw) || 1;
         const directionX = directionXRaw / directionLength;
         const directionY = directionYRaw / directionLength;
-        const labelRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
-        const circleRadius = position.r * (1 + circleVisualWeight * (NETWORK_NODE_MAX_SCALE - 1));
+        const circleRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
         const fontSize = NETWORK_LABEL_BASE_SIZE + visualWeight * NETWORK_LABEL_SIZE_RANGE;
-        const labelOffset = labelRadius + NETWORK_LABEL_OUTSET + visualWeight * NETWORK_LABEL_OUTSET_RANGE;
+        const labelOffset = circleRadius + NETWORK_LABEL_OUTSET + visualWeight * NETWORK_LABEL_OUTSET_RANGE;
         const textAnchor: "start" | "end" = directionX >= 0 ? "start" : "end";
         const estimatedLabelWidth = artist.name.length * fontSize * 0.62;
         let labelX = position.x + directionX * labelOffset;
@@ -1542,7 +1534,7 @@ export function ArchiveHomeExplorer({
           labelX,
           labelY,
           position,
-          renderWeight: Math.max(visualWeight, circleVisualWeight),
+          renderWeight: visualWeight,
           selected,
           textAnchor,
           visualWeight,
@@ -1558,7 +1550,6 @@ export function ArchiveHomeExplorer({
   }, [
     networkArtists,
     networkLensEnabled,
-    networkPinnedArtistSlug,
     networkPointer,
     networkPositions,
     networkSelectedArtistSlugs,
@@ -1598,52 +1589,6 @@ export function ArchiveHomeExplorer({
 
     const nextX = ((clientX - rect.left) / rect.width) * networkPositions.width;
     const nextY = ((clientY - rect.top) / rect.height) * networkPositions.height;
-
-    setNetworkPinnedArtistSlug((currentPinnedSlug) => {
-      if (currentPinnedSlug) {
-        const pinnedPosition = networkPositions.positions.get(currentPinnedSlug);
-        if (pinnedPosition) {
-          const pinnedDistance = Math.hypot(pinnedPosition.x - nextX, pinnedPosition.y - nextY);
-          const pinnedRadius = pinnedPosition.r * NETWORK_NODE_MAX_SCALE;
-
-          if (pinnedDistance <= pinnedRadius) {
-            return currentPinnedSlug;
-          }
-        }
-      }
-
-      let nextPinned: { distance: number; slug: string } | null = null;
-
-      for (const artist of networkArtists) {
-        const position = networkPositions.positions.get(artist.slug);
-        if (!position) {
-          continue;
-        }
-
-        const selected = networkSelectedArtistSlugs.includes(artist.slug);
-        const distance = Math.hypot(position.x - nextX, position.y - nextY);
-        const proximity = clamp(1 - distance / NETWORK_LENS_RADIUS, 0, 1);
-        let visualWeight = proximity > 0 ? Math.pow(proximity, NETWORK_LENS_FALLOFF) : 0;
-
-        if (selected) {
-          visualWeight = Math.max(visualWeight, NETWORK_SELECTED_LENS_FLOOR);
-        }
-
-        const visibleRadius = position.r * (1 + visualWeight * (NETWORK_NODE_MAX_SCALE - 1));
-        if (distance > visibleRadius) {
-          continue;
-        }
-
-        if (!nextPinned || distance < nextPinned.distance) {
-          nextPinned = {
-            distance,
-            slug: artist.slug,
-          };
-        }
-      }
-
-      return nextPinned ? nextPinned.slug : null;
-    });
 
     setNetworkPointer((current) => {
       if (
@@ -2278,7 +2223,6 @@ export function ArchiveHomeExplorer({
                       });
                     }}
                     onPointerLeave={() => {
-                      setNetworkPinnedArtistSlug(null);
                       setNetworkPointer((current) =>
                         current.active
                           ? {
@@ -2334,14 +2278,6 @@ export function ArchiveHomeExplorer({
                       <g
                         key={node.artist.id}
                         onClick={() => toggleNetworkArtistSelection(node.artist.slug)}
-                        onPointerEnter={() => {
-                          setNetworkPinnedArtistSlug(node.artist.slug);
-                        }}
-                        onPointerLeave={() => {
-                          setNetworkPinnedArtistSlug((current) =>
-                            current === node.artist.slug ? null : current,
-                          );
-                        }}
                         style={{ cursor: "pointer" }}
                       >
                         <circle
