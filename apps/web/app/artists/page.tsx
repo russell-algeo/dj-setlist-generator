@@ -178,7 +178,7 @@ export default async function ArtistsPage({ searchParams }: ArtistsPageProps) {
         ) : (
           <div className="empty-state">
             {isPersonal
-              ? "No artists from your runs yet. Submit a URL from the dashboard to get started."
+              ? "No artists from your runs yet. Submit an artist from the dashboard to get started."
               : "No artists matched that search."}
           </div>
         )}

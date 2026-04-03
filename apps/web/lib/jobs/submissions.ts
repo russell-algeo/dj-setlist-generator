@@ -26,7 +26,7 @@ const db = getDb();
 
 const submissionSchema = z
   .object({
-    mode: z.enum(["url", "artist", "curated_artist"]),
+    mode: z.enum(["artist", "curated_artist"]),
     sourceUrl: z.string().url().optional(),
     sourceUrls: z.array(z.string().url()).default([]),
     artistName: z.string().trim().min(1).optional(),
@@ -34,14 +34,6 @@ const submissionSchema = z
     maxSetsOverride: z.number().int().positive().optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.mode === "url" && !value.sourceUrl) {
-      ctx.addIssue({
-        code: "custom",
-        message: "A sourceUrl is required for url submissions",
-        path: ["sourceUrl"],
-      });
-    }
-
     if (value.mode === "artist" && !value.artistName) {
       ctx.addIssue({
         code: "custom",
@@ -123,11 +115,9 @@ export const syncSubmissionStatusFromRuns = async (submissionId: string) => {
 
 export const createSubmission = async (actor: SessionActor, input: CreateSubmissionInput) => {
   const normalizedUrls =
-    input.mode === "url"
-      ? [input.sourceUrl!]
-      : input.mode === "curated_artist"
-        ? input.sourceUrls
-        : [];
+    input.mode === "curated_artist"
+      ? input.sourceUrls
+      : [];
 
   // If the user asked for playlist creation, verify they have an active Spotify connection.
   // If not, accept the submission but downgrade createPlaylist and surface a warning.
@@ -183,7 +173,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
     },
   });
 
-  if (input.mode === "url" || input.mode === "curated_artist") {
+  if (input.mode === "curated_artist") {
     // Dedup: find URLs already published in a completed run so we don't re-process them.
     const dedupedByUrl = new Map<string, string>(); // sourceUrl → publishedSetId
     const existingCompleted = await db

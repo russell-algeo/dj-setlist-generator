@@ -130,21 +130,41 @@
   margin-bottom: 6px;
 }
 
+.input[data-has-value="true"] {
+  color: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .input::placeholder {
   color: #333;
 }
 
 .inputPrefilled {
   composes: input;
-  color: rgba(255, 255, 255, 0.25);
-  background: #0a0a0a;
-  border-color: #1a1a1a;
+  color: rgba(255, 255, 255, 0.84);
+  background: #101010;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .textarea {
   composes: input;
   height: 52px;
   resize: none;
+}
+
+.artistFieldTheme {
+  --artist-suggest-bg: #0f0f0f;
+  --artist-suggest-border: #2a2a2a;
+  --artist-suggest-divider: #1f1f1f;
+  --artist-suggest-font: "Space Mono", monospace;
+  --artist-suggest-heading-size: 0.56rem;
+  --artist-suggest-hover: rgba(255, 255, 255, 0.04);
+  --artist-suggest-helper-size: 0.62rem;
+  --artist-suggest-ink: #d7d7d7;
+  --artist-suggest-meta-size: 0.58rem;
+  --artist-suggest-muted: rgba(255, 255, 255, 0.42);
+  --artist-suggest-name-size: 0.64rem;
+  --artist-suggest-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
 .btnRow {
@@ -178,18 +198,6 @@
   cursor: pointer;
   background: none;
   border: none;
-}
-
-.singleRow {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.singleInput {
-  composes: input;
-  flex: 1;
-  margin: 0;
 }
 
 .error {

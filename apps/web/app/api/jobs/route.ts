@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 
 import { getRequestActor } from "@/lib/auth/session";
 import { isJsonRequest, readRequestBody } from "@/lib/http/request-body";
 import { listPublicSubmissionsForActor } from "@/lib/jobs/public.server";
 import { createSubmission, parseSubmissionInput } from "@/lib/jobs/submissions";
+import type { CreateSubmissionInput } from "@/lib/jobs/submissions";
 import { dispatchPendingWork } from "@/lib/jobs/dispatch";
 
 const parseSourceUrls = (value: FormDataEntryValue | FormDataEntryValue[] | undefined) => {
@@ -44,15 +46,28 @@ export async function POST(request: Request) {
   }
 
   const body = await readRequestBody(request);
-  const input = parseSubmissionInput({
-    mode: String(body.mode ?? "url"),
-    sourceUrl: body.sourceUrl ? String(body.sourceUrl) : undefined,
-    sourceUrls: parseSourceUrls(body.sourceUrls),
-    artistName: body.artistName ? String(body.artistName) : undefined,
-    createPlaylist:
-      body.createPlaylist === "true" || body.createPlaylist === "on",
-    maxSetsOverride: body.maxSetsOverride ? Number(body.maxSetsOverride) : undefined,
-  });
+  let input: CreateSubmissionInput;
+
+  try {
+    input = parseSubmissionInput({
+      mode: String(body.mode ?? ""),
+      sourceUrl: body.sourceUrl ? String(body.sourceUrl) : undefined,
+      sourceUrls: parseSourceUrls(body.sourceUrls),
+      artistName: body.artistName ? String(body.artistName) : undefined,
+      createPlaylist:
+        body.createPlaylist === "true" || body.createPlaylist === "on",
+      maxSetsOverride: body.maxSetsOverride ? Number(body.maxSetsOverride) : undefined,
+    });
+  } catch (error) {
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message ?? "Invalid submission payload" },
+        { status: 400 },
+      );
+    }
+
+    throw error;
+  }
 
   const { submission, warnings } = await createSubmission(actor, input);
   await dispatchPendingWork();

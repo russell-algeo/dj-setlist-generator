@@ -160,6 +160,7 @@ const waitForNewWorkflowRun = async (existingIds: Set<number>) => {
 };
 
 const createBenchmarkRun = async (email: string, sourceUrl: string) => {
+  const benchmarkArtistName = "Benchmark Artist";
   const [profile] = await sql`
     select user_id, email
     from authn.user_profiles
@@ -176,15 +177,15 @@ const createBenchmarkRun = async (email: string, sourceUrl: string) => {
       requested_by,
       mode,
       status,
-      source_url,
+      artist_name,
       source_urls,
       create_playlist
     )
     values (
       ${profile.user_id},
-      'url',
+      'curated_artist',
       'queued',
-      ${sourceUrl},
+      ${benchmarkArtistName},
       ${JSON.stringify([sourceUrl])}::jsonb,
       false
     )
@@ -225,12 +226,12 @@ const createBenchmarkRun = async (email: string, sourceUrl: string) => {
     values (
       ${submission.id},
       'submission.created',
-      'Submission queued in url mode',
+      'Submission queued in curated_artist mode',
       ${JSON.stringify({
-        mode: "url",
-        sourceUrl,
+        mode: "curated_artist",
+        sourceUrl: null,
         sourceUrls: [sourceUrl],
-        artistName: null,
+        artistName: benchmarkArtistName,
       })}::jsonb
     )
   `;

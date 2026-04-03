@@ -1,6 +1,8 @@
 import { AppShell } from "@/components/app-shell";
 import { requireSessionActor } from "@/lib/auth/session";
 
+import { DashboardSubmitForms } from "./dashboard-submit-forms";
+
 export default async function DashboardSubmitPage() {
   const actor = await requireSessionActor("/dashboard/submit");
 
@@ -8,7 +10,7 @@ export default async function DashboardSubmitPage() {
     <AppShell
       title="Submit work"
       eyebrow="Operator actions"
-      description="Queue single-set processing, artist discovery, or curated artist batches. Forms post directly to the remote job API."
+      description="Queue artist discovery or curated artist batches. Every submitted set now stays attached to an artist page so archive navigation remains native."
     >
       {!actor.isAllowlisted ? (
         <section className="panel">
@@ -16,55 +18,10 @@ export default async function DashboardSubmitPage() {
           <p>Your account is authenticated but cannot submit jobs until an admin promotes it.</p>
         </section>
       ) : (
-        <section className="panel-grid panel-grid--three">
-          <article className="panel">
-            <h2>Single set URL</h2>
-            <form action="/api/jobs" className="stack-form" method="post">
-              <input name="mode" type="hidden" value="url" />
-              <input name="sourceUrl" placeholder="https://www.youtube.com/watch?v=..." required type="url" />
-              <label>
-                <input name="createPlaylist" type="checkbox" value="true" /> Create Spotify playlist
-              </label>
-              <button className="button" type="submit">
-                Queue set
-              </button>
-            </form>
-          </article>
-
-          <article className="panel">
-            <h2>Artist discovery</h2>
-            <form action="/api/jobs" className="stack-form" method="post">
-              <input name="mode" type="hidden" value="artist" />
-              <input name="artistName" placeholder="Artist name" required type="text" />
-              <input min="1" name="maxSetsOverride" placeholder="Max sets override (optional)" type="number" />
-              <label>
-                <input name="createPlaylist" type="checkbox" value="true" /> Create Spotify playlist
-              </label>
-              <button className="button" type="submit">
-                Discover sets
-              </button>
-            </form>
-          </article>
-
-          <article className="panel">
-            <h2>Curated artist batch</h2>
-            <form action="/api/jobs" className="stack-form" method="post">
-              <input name="mode" type="hidden" value="curated_artist" />
-              <input name="artistName" placeholder="Artist name" required type="text" />
-              <textarea
-                name="sourceUrls"
-                placeholder={"One URL per line\nhttps://...\nhttps://..."}
-                required
-              />
-              <label>
-                <input name="createPlaylist" type="checkbox" value="true" /> Create Spotify playlist
-              </label>
-              <button className="button" type="submit">
-                Queue curated batch
-              </button>
-            </form>
-          </article>
-        </section>
+        <DashboardSubmitForms
+          curatedHelperText="Select an existing artist to add additional sets to their existing page"
+          discoveryHelperText={'If the artist you are looking for has already been submitted, use "Curated Artist" mode to add new sets to their existing page.'}
+        />
       )}
     </AppShell>
   );

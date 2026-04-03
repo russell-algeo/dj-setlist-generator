@@ -1,17 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 
+import { ArtistNameField } from "@/components/forms/artist-name-field";
+
 import styles from "./inline-submit-button.module.css";
 
-type InlineSubmitMode = "scan-artist" | "submit-set" | "add-sets";
+type InlineSubmitMode = "scan-artist" | "add-sets";
 
 type InlineSubmitButtonProps = {
   mode: InlineSubmitMode;
   /** Pre-filled artist name for add-sets mode */
   artistName?: string;
+  label?: string;
 };
 
 type SubmitState =
@@ -33,18 +36,16 @@ async function postSubmission(body: Record<string, string>): Promise<{ submissio
 }
 
 const LABEL: Record<InlineSubmitMode, string> = {
-  "scan-artist": "+ scan new artist",
-  "submit-set": "+ scan new set",
-  "add-sets": "+ scan new set",
+  "scan-artist": "+ submit artist",
+  "add-sets": "+ add sets",
 };
 
 const TITLE: Record<InlineSubmitMode, string> = {
-  "scan-artist": "How would you like to scan this artist?",
-  "submit-set": "Paste a YouTube or SoundCloud URL",
+  "scan-artist": "Choose an artist submission mode",
   "add-sets": "Add sets",
 };
 
-export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps) {
+export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButtonProps) {
   const { data: session } = useSession();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -52,8 +53,8 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
   const [discoveryName, setDiscoveryName] = useState("");
   const [curatedName, setCuratedName] = useState("");
   const [urls, setUrls] = useState("");
-  const [singleUrl, setSingleUrl] = useState("");
   const [state, setState] = useState<SubmitState>({ status: "idle" });
+  const curatedUrlsRef = useRef<HTMLTextAreaElement | null>(null);
 
   const isAuthenticated = Boolean(session?.user);
 
@@ -70,6 +71,17 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
 
   const isSubmitting = state.status === "submitting";
 
+  const routeDiscoveryToCurated = (artistName: string) => {
+    setCuratedName(artistName);
+
+    requestAnimationFrame(() => {
+      curatedUrlsRef.current?.focus();
+      curatedUrlsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  };
+
+  const triggerLabel = label ?? LABEL[mode];
+
   return (
     <div className={styles.wrap}>
       <div style={{ position: "relative", display: "inline-block" }}>
@@ -80,7 +92,7 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
           onMouseLeave={() => setTooltipVisible(false)}
           type="button"
         >
-          {LABEL[mode]}
+          {triggerLabel}
         </button>
         {tooltipVisible && !isAuthenticated && (
           <div className={styles.tooltip}>You must log in to submit work</div>
@@ -90,32 +102,6 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
         <div className={styles.panel}>
           <div className={styles.panelTitle}>{TITLE[mode]}</div>
 
-          {/* Single Set URL */}
-          {mode === "submit-set" && (
-            <div className={styles.modesOne}>
-              <div className={styles.singleRow}>
-                <input
-                  className={styles.singleInput}
-                  placeholder="https://www.youtube.com/watch?v=…"
-                  value={singleUrl}
-                  onChange={(e) => setSingleUrl(e.target.value)}
-                />
-                <button
-                  className={styles.submitBtn}
-                  disabled={!singleUrl.trim() || isSubmitting}
-                  onClick={() => handleSubmit({ mode: "url", sourceUrl: singleUrl })}
-                  type="button"
-                >
-                  {isSubmitting ? "…" : "Submit"}
-                </button>
-                <button className={styles.cancelBtn} onClick={() => setOpen(false)} type="button">
-                  Cancel
-                </button>
-              </div>
-              {state.status === "error" && <div className={styles.error}>{state.message}</div>}
-            </div>
-          )}
-
           {/* Artist Discovery + Curated Artist */}
           {mode === "scan-artist" && (
             <div className={styles.modes}>
@@ -124,11 +110,14 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
                 <span className={styles.modeDesc}>
                   Enter a name — auto-finds all their sets on YouTube &amp; SoundCloud
                 </span>
-                <input
-                  className={styles.input}
+                <ArtistNameField
+                  className={styles.artistFieldTheme}
+                  existingArtistHelperText={'If the artist you are looking for has already been submitted, use "Curated Artist" mode to add new sets to their existing page.'}
+                  inputClassName={styles.input}
+                  onSuggestionSelect={(artist) => routeDiscoveryToCurated(artist.name)}
+                  onValueChange={setDiscoveryName}
                   placeholder="e.g. Floating Points"
                   value={discoveryName}
-                  onChange={(e) => setDiscoveryName(e.target.value)}
                 />
                 <div className={styles.btnRow}>
                   <button
@@ -146,15 +135,18 @@ export function InlineSubmitButton({ mode, artistName }: InlineSubmitButtonProps
               </div>
               <div className={styles.modeCard}>
                 <span className={styles.modeTitle}>Curated Artist</span>
-                <span className={styles.modeDesc}>Paste hand-picked URLs for a named artist</span>
-                <input
-                  className={styles.input}
+                <span className={styles.modeDesc}>Paste hand-picked URLs for a named artist and reuse an existing page when it already exists</span>
+                <ArtistNameField
+                  className={styles.artistFieldTheme}
+                  existingArtistHelperText="Select an existing artist to add additional sets to their existing page"
+                  inputClassName={styles.input}
+                  onValueChange={setCuratedName}
                   placeholder="Artist name"
                   value={curatedName}
-                  onChange={(e) => setCuratedName(e.target.value)}
                 />
                 <textarea
                   className={styles.textarea}
+                  ref={curatedUrlsRef}
                   placeholder="Paste URLs, one per line"
                   value={urls}
                   onChange={(e) => setUrls(e.target.value)}

@@ -1444,7 +1444,6 @@ export function ArchiveSetExplorer({
   const progressPercent =
     detail.duration > 0 ? clamp((currentTime / detail.duration) * 100, 0, 100) : 0;
   const currentTimeLabel = formatDuration(currentTime);
-
   return (
     <div
       className={styles.root}

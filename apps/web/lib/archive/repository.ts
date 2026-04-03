@@ -10,11 +10,13 @@ import {
   ilike,
   inArray,
   isNotNull,
+  like,
   or,
   sql,
 } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
+import { normalizeText } from "@/lib/archive/import-helpers";
 import { artists, setArtists, setRuns, sets, sitePages } from "@/lib/db/schema";
 
 const clampPage = (page: number) => (Number.isFinite(page) && page > 0 ? Math.floor(page) : 1);
@@ -106,6 +108,31 @@ export const listArtists = async (search?: string, userId?: string) => {
     .groupBy(artists.id)
     .orderBy(desc(sql`count(${setArtists.setId})`), asc(artists.name))
     .limit(200);
+
+  return rows;
+};
+
+export const suggestArtistsByPrefix = async (query: string, limit = 5) => {
+  const db = getDb();
+  const normalizedQuery = normalizeText(query);
+
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  const rows = await db
+    .select({
+      id: artists.id,
+      slug: artists.slug,
+      name: artists.name,
+      setCount: sql<number>`count(distinct ${setArtists.setId})`,
+    })
+    .from(artists)
+    .innerJoin(setArtists, eq(setArtists.artistId, artists.id))
+    .where(and(like(artists.normalizedName, `${normalizedQuery}%`), eq(setArtists.role, "primary")))
+    .groupBy(artists.id)
+    .orderBy(desc(sql`count(distinct ${setArtists.setId})`), asc(artists.name))
+    .limit(limit);
 
   return rows;
 };

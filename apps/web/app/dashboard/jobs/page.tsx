@@ -27,7 +27,7 @@ export default async function DashboardJobsPage({ searchParams }: DashboardJobsP
     <AppShell
       title="Job queue"
       eyebrow="Operations"
-      description="Submission-level history for discovery jobs, direct set runs, and curated batches."
+      description="Submission-level history for artist discovery jobs and curated artist batches."
       viewAs={viewAsActor?.userId}
     >
       <section className="panel">

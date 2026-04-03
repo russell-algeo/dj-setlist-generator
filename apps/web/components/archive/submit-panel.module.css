@@ -68,8 +68,12 @@
 
 .modes {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.singleMode {
+  max-width: 360px;
 }
 
 .mode {
@@ -108,14 +112,41 @@
   margin-bottom: 6px;
 }
 
+.input[data-has-value="true"] {
+  color: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .input::placeholder {
   color: #333;
+}
+
+.inputPrefilled {
+  composes: input;
+  color: rgba(255, 255, 255, 0.25);
+  background: #0a0a0a;
+  border-color: #1a1a1a;
 }
 
 .textarea {
   composes: input;
   height: 56px;
   resize: none;
+}
+
+.artistFieldTheme {
+  --artist-suggest-bg: #0f0f0f;
+  --artist-suggest-border: #2a2a2a;
+  --artist-suggest-divider: #1f1f1f;
+  --artist-suggest-font: "Space Mono", monospace;
+  --artist-suggest-heading-size: 0.56rem;
+  --artist-suggest-hover: rgba(255, 255, 255, 0.04);
+  --artist-suggest-helper-size: 0.62rem;
+  --artist-suggest-ink: #d7d7d7;
+  --artist-suggest-meta-size: 0.58rem;
+  --artist-suggest-muted: rgba(255, 255, 255, 0.42);
+  --artist-suggest-name-size: 0.64rem;
+  --artist-suggest-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
 .btnRow {

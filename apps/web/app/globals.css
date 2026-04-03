@@ -223,6 +223,12 @@ textarea {
   color: var(--ink);
 }
 
+.field[data-has-value="true"] {
+  background: rgba(255, 250, 241, 0.92);
+  border-color: rgba(35, 30, 26, 0.22);
+  color: var(--ink);
+}
+
 .stack-form textarea {
   min-height: 144px;
   resize: vertical;
