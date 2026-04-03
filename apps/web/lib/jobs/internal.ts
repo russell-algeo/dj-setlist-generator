@@ -2,11 +2,12 @@ import "server-only";
 
 import { getDb } from "@/lib/db/client";
 import { workerEvents } from "@/lib/db/schema";
+import { setRunRetryAttemptLimit } from "./policy";
 
 const db = getDb();
 
 // How many automatic recovery attempts the scheduler will make before giving up.
-export const automaticRecoveryAttemptLimit = 3;
+export const automaticRecoveryAttemptLimit = setRunRetryAttemptLimit;
 
 export const createWorkerEvent = async (values: {
   submissionId?: string;

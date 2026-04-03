@@ -1,58 +1,32 @@
 import Link from "next/link";
 
 import { requireSessionActor } from "@/lib/auth/session";
-import { formatTimestamp } from "@/lib/format";
-import { listSubmissionsForActor } from "@/lib/jobs/submissions";
+import {
+  normalizePublicSubmissionFilter,
+  type PublicSubmissionFilter,
+} from "@/lib/jobs/public";
+import { listPublicSubmissionsForActor } from "@/lib/jobs/public.server";
 
-type SubmissionRow = {
-  id: string;
-  mode: string;
-  status: string;
-  artistName: string | null;
-  sourceUrl: string | null;
-  createdAt: Date;
-};
+import { SubmissionsListClient } from "./submissions-list-client";
 
 type SubmissionsPageProps = {
   searchParams: Promise<{ status?: string }>;
 };
 
-const MODE_LABEL: Record<string, string> = {
-  url: "Single Set URL",
-  artist: "Artist Discovery",
-  curated_artist: "Curated Artist",
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  queued: "#555",
-  running: "#7a7a3a",
-  partial: "#7a5a3a",
-  completed: "#3a7a3a",
-  failed: "#8a3a3a",
-  cancelled: "#555",
-};
-
 export default async function SubmissionsPage({ searchParams }: SubmissionsPageProps) {
   const actor = await requireSessionActor("/submissions");
   const { status: filterStatus } = await searchParams;
-
-  const allSubmissions = await listSubmissionsForActor(actor) as unknown as SubmissionRow[];
-
-  const submissions =
-    !filterStatus || filterStatus === "all"
-      ? allSubmissions
-      : filterStatus === "active"
-        ? allSubmissions.filter((s) => s.status === "queued" || s.status === "running")
-        : allSubmissions.filter((s) => s.status === filterStatus);
+  const activeTab = normalizePublicSubmissionFilter(filterStatus) as PublicSubmissionFilter;
+  const submissions = await listPublicSubmissionsForActor(actor, activeTab);
 
   const tabs = [
     { label: "All", value: "all" },
     { label: "Active", value: "active" },
+    { label: "Partial", value: "partial" },
     { label: "Complete", value: "completed" },
     { label: "Failed", value: "failed" },
+    { label: "Cancelled", value: "cancelled" },
   ];
-
-  const activeTab = filterStatus ?? "all";
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#ccc", fontFamily: "monospace" }}>
@@ -95,43 +69,9 @@ export default async function SubmissionsPage({ searchParams }: SubmissionsPageP
           </div>
         </div>
 
-        {/* Table header */}
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 80px", gap: 12, padding: "0 0 8px", borderBottom: "1px solid #1a1a1a", fontSize: 9, color: "#444", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          <span>Submission</span>
-          <span>Mode</span>
-          <span>Sets</span>
-          <span>Submitted</span>
-          <span style={{ textAlign: "right" }}>Status</span>
+        <div style={{ overflowX: "auto" }}>
+          <SubmissionsListClient filterStatus={activeTab} initialSubmissions={submissions} />
         </div>
-
-        {submissions.length === 0 ? (
-          <div style={{ padding: "40px 0", color: "#444", fontSize: 11, textAlign: "center" }}>
-            No submissions yet.
-          </div>
-        ) : (
-          submissions.map((submission) => (
-            <Link
-              key={submission.id}
-              href={`/submissions/${submission.id}`}
-              style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 80px", gap: 12, padding: "12px 0", borderBottom: "1px solid #0f0f0f", alignItems: "center", textDecoration: "none", color: "inherit" }}
-            >
-              <div>
-                <div style={{ color: "#ccc", fontSize: 11 }}>
-                  {submission.artistName ?? submission.sourceUrl ?? submission.id}
-                </div>
-                <div style={{ color: "#333", fontSize: 9, marginTop: 2 }}>{submission.id.slice(0, 8)}…</div>
-              </div>
-              <span style={{ color: "#666", fontSize: 10 }}>{MODE_LABEL[submission.mode] ?? submission.mode}</span>
-              <span style={{ color: "#666", fontSize: 10 }}>—</span>
-              <span style={{ color: "#555", fontSize: 10 }}>{formatTimestamp(submission.createdAt)}</span>
-              <div style={{ textAlign: "right" }}>
-                <span style={{ fontSize: 9, letterSpacing: "0.08em", padding: "2px 8px", borderRadius: 3, border: "1px solid", color: STATUS_COLOR[submission.status] ?? "#555", borderColor: STATUS_COLOR[submission.status] ?? "#555" }}>
-                  {submission.status}
-                </span>
-              </div>
-            </Link>
-          ))
-        )}
       </div>
     </div>
   );

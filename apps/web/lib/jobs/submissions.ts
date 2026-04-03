@@ -15,7 +15,12 @@ import {
 } from "@/lib/db/schema";
 import type { SessionActor } from "@/lib/auth/session";
 import { createWorkerEvent } from "@/lib/jobs/internal";
-import { activeSetRunStatuses, summarizeSetRunCounts } from "@/lib/jobs/status";
+import { setRunRetryAttemptLimit } from "./policy";
+import {
+  activeSetRunStatuses,
+  isRetryableSetRun,
+  summarizeSetRunCounts,
+} from "@/lib/jobs/status";
 
 const db = getDb();
 
@@ -344,64 +349,95 @@ export const getDashboardSummary = async (actor: SessionActor) => {
   };
 };
 
-export const markSubmissionCancelled = async (submissionId: string) => {
-  const now = new Date();
-
-  await db
-    .update(submissions)
-    .set({
-      status: "cancelling",
-      cancelRequestedAt: now,
-      updatedAt: now,
-    })
-    .where(eq(submissions.id, submissionId));
-
-  await db
-    .update(setRuns)
-    .set({
-      cancelRequestedAt: now,
-      status: sql`case when ${setRuns.status} = 'queued' then 'cancelled' else 'cancelling' end`,
-      updatedAt: now,
-      completedAt: sql`case when ${setRuns.status} = 'queued' then now() else ${setRuns.completedAt} end`,
-    })
-    .where(
-      and(
-        eq(setRuns.submissionId, submissionId),
-        inArray(setRuns.status, ["queued", ...activeSetRunStatuses]),
-      ),
-    );
-
-  await createWorkerEvent({
-    submissionId,
-    eventType: "submission.cancel_requested",
-    message: "Cancellation requested",
-  });
+export type RetrySetRunsResult = {
+  targetRunIds: string[];
+  retriedRunIds: string[];
+  skippedExhaustedRunIds: string[];
+  skippedIneligibleRunIds: string[];
+  retriedCount: number;
+  skippedExhaustedCount: number;
+  skippedIneligibleCount: number;
+  nothingToRetry: boolean;
 };
 
-// Retries only the failed or cancelled set-runs within a submission.
-// Returns "nothing_to_retry" when all child runs have already completed successfully.
-export const retryFailedSetRuns = async (
-  submissionId: string,
-): Promise<"retried" | "nothing_to_retry"> => {
-  const now = new Date();
+export type CancelSetRunsResult = {
+  targetRunIds: string[];
+  cancelledRunIds: string[];
+  cancellingRunIds: string[];
+  skippedIneligibleRunIds: string[];
+  cancelledCount: number;
+  cancellingCount: number;
+  skippedIneligibleCount: number;
+  affectedCount: number;
+  nothingToCancel: boolean;
+};
 
-  const retryableRuns = await db
-    .select({ id: setRuns.id })
+export const getSubmissionSetRun = async (submissionId: string, setRunId: string) => {
+  const [run] = await db
+    .select()
+    .from(setRuns)
+    .where(and(eq(setRuns.submissionId, submissionId), eq(setRuns.id, setRunId)))
+    .limit(1);
+
+  return run ?? null;
+};
+
+const getSubmissionRuns = async (submissionId: string, setRunIds?: readonly string[]) => {
+  if (setRunIds && setRunIds.length === 0) {
+    return [];
+  }
+
+  return db
+    .select({
+      id: setRuns.id,
+      status: setRuns.status,
+      attemptCount: setRuns.attemptCount,
+    })
     .from(setRuns)
     .where(
       and(
         eq(setRuns.submissionId, submissionId),
-        inArray(setRuns.status, ["failed", "cancelled"]),
+        setRunIds ? inArray(setRuns.id, [...setRunIds]) : undefined,
       ),
     );
+};
 
-  if (retryableRuns.length === 0) {
-    return "nothing_to_retry";
+const retrySetRunsInternal = async (
+  submissionId: string,
+  setRunIds?: readonly string[],
+): Promise<RetrySetRunsResult> => {
+  const now = new Date();
+  const runs = await getSubmissionRuns(submissionId, setRunIds);
+
+  const retriedRunIds = runs
+    .filter((run) => isRetryableSetRun(run.status, run.attemptCount))
+    .map((run) => run.id);
+  const skippedExhaustedRunIds = runs
+    .filter(
+      (run) =>
+        (run.status === "failed" || run.status === "cancelled") &&
+        run.attemptCount >= setRunRetryAttemptLimit,
+    )
+    .map((run) => run.id);
+  const skippedIneligibleRunIds = runs
+    .filter((run) => !retriedRunIds.includes(run.id) && !skippedExhaustedRunIds.includes(run.id))
+    .map((run) => run.id);
+
+  if (retriedRunIds.length === 0) {
+    return {
+      targetRunIds: runs.map((run) => run.id),
+      retriedRunIds,
+      skippedExhaustedRunIds,
+      skippedIneligibleRunIds,
+      retriedCount: 0,
+      skippedExhaustedCount: skippedExhaustedRunIds.length,
+      skippedIneligibleCount: skippedIneligibleRunIds.length,
+      nothingToRetry: true,
+    };
   }
 
-  const ids = retryableRuns.map((row) => row.id);
-  await db.delete(segmentHits).where(inArray(segmentHits.setRunId, ids));
-  await db.delete(setRunLeases).where(inArray(setRunLeases.setRunId, ids));
+  await db.delete(segmentHits).where(inArray(segmentHits.setRunId, retriedRunIds));
+  await db.delete(setRunLeases).where(inArray(setRunLeases.setRunId, retriedRunIds));
 
   await db
     .update(setRuns)
@@ -414,17 +450,148 @@ export const retryFailedSetRuns = async (
       heartbeatAt: null,
       updatedAt: now,
     })
-    .where(inArray(setRuns.id, ids));
+    .where(inArray(setRuns.id, retriedRunIds));
 
-  // Recalculate submission status now that some runs are back to queued.
   await syncSubmissionStatusFromRuns(submissionId);
 
   await createWorkerEvent({
     submissionId,
-    eventType: "submission.retried",
-    message: `${retryableRuns.length} failed/cancelled run(s) returned to queue`,
-    details: { retryedRunIds: ids },
+    setRunId: retriedRunIds.length === 1 ? retriedRunIds[0] : undefined,
+    eventType: retriedRunIds.length === 1 ? "set_run.retried" : "submission.retried",
+    message:
+      retriedRunIds.length === 1
+        ? "Run returned to queue"
+        : `${retriedRunIds.length} failed/cancelled run(s) returned to queue`,
+    details: {
+      retriedRunIds,
+      skippedExhaustedRunIds,
+      skippedIneligibleRunIds,
+    },
   });
 
-  return "retried";
+  return {
+    targetRunIds: runs.map((run) => run.id),
+    retriedRunIds,
+    skippedExhaustedRunIds,
+    skippedIneligibleRunIds,
+    retriedCount: retriedRunIds.length,
+    skippedExhaustedCount: skippedExhaustedRunIds.length,
+    skippedIneligibleCount: skippedIneligibleRunIds.length,
+    nothingToRetry: false,
+  };
 };
+
+const cancelSetRunsInternal = async (
+  submissionId: string,
+  setRunIds?: readonly string[],
+  options?: { submissionScope?: boolean },
+): Promise<CancelSetRunsResult> => {
+  const now = new Date();
+  const runs = await getSubmissionRuns(submissionId, setRunIds);
+
+  const cancelledRunIds = runs
+    .filter((run) => run.status === "queued")
+    .map((run) => run.id);
+  const cancellingRunIds = runs
+    .filter((run) => activeSetRunStatuses.includes(run.status as (typeof activeSetRunStatuses)[number]))
+    .map((run) => run.id);
+  const skippedIneligibleRunIds = runs
+    .filter((run) => !cancelledRunIds.includes(run.id) && !cancellingRunIds.includes(run.id))
+    .map((run) => run.id);
+
+  if (cancelledRunIds.length === 0 && cancellingRunIds.length === 0) {
+    return {
+      targetRunIds: runs.map((run) => run.id),
+      cancelledRunIds,
+      cancellingRunIds,
+      skippedIneligibleRunIds,
+      cancelledCount: 0,
+      cancellingCount: 0,
+      skippedIneligibleCount: skippedIneligibleRunIds.length,
+      affectedCount: 0,
+      nothingToCancel: true,
+    };
+  }
+
+  if (cancelledRunIds.length > 0) {
+    await db
+      .update(setRuns)
+      .set({
+        cancelRequestedAt: now,
+        status: "cancelled",
+        stage: "cancelled",
+        updatedAt: now,
+        completedAt: now,
+      })
+      .where(inArray(setRuns.id, cancelledRunIds));
+  }
+
+  if (cancellingRunIds.length > 0) {
+    await db
+      .update(setRuns)
+      .set({
+        cancelRequestedAt: now,
+        status: "cancelling",
+        updatedAt: now,
+      })
+      .where(inArray(setRuns.id, cancellingRunIds));
+  }
+
+  if (options?.submissionScope) {
+    await db
+      .update(submissions)
+      .set({
+        status: "cancelling",
+        cancelRequestedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(submissions.id, submissionId));
+  } else {
+    await syncSubmissionStatusFromRuns(submissionId);
+  }
+
+  await createWorkerEvent({
+    submissionId,
+    setRunId:
+      cancelledRunIds.length + cancellingRunIds.length === 1
+        ? cancelledRunIds[0] ?? cancellingRunIds[0]
+        : undefined,
+    eventType:
+      options?.submissionScope || cancelledRunIds.length + cancellingRunIds.length > 1
+        ? "submission.cancel_requested"
+        : "set_run.cancel_requested",
+    message:
+      options?.submissionScope || cancelledRunIds.length + cancellingRunIds.length > 1
+        ? "Cancellation requested"
+        : "Run cancellation requested",
+    details: {
+      cancelledRunIds,
+      cancellingRunIds,
+      skippedIneligibleRunIds,
+    },
+  });
+
+  return {
+    targetRunIds: runs.map((run) => run.id),
+    cancelledRunIds,
+    cancellingRunIds,
+    skippedIneligibleRunIds,
+    cancelledCount: cancelledRunIds.length,
+    cancellingCount: cancellingRunIds.length,
+    skippedIneligibleCount: skippedIneligibleRunIds.length,
+    affectedCount: cancelledRunIds.length + cancellingRunIds.length,
+    nothingToCancel: false,
+  };
+};
+
+export const markSubmissionCancelled = async (submissionId: string) =>
+  cancelSetRunsInternal(submissionId, undefined, { submissionScope: true });
+
+export const cancelSubmissionSetRun = async (submissionId: string, setRunId: string) =>
+  cancelSetRunsInternal(submissionId, [setRunId]);
+
+export const retryFailedSetRuns = async (submissionId: string): Promise<RetrySetRunsResult> =>
+  retrySetRunsInternal(submissionId);
+
+export const retrySubmissionSetRun = async (submissionId: string, setRunId: string) =>
+  retrySetRunsInternal(submissionId, [setRunId]);

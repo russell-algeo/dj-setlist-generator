@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getRequestActor } from "@/lib/auth/session";
 import { isJsonRequest, readRequestBody } from "@/lib/http/request-body";
+import { listPublicSubmissionsForActor } from "@/lib/jobs/public.server";
 import { createSubmission, parseSubmissionInput } from "@/lib/jobs/submissions";
 import { dispatchPendingWork } from "@/lib/jobs/dispatch";
 
@@ -17,6 +18,21 @@ const parseSourceUrls = (value: FormDataEntryValue | FormDataEntryValue[] | unde
     .map((entry) => entry.trim())
     .filter(Boolean);
 };
+
+export async function GET(request: Request) {
+  const actor = await getRequestActor(request);
+  if (!actor) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const submissions = await listPublicSubmissionsForActor(
+    actor,
+    url.searchParams.get("status") ?? undefined,
+  );
+
+  return NextResponse.json({ submissions });
+}
 
 export async function POST(request: Request) {
   const actor = await getRequestActor(request);

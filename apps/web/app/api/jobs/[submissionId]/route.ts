@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { canAccessSubmission, getRequestActor } from "@/lib/auth/session";
-import { getSubmissionDetail } from "@/lib/jobs/submissions";
+import { getPublicSubmissionDetail } from "@/lib/jobs/public.server";
 
 type Params = {
   params: Promise<{
@@ -21,7 +21,7 @@ export async function GET(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const detail = await getSubmissionDetail(submissionId);
+  const detail = await getPublicSubmissionDetail(submissionId);
   if (!detail) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
