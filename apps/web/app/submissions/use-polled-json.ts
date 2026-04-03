@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useEffectEvent, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 
 type UsePolledJsonOptions<T> = {
   initialData: T;
@@ -23,6 +23,11 @@ export const usePolledJson = <T,>({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(() => new Date().toISOString());
+  const urlRef = useRef(url);
+  const parseResponseRef = useRef(parseResponse);
+
+  urlRef.current = url;
+  parseResponseRef.current = parseResponse;
 
   useEffect(() => {
     setData(initialData);
@@ -30,7 +35,7 @@ export const usePolledJson = <T,>({
     setLastUpdatedAt(new Date().toISOString());
   }, [initialData, url]);
 
-  const refreshNow = useEffectEvent(async () => {
+  const refreshNow = useCallback(async () => {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
       return;
     }
@@ -38,7 +43,7 @@ export const usePolledJson = <T,>({
     setIsRefreshing(true);
 
     try {
-      const response = await fetch(url, {
+      const response = await fetch(urlRef.current, {
         cache: "no-store",
         headers: {
           accept: "application/json",
@@ -50,7 +55,7 @@ export const usePolledJson = <T,>({
         throw new Error((body as { error?: string }).error ?? `HTTP ${response.status}`);
       }
 
-      const next = await parseResponse(response);
+      const next = await parseResponseRef.current(response);
       startTransition(() => {
         setData(next);
         setRefreshError(null);
@@ -61,7 +66,7 @@ export const usePolledJson = <T,>({
     } finally {
       setIsRefreshing(false);
     }
-  });
+  }, []);
 
   useEffect(() => {
     if (!shouldPoll(data)) {
