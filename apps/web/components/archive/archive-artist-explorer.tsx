@@ -18,6 +18,7 @@ import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveSetCard } from "@/components/archive/archive-set-card";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
+import { buildArtistHeroRail, pickFirstImageUrl } from "@/lib/archive/artist-visuals";
 import { ARCHIVE_SET_LIBRARY_PAGE_SIZE } from "@/lib/archive/constants";
 import type {
   ArchiveArtistAtlasTrack,
@@ -266,43 +267,6 @@ const splitSetAtlasHeadingTwoLines = (title: string) => {
 
 const getBetterConfidence = (left: ArchiveConfidence, right: ArchiveConfidence) =>
   CONFIDENCE_RANK[right] > CONFIDENCE_RANK[left] ? right : left;
-
-const buildHeroRail = (sets: SetCardModel[]) => {
-  const uniqueSets = sets.filter(
-    (setItem, index, value) => value.findIndex((candidate) => candidate.id === setItem.id) === index,
-  );
-
-  if (uniqueSets.length === 0) {
-    return [];
-  }
-
-  const prioritized = uniqueSets.filter((setItem) => Boolean(setItem.heroImageUrl));
-  const chosen: SetCardModel[] = [];
-
-  for (const setItem of prioritized) {
-    if (chosen.length >= 2) {
-      break;
-    }
-
-    chosen.push(setItem);
-  }
-
-  for (const setItem of uniqueSets) {
-    if (chosen.length >= 2) {
-      break;
-    }
-
-    if (!chosen.some((candidate) => candidate.id === setItem.id)) {
-      chosen.push(setItem);
-    }
-  }
-
-  if (chosen.length === 1) {
-    return [...chosen];
-  }
-
-  return [...chosen, ...chosen];
-};
 
 const buildMiniTimeline = (setItem: SetCardModel) => {
   if (setItem.duration <= 0 || setItem.tracks.length === 0) {
@@ -564,11 +528,12 @@ export function ArchiveArtistExplorer({
   const recurringCards = buildRecurringCards(artist);
   const setCards = buildSetCards(artist);
   const atlasTracks = buildAtlasTracks(artist);
-  const heroRail = buildHeroRail(setCards);
-  const heroVisualImageUrl =
-    artist.imageUrl ??
-    heroRail.find((setItem) => Boolean(setItem.heroImageUrl))?.heroImageUrl ??
-    artist.heroImageUrl;
+  const heroRail = buildArtistHeroRail(setCards);
+  const heroVisualImageUrl = pickFirstImageUrl([
+    artist.imageUrl,
+    artist.heroImageUrl,
+    ...heroRail.map((setItem) => setItem.heroImageUrl),
+  ]);
 
   const recurringThresholdValues = getRecurringThresholdValues(recurringCards);
   const [recMin, setRecMin] = useState(recurringThresholdValues[0] ?? 1);

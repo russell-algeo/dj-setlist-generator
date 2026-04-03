@@ -1,3 +1,5 @@
+import { buildYouTubeThumbnail } from "./utils";
+
 const SET_SPECIFIC_IMAGE_KEYS = [
   "thumbnail_url",
   "thumbnail",
@@ -51,4 +53,28 @@ export const resolveSetSpecificImageUrl = (mixInfo: Record<string, unknown>) => 
   }
 
   return null;
+};
+
+export const resolveSetVisualImageUrl = (value: {
+  imageUrl: string | null | undefined;
+  metadata?: unknown;
+  sourcePlatform: string | null | undefined;
+  sourceUrl: string | null | undefined;
+}) => {
+  const setMetadata =
+    value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata)
+      ? (value.metadata as Record<string, unknown>)
+      : {};
+  const mixInfo =
+    setMetadata.mixInfo && typeof setMetadata.mixInfo === "object" && !Array.isArray(setMetadata.mixInfo)
+      ? (setMetadata.mixInfo as Record<string, unknown>)
+      : {};
+  const persistedImage =
+    value.imageUrl && !isArtistImageDuplicate(mixInfo, value.imageUrl) ? value.imageUrl : null;
+
+  return (
+    resolveSetSpecificImageUrl(mixInfo) ??
+    persistedImage ??
+    (value.sourcePlatform === "youtube" ? buildYouTubeThumbnail(value.sourceUrl ?? null) : null)
+  );
 };

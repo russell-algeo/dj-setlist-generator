@@ -78,6 +78,13 @@
       "when": 1775238000000,
       "tag": "0011_submission_artist_aliases",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1775242826000,
+      "tag": "0012_fix_archive_home_set_library_youtube_thumbnail",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isArtistImageDuplicate,
   resolveSetSpecificImageUrl,
+  resolveSetVisualImageUrl,
 } from "./set-images";
 
 describe("resolveSetSpecificImageUrl", () => {
@@ -56,5 +57,35 @@ describe("isArtistImageDuplicate", () => {
         "",
       ),
     ).toBe(false);
+  });
+});
+
+describe("resolveSetVisualImageUrl", () => {
+  it("falls back to a YouTube thumbnail when no persisted image exists", () => {
+    expect(
+      resolveSetVisualImageUrl({
+        imageUrl: null,
+        metadata: {
+          mixInfo: {},
+        },
+        sourcePlatform: "youtube",
+        sourceUrl: "https://www.youtube.com/watch?v=2bf6M-XM_fI",
+      }),
+    ).toBe("https://img.youtube.com/vi/2bf6M-XM_fI/hqdefault.jpg");
+  });
+
+  it("prefers a set-specific image over the persisted image", () => {
+    expect(
+      resolveSetVisualImageUrl({
+        imageUrl: "https://example.com/persisted.jpg",
+        metadata: {
+          mixInfo: {
+            thumbnail_url: "https://example.com/thumbnail.jpg",
+          },
+        },
+        sourcePlatform: "soundcloud",
+        sourceUrl: "https://soundcloud.com/example/set",
+      }),
+    ).toBe("https://example.com/thumbnail.jpg");
   });
 });

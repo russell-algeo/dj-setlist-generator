@@ -40,15 +40,14 @@ import type {
   ArchiveSetTimelineSegment,
   ArchiveSetTrack,
 } from "@/lib/archive/types";
+import { pickFirstImageUrl } from "@/lib/archive/artist-visuals";
 import {
-  isArtistImageDuplicate,
-  resolveSetSpecificImageUrl,
+  resolveSetVisualImageUrl,
 } from "@/lib/archive/set-images";
 import {
   asRecord,
   buildArchiveEmbed,
   buildTrackKey,
-  buildYouTubeThumbnail,
   formatCompactDuration,
   formatDuration,
   getNumber,
@@ -228,24 +227,6 @@ const buildJourneyPoints = (tracks: ArchiveSetTrack[]): ArchiveJourneyPoint[] =>
       dance: track.dance,
     }));
 
-const resolveDirectSetImage = (value: {
-  imageUrl: string | null | undefined;
-  metadata?: unknown;
-  sourcePlatform: string | null | undefined;
-  sourceUrl: string | null | undefined;
-}) => {
-  const setMetadata = asRecord(value.metadata);
-  const mixInfo = asRecord(setMetadata.mixInfo);
-  const persistedImage =
-    value.imageUrl && !isArtistImageDuplicate(mixInfo, value.imageUrl) ? value.imageUrl : null;
-
-  return (
-    resolveSetSpecificImageUrl(mixInfo) ??
-    persistedImage ??
-    (value.sourcePlatform === "youtube" ? buildYouTubeThumbnail(value.sourceUrl ?? null) : null)
-  );
-};
-
 const getArchiveArtistPayloadSize = (artist: ArchiveArtistSummary) =>
   Buffer.byteLength(JSON.stringify(artist), "utf8");
 
@@ -305,7 +286,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
     getNumber(mixInfo.duration) ??
     getNumber(setRecord.durationSeconds) ??
     0;
-  const setImageSource = resolveDirectSetImage(setRecord);
+  const setImageSource = resolveSetVisualImageUrl(setRecord);
   const artistImageSource =
     preferredArtists.find((artist) => artist.imageUrl)?.imageUrl ??
     getString(mixInfo.artist_profile_image) ??
@@ -336,7 +317,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
 
     relatedSetFallbackImage =
       relatedFallbackSets
-        .map((fallbackSet) => resolveDirectSetImage(fallbackSet))
+        .map((fallbackSet) => resolveSetVisualImageUrl(fallbackSet))
         .find((image): image is string => Boolean(image)) ??
       null;
   }
@@ -358,7 +339,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
       .orderBy(sql`random()`)
       .limit(1);
 
-    archiveFallbackImage = fallbackSet ? resolveDirectSetImage(fallbackSet) : null;
+    archiveFallbackImage = fallbackSet ? resolveSetVisualImageUrl(fallbackSet) : null;
   }
 
   const heroImageUrl =
@@ -383,7 +364,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
       slug: artist.slug,
     })),
     heroImageUrl,
-    thumbnailUrl: resolveDirectSetImage(setRecord),
+    thumbnailUrl: resolveSetVisualImageUrl(setRecord),
     sourcePlatform: setRecord.sourcePlatform,
     sourceUrl: setRecord.sourceUrl,
     embedUrl: buildArchiveEmbed({
@@ -545,6 +526,7 @@ const getArtistSummaryUncached = async (
     : [];
 
   const rowsBySet = new Map<string, ArchiveSetTrack[]>();
+  const setImageUrlById = new Map(setRows.map((setRow) => [setRow.id, resolveSetVisualImageUrl(setRow)]));
   const recurringMap = new Map<
     string,
     {
@@ -658,7 +640,7 @@ const getArtistSummaryUncached = async (
       slug: setRow.slug,
       title: setRow.title,
       sourceUrl: setRow.sourceUrl,
-      thumbnailUrl: resolveDirectSetImage(setRow),
+      thumbnailUrl: setImageUrlById.get(setRow.id) ?? null,
       duration: Number(setRow.durationSeconds ?? 0),
       durationFmt: formatCompactDuration(Number(setRow.durationSeconds ?? 0)),
       totalTracks: setTracks.length,
@@ -745,9 +727,10 @@ const getArtistSummaryUncached = async (
     slug: artistRecord.slug,
     name: artistRecord.name,
     imageUrl: artistRecord.imageUrl,
-    heroImageUrl:
-      artistRecord.imageUrl ??
-      (latestSet ? resolveDirectSetImage(latestSet) : null),
+    heroImageUrl: pickFirstImageUrl([
+      artistRecord.imageUrl,
+      ...setRows.map((setRow) => setImageUrlById.get(setRow.id) ?? null),
+    ]),
     generatedAt: latestSet?.updatedAt?.toISOString() ?? artistRecord.updatedAt?.toISOString() ?? null,
     stats: {
       setsAnalyzed: setRows.length,
@@ -815,7 +798,7 @@ const getArchiveArtistSummaryCacheRecord = async (
         artist,
       } satisfies ArchiveArtistSummaryCacheRecord;
     },
-    ["archive-artist-summary-v3", slug],
+    ["archive-artist-summary-v4", slug],
     { tags: [ARCHIVE_TAGS.artist(slug)] },
   )();
 
