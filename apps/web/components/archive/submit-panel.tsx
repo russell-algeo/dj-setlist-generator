@@ -184,7 +184,7 @@ export function SubmitPanel() {
           onMouseLeave={() => setTooltipVisible(false)}
           type="button"
         >
-          {`+ Submit ${!isAuthenticated || !open ? "▾" : "▴"}`}
+          + Submit
         </button>
         {tooltipVisible && !isAuthenticated && (
           <div className={styles.tooltip}>You must log in to submit work</div>

@@ -14,10 +14,17 @@ import {
 } from "react";
 
 import { buildSetHref } from "@/components/archive/archive-hrefs";
+import {
+  ArchiveEvidenceTrackCard,
+  type ArchiveEvidenceTrackCardSourceGroup,
+} from "@/components/archive/archive-evidence-track-card";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveSetCard } from "@/components/archive/archive-set-card";
+import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { ArchiveTaxonomyPanel } from "@/components/archive/archive-taxonomy-panel";
 import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
+import { buildArtistSpotifyExportCounts } from "@/lib/archive/spotify-export";
 import { buildArtistHeroRail, pickFirstImageUrl } from "@/lib/archive/artist-visuals";
 import { ARCHIVE_SET_LIBRARY_PAGE_SIZE } from "@/lib/archive/constants";
 import type {
@@ -95,6 +102,7 @@ const FOCUS_TITLE_NBSP = "\u00a0";
 const HERO_TITLE_FIT_VAR = "--artist-hero-title-fit-size";
 const HERO_TITLE_MIN_SIZE = 24;
 const HERO_TITLE_SAFE_PADDING = 6;
+const OPEN_EVIDENCE_ACTION_ROW_HEIGHT = 36;
 const CONFIDENCE_RANK: Record<ArchiveConfidence, number> = {
   HIGH: 4,
   MEDIUM: 3,
@@ -142,6 +150,27 @@ const toggleSelectedSetIds = (currentSelectedIds: string[], setId: string) => {
 
   return [...currentSelectedIds, setId];
 };
+
+const buildArtistTrackSourceGroups = (
+  trackKey: string,
+  setLinks: Array<{
+    href?: string | null;
+    label: string;
+  }>,
+): ArchiveEvidenceTrackCardSourceGroup[] =>
+  setLinks.length > 0
+    ? [
+        {
+          emptyLabel: "No set links available.",
+          id: `${trackKey}-sets`,
+          links: setLinks.map((link, index) => ({
+            href: link.href,
+            id: `${trackKey}-set-${index}`,
+            label: link.label,
+          })),
+        },
+      ]
+    : [];
 
 const formatMatch = (rate: number | null) => `${Math.round(rate ?? 0)}% match`;
 
@@ -267,6 +296,21 @@ const splitSetAtlasHeadingTwoLines = (title: string) => {
 
 const getBetterConfidence = (left: ArchiveConfidence, right: ArchiveConfidence) =>
   CONFIDENCE_RANK[right] > CONFIDENCE_RANK[left] ? right : left;
+
+const getPrimaryConfidenceFromCounts = (
+  confidenceCounts: Record<ArchiveConfidence, number>,
+): ArchiveConfidence =>
+  (Object.keys(CONFIDENCE_RANK) as ArchiveConfidence[]).reduce((best, candidate) => {
+    const bestCount = Number(confidenceCounts[best] ?? 0);
+    const candidateCount = Number(confidenceCounts[candidate] ?? 0);
+    if (candidateCount > bestCount) {
+      return candidate;
+    }
+    if (candidateCount === bestCount) {
+      return getBetterConfidence(best, candidate);
+    }
+    return best;
+  }, "UNCERTAIN");
 
 const buildMiniTimeline = (setItem: SetCardModel) => {
   if (setItem.duration <= 0 || setItem.tracks.length === 0) {
@@ -465,16 +509,6 @@ const getRecurringThresholdValues = (cards: RecurringCardModel[]) =>
 const getAtlasThresholdValues = (rows: AtlasRow[]) =>
   normalizeThresholdValues(rows.map((row) => row.count));
 
-const renderSpotifyEmbed = (trackId: string) => (
-  <div className="spotify-embed">
-    <iframe
-      allow="autoplay; clipboard-write; encrypted-media"
-      src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
-      title="Spotify embed"
-    />
-  </div>
-);
-
 const buildAtlasOpenCardStyle = (
   card: HTMLElement | null,
   panel: "embed" | "source",
@@ -491,12 +525,15 @@ const buildAtlasOpenCardStyle = (
   if (cardHeight > 0) {
     const targetPanelHeight = 91.2;
     const controls = actionsWrap ?? body;
-    const actionsHeight = controls ? Math.max(28, Math.round(controls.getBoundingClientRect().height)) : 32;
+    const actionsHeight = controls
+      ? Math.max(OPEN_EVIDENCE_ACTION_ROW_HEIGHT, Math.round(controls.getBoundingClientRect().height))
+      : OPEN_EVIDENCE_ACTION_ROW_HEIGHT;
     const bodyHeight = Math.min(cardHeight, actionsHeight + targetPanelHeight);
     const artHeight = Math.max(0, cardHeight - bodyHeight);
     const panelHeight = Math.max(0, bodyHeight - actionsHeight);
 
     return {
+      "--open-action-row-height": `${actionsHeight}px`,
       "--open-art-height": `${Math.max(0, artHeight)}px`,
       "--open-body-height": `${Math.max(0, bodyHeight)}px`,
       "--open-card-height": `${cardHeight}px`,
@@ -516,18 +553,23 @@ const buildAtlasOpenCardStyle = (
 export function ArchiveArtistExplorer({
   artist,
   initialQuery,
+  scope,
 }: {
   artist: ArchiveArtistSummary;
   initialQuery: string;
+  scope: "global" | "mine";
 }) {
+  const heroMainRef = useRef<HTMLDivElement | null>(null);
   const heroVisualRef = useRef<HTMLDivElement | null>(null);
   const heroTitleRef = useRef<HTMLHeadingElement | null>(null);
+  const heroSideRef = useRef<HTMLElement | null>(null);
   const heroRailViewportRef = useRef<HTMLDivElement | null>(null);
   const heroRailTrackRef = useRef<HTMLDivElement | null>(null);
   const atlasRailRef = useRef<HTMLDivElement | null>(null);
   const recurringCards = buildRecurringCards(artist);
   const setCards = buildSetCards(artist);
   const atlasTracks = buildAtlasTracks(artist);
+  const spotifyExportCounts = useMemo(() => buildArtistSpotifyExportCounts(artist), [artist]);
   const heroRail = buildArtistHeroRail(setCards);
   const heroVisualImageUrl = pickFirstImageUrl([
     artist.imageUrl,
@@ -542,6 +584,7 @@ export function ArchiveArtistExplorer({
   const deferredRecSearch = useDeferredValue(recSearch);
   const [openRecurringSources, setOpenRecurringSources] = useState<string[]>([]);
   const [openRecurringSpotify, setOpenRecurringSpotify] = useState<string[]>([]);
+  const [recurringCardStyles, setRecurringCardStyles] = useState<Record<string, TrackCardInlineStyle>>({});
 
   const [atlasScope, setAtlasScope] = useState<AtlasScope>("set");
   const [atlasSelectedSetIds, setAtlasSelectedSetIds] = useState<string[]>(
@@ -718,6 +761,61 @@ export function ArchiveArtistExplorer({
     };
   }, [artist.name, heroVisualImageUrl]);
 
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const heroMain = heroMainRef.current;
+    const heroSide = heroSideRef.current;
+    if (!heroMain || !heroSide) {
+      return;
+    }
+
+    let frame = 0;
+
+    const syncHeroSideHeight = () => {
+      heroSide.style.removeProperty("height");
+      if (window.matchMedia("(max-width: 1320px)").matches) {
+        return;
+      }
+
+      const nextHeight = Math.round(heroMain.getBoundingClientRect().height);
+      if (nextHeight > 0) {
+        heroSide.style.height = `${nextHeight}px`;
+      }
+    };
+
+    const scheduleSync = () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        syncHeroSideHeight();
+      });
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => scheduleSync());
+    resizeObserver?.observe(heroMain);
+    window.addEventListener("resize", scheduleSync);
+    void document.fonts?.ready.then(() => {
+      scheduleSync();
+    });
+    scheduleSync();
+
+    return () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+      heroSide.style.removeProperty("height");
+    };
+  }, [artist.name, heroRail.length]);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -817,6 +915,66 @@ export function ArchiveArtistExplorer({
       ...current,
       [trackKey]: style,
     }));
+  };
+
+  const clearRecurringCardStyle = (trackKey: string) => {
+    setRecurringCardStyles((current) => {
+      if (!current[trackKey]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[trackKey];
+      return next;
+    });
+  };
+
+  const setRecurringCardStyle = (trackKey: string, style: TrackCardInlineStyle | null) => {
+    if (!style) {
+      clearRecurringCardStyle(trackKey);
+      return;
+    }
+
+    setRecurringCardStyles((current) => ({
+      ...current,
+      [trackKey]: style,
+    }));
+  };
+
+  const handleRecurringSpotifyToggle = (
+    event: MouseEvent<HTMLButtonElement>,
+    trackKey: string,
+  ) => {
+    const card = event.currentTarget.closest(".track-card") as HTMLElement | null;
+    const isOpen = openRecurringSpotify.includes(trackKey);
+
+    if (isOpen) {
+      setOpenRecurringSpotify((current) => current.filter((value) => value !== trackKey));
+      clearRecurringCardStyle(trackKey);
+      return;
+    }
+
+    setRecurringCardStyle(trackKey, buildAtlasOpenCardStyle(card, "embed"));
+    setOpenRecurringSources((current) => current.filter((value) => value !== trackKey));
+    setOpenRecurringSpotify((current) => [...current.filter((value) => value !== trackKey), trackKey]);
+  };
+
+  const handleRecurringSourcesToggle = (
+    event: MouseEvent<HTMLButtonElement>,
+    trackKey: string,
+  ) => {
+    const card = event.currentTarget.closest(".track-card") as HTMLElement | null;
+    const isOpen = openRecurringSources.includes(trackKey);
+
+    if (isOpen) {
+      setOpenRecurringSources((current) => current.filter((value) => value !== trackKey));
+      clearRecurringCardStyle(trackKey);
+      return;
+    }
+
+    setRecurringCardStyle(trackKey, buildAtlasOpenCardStyle(card, "source"));
+    setOpenRecurringSpotify((current) => current.filter((value) => value !== trackKey));
+    setOpenRecurringSources((current) => [...current.filter((value) => value !== trackKey), trackKey]);
   };
 
   const handleAtlasSpotifyToggle = (
@@ -1005,25 +1163,20 @@ export function ArchiveArtistExplorer({
     effectiveAtlasSelectedIds.length === 1
       ? setCards.find((setItem) => setItem.id === effectiveAtlasSelectedIds[0]) ?? null
       : null;
+  const allVisibleAtlasSetIds = visibleAtlasSetCards.map((setItem) => setItem.id);
+  const allVisibleAtlasSetsSelected =
+    allVisibleAtlasSetIds.length > 0 &&
+    allVisibleAtlasSetIds.every((setId) => atlasSelectedSetIds.includes(setId));
+  const clearAtlasSelectionId = effectiveAtlasSelectedIds[0] ?? visibleAtlasSetCards[0]?.id ?? null;
   const focusHeading =
-    atlasScope === "artist"
-      ? "Artist Wide Scope"
-      : effectiveAtlasSelectedIds.length > 1
-        ? `${effectiveAtlasSelectedIds.length} Sets Selected`
-        : selectedAtlasSet?.title ?? "No Set Selected";
+    effectiveAtlasSelectedIds.length > 1
+      ? `${effectiveAtlasSelectedIds.length} Sets Selected`
+      : selectedAtlasSet?.title ?? "No Set Selected";
   const focusHeadingLayout = splitSetAtlasHeadingTwoLines(focusHeading);
   const focusSummary =
-    atlasScope === "artist"
-      ? `${visibleAtlasSetCards.length} sets selected in artist-wide scope.`
-      : effectiveAtlasSelectedIds.length <= 1
-        ? "Single set focus. Select another set card to pivot taxonomy."
-        : `${effectiveAtlasSelectedIds.length} sets in scope. ${atlasCompareMode === "intersection" ? "Intersection" : "Union"} mode active.`;
-  const taxonomySummary =
-    atlasScope === "artist"
-      ? `${allScopedAtlasTracks.length} detections across ${visibleAtlasSetCards.length} sets`
-      : effectiveAtlasSelectedIds.length <= 1
-        ? `${selectedAtlasSet?.title ?? "No Set Selected"} | ${selectedAtlasSet?.totalTracks ?? 0} tracks | ${Math.round(selectedAtlasSet?.recognitionRate ?? 0)}% match`
-        : `${effectiveAtlasSelectedIds.length} sets | ${allScopedAtlasTracks.length} detections in selected scope`;
+    effectiveAtlasSelectedIds.length <= 1
+      ? "Single set focus. Select all or add another set card to compare overlap."
+      : `${effectiveAtlasSelectedIds.length} sets in scope. ${atlasCompareMode === "intersection" ? "Intersection" : "Union"} mode active.`;
   const maxAtlasCount = atlasPageRows.length
     ? Math.max(...atlasPageRows.map((row) => row.count))
     : 1;
@@ -1126,7 +1279,7 @@ export function ArchiveArtistExplorer({
           <div className="section-inner">
             <div className="kicker">Artist Intelligence Deck</div>
             <div className="artist-hero">
-              <div className="artist-hero-main">
+              <div className="artist-hero-main" ref={heroMainRef}>
                 <div className="artist-hero-visual" ref={heroVisualRef}>
                   {heroVisualImageUrl ? (
                     <img alt={`${artist.name} artist image`} src={heroVisualImageUrl} />
@@ -1159,7 +1312,7 @@ export function ArchiveArtistExplorer({
                 </div>
               </div>
 
-              <aside className="artist-hero-side">
+              <aside className="artist-hero-side" ref={heroSideRef}>
                 <div className="artist-hero-side-viewport" ref={heroRailViewportRef}>
                   <div className="artist-hero-side-track" ref={heroRailTrackRef}>
                     {heroRail.map((setItem, index) => (
@@ -1194,53 +1347,56 @@ export function ArchiveArtistExplorer({
             </div>
 
             <div className="recurring-controls">
-              <div className="controls-row">
-                <div className="threshold-stepper">
-                  <button
-                    aria-label="Decrease recurring set threshold"
-                    className="btn threshold-arrow"
-                    disabled={recMin === recurringThresholdValues[0]}
-                    onClick={() => setRecMin((current) => stepThresholdValue(current, recurringThresholdValues, -1))}
-                    type="button"
-                  >
-                    ▼
-                  </button>
-                  <span className="btn threshold-value">{recMin}+ SETS</span>
-                  <button
-                    aria-label="Increase recurring set threshold"
-                    className="btn threshold-arrow"
-                    disabled={recMin === recurringThresholdValues[recurringThresholdValues.length - 1]}
-                    onClick={() => setRecMin((current) => stepThresholdValue(current, recurringThresholdValues, 1))}
-                    type="button"
-                  >
-                    ▲
-                  </button>
+              <div className="recurring-toolbar">
+                <input
+                  aria-label="Search recurring tracks"
+                  className={joinClasses("input", "recurring-search-input")}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    startTransition(() => {
+                      setRecSearch(next);
+                    });
+                  }}
+                  placeholder="Search recurring tracks..."
+                  type="search"
+                  value={recSearch}
+                />
+
+                <div className="controls-row recurring-filter-row">
+                  <div className="threshold-stepper">
+                    <button
+                      aria-label="Decrease recurring set threshold"
+                      className="btn threshold-arrow"
+                      disabled={recMin === recurringThresholdValues[0]}
+                      onClick={() => setRecMin((current) => stepThresholdValue(current, recurringThresholdValues, -1))}
+                      type="button"
+                    >
+                      ▼
+                    </button>
+                    <span className="btn threshold-value">{recMin}+ SETS</span>
+                    <button
+                      aria-label="Increase recurring set threshold"
+                      className="btn threshold-arrow"
+                      disabled={recMin === recurringThresholdValues[recurringThresholdValues.length - 1]}
+                      onClick={() => setRecMin((current) => stepThresholdValue(current, recurringThresholdValues, 1))}
+                      type="button"
+                    >
+                      ▲
+                    </button>
+                  </div>
+
+                  {TRACK_CONFIDENCE_LEVELS.map((filter) => (
+                    <button
+                      className={joinClasses("btn", recFilter === filter && "active")}
+                      key={filter}
+                      onClick={() => setRecFilter(filter)}
+                      type="button"
+                    >
+                      {filter === "all" ? "All" : filter.charAt(0) + filter.slice(1).toLowerCase()}
+                    </button>
+                  ))}
                 </div>
-
-                {TRACK_CONFIDENCE_LEVELS.map((filter) => (
-                  <button
-                    className={joinClasses("btn", recFilter === filter && "active")}
-                    key={filter}
-                    onClick={() => setRecFilter(filter)}
-                    type="button"
-                  >
-                    {filter === "all" ? "All confidence" : filter.charAt(0) + filter.slice(1).toLowerCase()}
-                  </button>
-                ))}
               </div>
-
-              <input
-                className="input"
-                onChange={(event) => {
-                  const next = event.target.value;
-                  startTransition(() => {
-                    setRecSearch(next);
-                  });
-                }}
-                placeholder="Search recurring tracks..."
-                type="search"
-                value={recSearch}
-              />
             </div>
 
             <div className="recurring-grid">
@@ -1253,80 +1409,31 @@ export function ArchiveArtistExplorer({
                 const spotifyOpen = openRecurringSpotify.includes(track.trackKey);
 
                 return (
-                  <article
-                    className={joinClasses(
-                      "track-card",
-                      "rec-card",
-                      sourcesOpen && "sources-open",
-                      spotifyOpen && "embed-open",
-                    )}
+                  <ArchiveEvidenceTrackCard
+                    albumArt={track.albumArt}
+                    cardClassName="rec-card"
+                    confidence={getPrimaryConfidenceFromCounts(track.confidenceCounts)}
+                    dataTrackKey={track.trackKey}
                     key={track.trackKey}
-                  >
-                    <div className="track-art">
-                      {track.albumArt ? <img alt={track.title} src={track.albumArt} loading="lazy" /> : <div className="track-art-fallback">No Art</div>}
-                    </div>
-                    <div className="track-body">
-                      <h4 className="track-title">
-                        {track.artist} - {track.title}
-                      </h4>
-                      <div className="actions">
-                        {track.spotifyTrackId ? (
-                          <button
-                            data-action="spotify-embed"
-                            data-closed-label="Spotify"
-                            data-open-label="Hide Spotify"
-                            data-track-id={track.spotifyTrackId}
-                            data-open={spotifyOpen}
-                            onClick={() => {
-                              setOpenRecurringSpotify((current) =>
-                                current.includes(track.trackKey)
-                                  ? current.filter((value) => value !== track.trackKey)
-                                  : [...current, track.trackKey],
-                              );
-                            }}
-                            type="button"
-                          >
-                            {spotifyOpen ? "Hide Spotify" : "Spotify"}
-                          </button>
-                        ) : null}
-                        {hasSources ? (
-                          <button
-                            data-action="toggle-sources"
-                            data-closed-label={`Sets (${visibleSetRefs.length})`}
-                            data-open-label="Hide Sets"
-                            onClick={() => {
-                              setOpenRecurringSources((current) =>
-                                current.includes(track.trackKey)
-                                  ? current.filter((value) => value !== track.trackKey)
-                                  : [...current, track.trackKey],
-                              );
-                            }}
-                            type="button"
-                          >
-                            {sourcesOpen ? "Hide Sets" : `Sets (${visibleSetRefs.length})`}
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className={joinClasses("source-panel", sourcesOpen && "open")}>
-                        {sourcesOpen ? (
-                          <ul className="source-list">
-                            {visibleSetRefs.map((setRef) => (
-                              <li key={`${track.trackKey}:${setRef.href ?? setRef.setTitle}`}>
-                                {setRef.href ? (
-                                  <a href={setRef.href} rel="noopener" target="_blank">
-                                    {setRef.setTitle}
-                                  </a>
-                                ) : (
-                                  <span>{setRef.setTitle}</span>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                      {spotifyOpen && track.spotifyTrackId ? renderSpotifyEmbed(track.spotifyTrackId) : null}
-                    </div>
-                  </article>
+                    openState={{
+                      sourcesOpen,
+                      spotifyOpen,
+                    }}
+                    onToggleSources={(event) => handleRecurringSourcesToggle(event, track.trackKey)}
+                    onToggleSpotify={(event) => handleRecurringSpotifyToggle(event, track.trackKey)}
+                    sourceGroups={buildArtistTrackSourceGroups(
+                      track.trackKey,
+                      visibleSetRefs.map((setRef) => ({
+                        href: setRef.href,
+                        label: setRef.setTitle,
+                      })),
+                    )}
+                    sourceLabel={hasSources ? `Sets (${visibleSetRefs.length})` : null}
+                    spotifyTrackId={track.spotifyTrackId}
+                    style={recurringCardStyles[track.trackKey]}
+                    title={track.title}
+                    titlePrefix={`${track.artist} - `}
+                  />
                 );
               })}
             </div>
@@ -1338,7 +1445,13 @@ export function ArchiveArtistExplorer({
         </section>
 
         <section className="section" id="set-atlas-section" style={{ position: "relative" }}>
-          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+          <div className="section-inline-actions">
+            <SpotifyExportButton
+              counts={spotifyExportCounts}
+              entityType="artist"
+              scope={scope}
+              slug={artist.slug}
+            />
             <InlineSubmitButton mode="add-sets" artistName={artist.name} />
           </div>
           <div className="section-inner">
@@ -1534,34 +1647,7 @@ export function ArchiveArtistExplorer({
                   <div className="focus-toolbar">
                     <p className="focus-summary">{focusSummary}</p>
                     <div className="focus-mode">
-                      <button
-                        className={joinClasses("chip-btn", atlasScope === "set" && "active")}
-                        onClick={() => {
-                          if (!atlasPanePointerInside) {
-                            setAtlasDockedSelectedSetIds(latestAtlasSelectedSetIdsRef.current);
-                          }
-                          setAtlasScope("set");
-                          setAtlasPage(0);
-                          setAtlasEvidencePage(0);
-                          setAtlasActiveName(null);
-                        }}
-                        type="button"
-                      >
-                        Selected Set
-                      </button>
-                      <button
-                        className={joinClasses("chip-btn", atlasScope === "artist" && "active")}
-                        onClick={() => {
-                          setAtlasScope("artist");
-                          setAtlasPage(0);
-                          setAtlasEvidencePage(0);
-                          setAtlasActiveName(null);
-                        }}
-                        type="button"
-                      >
-                        Artist Wide
-                      </button>
-                      {atlasScope === "set" && effectiveAtlasSelectedIds.length > 1 ? (
+                      {effectiveAtlasSelectedIds.length > 1 ? (
                         <>
                           <button
                             className={joinClasses("chip-btn", atlasCompareMode === "union" && "active")}
@@ -1587,8 +1673,64 @@ export function ArchiveArtistExplorer({
                           >
                             Intersection
                           </button>
+                          <button
+                            className={joinClasses("chip-btn", allVisibleAtlasSetsSelected && "active")}
+                            onClick={() => {
+                              latestAtlasSelectedSetIdsRef.current = allVisibleAtlasSetIds;
+                              if (!atlasPanePointerInside) {
+                                setAtlasDockedSelectedSetIds(allVisibleAtlasSetIds);
+                              }
+                              setAtlasScope("set");
+                              setAtlasSelectedSetIds(allVisibleAtlasSetIds);
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                              setAtlasActiveName(null);
+                            }}
+                            type="button"
+                          >
+                            Select All
+                          </button>
+                          <button
+                            className="chip-btn"
+                            onClick={() => {
+                              if (!clearAtlasSelectionId) {
+                                return;
+                              }
+                              const nextSelectedIds = [clearAtlasSelectionId];
+                              latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
+                              if (!atlasPanePointerInside) {
+                                setAtlasDockedSelectedSetIds(nextSelectedIds);
+                              }
+                              setAtlasScope("set");
+                              setAtlasSelectedSetIds(nextSelectedIds);
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                              setAtlasActiveName(null);
+                            }}
+                            type="button"
+                          >
+                            Clear
+                          </button>
                         </>
-                      ) : null}
+                      ) : (
+                        <button
+                          className={joinClasses("chip-btn", allVisibleAtlasSetsSelected && "active")}
+                          onClick={() => {
+                            latestAtlasSelectedSetIdsRef.current = allVisibleAtlasSetIds;
+                            if (!atlasPanePointerInside) {
+                              setAtlasDockedSelectedSetIds(allVisibleAtlasSetIds);
+                            }
+                            setAtlasScope("set");
+                            setAtlasSelectedSetIds(allVisibleAtlasSetIds);
+                            setAtlasPage(0);
+                            setAtlasEvidencePage(0);
+                            setAtlasActiveName(null);
+                          }}
+                          type="button"
+                        >
+                          Select All
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="focus-stats">
@@ -1612,125 +1754,108 @@ export function ArchiveArtistExplorer({
                 </div>
 
                 <div className="taxonomy-workbench">
-                  <div className="taxonomy-panel">
-                    <div className="panel-head taxonomy-head">
-                      <h3 className="panel-title">Taxonomy Atlas</h3>
-                      <div className="lens-tabs">
-                        {(["genres", "labels", "artists", "tracks"] as const).map((lens) => (
+                  <ArchiveTaxonomyPanel
+                    className="taxonomy-panel"
+                    confidenceFilters={TRACK_CONFIDENCE_LEVELS.map((filter) => ({
+                      active: atlasConf === filter,
+                      id: filter,
+                      label: filter === "all" ? `All (${allScopedAtlasTracks.length})` : filter,
+                      onSelect: () => {
+                        setAtlasConf(filter);
+                        setAtlasPage(0);
+                        setAtlasEvidencePage(0);
+                        setAtlasActiveName(null);
+                      },
+                    }))}
+                    lensOptions={(["genres", "labels", "artists", "tracks"] as const).map((lens) => ({
+                      active: atlasLens === lens,
+                      id: lens,
+                      label:
+                        lens === "genres"
+                          ? "Genres"
+                          : lens === "labels"
+                            ? "Labels"
+                            : lens === "artists"
+                              ? "Artists"
+                              : "Tracks",
+                    }))}
+                    onLensChange={(lensId) => {
+                      setAtlasLens(lensId as AtlasLens);
+                      setAtlasPage(0);
+                      setAtlasEvidencePage(0);
+                      setAtlasActiveName(null);
+                    }}
+                    pager={
+                      atlasLens !== "tracks" ? (
+                        <div className="pager">
                           <button
-                            className={joinClasses("chip-btn", atlasLens === lens && "active")}
-                            key={lens}
-                            onClick={() => {
-                              setAtlasLens(lens);
-                              setAtlasPage(0);
-                              setAtlasEvidencePage(0);
-                              setAtlasActiveName(null);
-                            }}
+                            className="btn"
+                            disabled={currentAtlasPage === 0}
+                            onClick={() => setAtlasPage((current) => Math.max(0, current - 1))}
                             type="button"
                           >
-                            {lens === "genres"
-                              ? "Genres"
-                              : lens === "labels"
-                                ? "Labels"
-                                : lens === "artists"
-                                  ? "Artists"
-                                  : "Tracks"}
+                            Prev
                           </button>
-                        ))}
-                      </div>
-                    </div>
-                    <p className="panel-copy">{taxonomySummary}</p>
-
-                    <div className="taxonomy-controls-bar">
-                      <div className="control taxonomy-search-control">
-                        <input
-                          className="input"
-                          onChange={(event) => {
-                            const next = event.target.value;
-                            startTransition(() => {
-                              setAtlasQuery(next);
-                              setAtlasPage(0);
-                              setAtlasEvidencePage(0);
-                              setAtlasActiveName(null);
-                            });
-                          }}
-                          placeholder="search"
-                          type="text"
-                          value={atlasQuery}
-                        />
-                      </div>
-                      <div className="taxonomy-controls-row">
-                        <div className="pill-row">
-                          <div className="threshold-stepper">
-                            <button
-                              aria-label="Decrease set threshold"
-                              className="btn threshold-arrow"
-                              disabled={atlasMin === atlasThresholdValues[0]}
-                              onClick={() => {
-                                setAtlasMin((current) => stepThresholdValue(current, atlasThresholdValues, -1));
-                                setAtlasPage(0);
-                                setAtlasEvidencePage(0);
-                                setAtlasActiveName(null);
-                              }}
-                              type="button"
-                            >
-                              ▼
-                            </button>
-                            <span className="btn threshold-value">{atlasMin}+ SETS</span>
-                            <button
-                              aria-label="Increase set threshold"
-                              className="btn threshold-arrow"
-                              disabled={atlasMin === atlasThresholdValues[atlasThresholdValues.length - 1]}
-                              onClick={() => {
-                                setAtlasMin((current) => stepThresholdValue(current, atlasThresholdValues, 1));
-                                setAtlasPage(0);
-                                setAtlasEvidencePage(0);
-                                setAtlasActiveName(null);
-                              }}
-                              type="button"
-                            >
-                              ▲
-                            </button>
-                          </div>
-                        </div>
-                        <div className="pill-row">
-                          {TRACK_CONFIDENCE_LEVELS.map((filter) => (
-                            <button
-                              className={joinClasses("chip-btn", atlasConf === filter && "active")}
-                              key={filter}
-                              onClick={() => {
-                                setAtlasConf(filter);
-                                setAtlasPage(0);
-                                setAtlasEvidencePage(0);
-                                setAtlasActiveName(null);
-                              }}
-                              type="button"
-                            >
-                              {filter === "all" ? `All (${allScopedAtlasTracks.length})` : filter}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="control taxonomy-sort-control">
-                          <span className="taxonomy-sort-icon" aria-hidden="true">
-                            ↕
+                          <span>
+                            Page {currentAtlasPage + 1} / {Math.max(1, maxAtlasPage + 1)}
                           </span>
-                          <select
-                            aria-label="Sort taxonomy entries"
-                            onChange={(event) => {
-                              setAtlasSort((event.target.value as "alpha" | "count") ?? "count");
-                              setAtlasPage(0);
-                              setAtlasEvidencePage(0);
-                            }}
-                            value={atlasSort}
+                          <button
+                            className="btn"
+                            disabled={currentAtlasPage >= maxAtlasPage}
+                            onClick={() => setAtlasPage((current) => Math.min(maxAtlasPage, current + 1))}
+                            type="button"
                           >
-                            <option value="count">Highest Usage</option>
-                            <option value="alpha">Alphabetical</option>
-                          </select>
+                            Next
+                          </button>
                         </div>
-                      </div>
-                    </div>
-
-                    <div className="rows">
+                      ) : null
+                    }
+                    search={{
+                      onChange: (value) => {
+                        startTransition(() => {
+                          setAtlasQuery(value);
+                          setAtlasPage(0);
+                          setAtlasEvidencePage(0);
+                          setAtlasActiveName(null);
+                        });
+                      },
+                      placeholder: "search",
+                      value: atlasQuery,
+                    }}
+                    sort={{
+                      ariaLabel: "Sort taxonomy entries",
+                      onChange: (value) => {
+                        setAtlasSort((value as "alpha" | "count") ?? "count");
+                        setAtlasPage(0);
+                        setAtlasEvidencePage(0);
+                      },
+                      options: [
+                        { label: "HIGHEST USAGE", value: "count" },
+                        { label: "ALPHABETICAL", value: "alpha" },
+                      ],
+                      value: atlasSort,
+                    }}
+                    threshold={{
+                      canDecrease: atlasMin !== atlasThresholdValues[0],
+                      canIncrease: atlasMin !== atlasThresholdValues[atlasThresholdValues.length - 1],
+                      decreaseLabel: "Decrease set threshold",
+                      increaseLabel: "Increase set threshold",
+                      onDecrease: () => {
+                        setAtlasMin((current) => stepThresholdValue(current, atlasThresholdValues, -1));
+                        setAtlasPage(0);
+                        setAtlasEvidencePage(0);
+                        setAtlasActiveName(null);
+                      },
+                      onIncrease: () => {
+                        setAtlasMin((current) => stepThresholdValue(current, atlasThresholdValues, 1));
+                        setAtlasPage(0);
+                        setAtlasEvidencePage(0);
+                        setAtlasActiveName(null);
+                      },
+                      valueLabel: `${atlasMin}+ SETS`,
+                    }}
+                    title="Taxonomy Atlas"
+                  >
                       {atlasLens === "tracks"
                         ? null
                         : atlasPageRows.map((row) => {
@@ -1780,69 +1905,25 @@ export function ArchiveArtistExplorer({
                                           const spotifyOpen = openAtlasSpotify.includes(trackKey);
 
                                           return (
-                                            <article
-                                              className={joinClasses(
-                                                "track-card",
-                                                "atlas-track-card",
-                                                sourcesOpen && "sources-open",
-                                                spotifyOpen && "embed-open",
-                                              )}
+                                            <ArchiveEvidenceTrackCard
+                                              albumArt={track.albumArt}
+                                              cardClassName="atlas-track-card"
+                                              confidence={track.confidence}
+                                              dataTrackKey={trackKey}
                                               key={trackKey}
+                                              openState={{
+                                                sourcesOpen,
+                                                spotifyOpen,
+                                              }}
+                                              onToggleSources={(event) => handleAtlasSourcesToggle(event, trackKey)}
+                                              onToggleSpotify={(event) => handleAtlasSpotifyToggle(event, trackKey)}
+                                              sourceGroups={buildArtistTrackSourceGroups(trackKey, track.setLinks)}
+                                              sourceLabel={`Sets (${track.setLinks.length})`}
+                                              spotifyTrackId={track.spotifyTrackId}
                                               style={atlasCardStyles[trackKey]}
-                                            >
-                                              <div className="track-art">
-                                                {track.albumArt ? (
-                                                  <img alt={track.title} loading="lazy" src={track.albumArt} />
-                                                ) : (
-                                                  <div className="track-art-fallback">No Art</div>
-                                                )}
-                                              </div>
-                                              <div className="track-body">
-                                                <h4 className="track-title">
-                                                  {track.artist} - {track.title}
-                                                </h4>
-                                                <p className="muted">
-                                                  Confidence{" "}
-                                                  <span className={joinClasses("set-track-conf", track.confidence.toLowerCase())}>
-                                                    {track.confidence}
-                                                  </span>
-                                                </p>
-                                                <div className="actions">
-                                                  {track.spotifyTrackId ? (
-                                                    <button
-                                                      onClick={(event) => handleAtlasSpotifyToggle(event, trackKey)}
-                                                      type="button"
-                                                    >
-                                                      {spotifyOpen ? "Hide Spotify" : "Spotify"}
-                                                    </button>
-                                                  ) : null}
-                                                  <button
-                                                    onClick={(event) => handleAtlasSourcesToggle(event, trackKey)}
-                                                    type="button"
-                                                  >
-                                                    {sourcesOpen ? "Hide Sets" : `Sets (${track.setLinks.length})`}
-                                                  </button>
-                                                </div>
-                                                <div className={joinClasses("source-panel", sourcesOpen && "open")}>
-                                                  {track.setLinks.length > 0 ? (
-                                                    <ul className="source-list">
-                                                      {track.setLinks.map((source) => (
-                                                        <li key={`${trackKey}:${source.href}`}>
-                                                          <a href={source.href} rel="noopener" target="_blank">
-                                                            {source.label}
-                                                          </a>
-                                                        </li>
-                                                      ))}
-                                                    </ul>
-                                                  ) : (
-                                                    <div className="empty">No set links available.</div>
-                                                  )}
-                                                </div>
-                                                {spotifyOpen && track.spotifyTrackId
-                                                  ? renderSpotifyEmbed(track.spotifyTrackId)
-                                                  : null}
-                                              </div>
-                                            </article>
+                                              title={track.title}
+                                              titlePrefix={`${track.artist} - `}
+                                            />
                                           );
                                         })}
                                       </div>
@@ -1854,7 +1935,6 @@ export function ArchiveArtistExplorer({
                               </article>
                             );
                           })}
-                    </div>
 
                     {atlasLens === "tracks" && atlasRowsAll.length > 0 ? (
                       <div className="inline-evidence">
@@ -1871,69 +1951,25 @@ export function ArchiveArtistExplorer({
                             const spotifyOpen = openAtlasSpotify.includes(trackKey);
 
                             return (
-                              <article
-                                className={joinClasses(
-                                  "track-card",
-                                  "atlas-track-card",
-                                  sourcesOpen && "sources-open",
-                                  spotifyOpen && "embed-open",
-                                )}
+                              <ArchiveEvidenceTrackCard
+                                albumArt={track.albumArt}
+                                cardClassName="atlas-track-card"
+                                confidence={track.confidence}
+                                dataTrackKey={trackKey}
                                 key={trackKey}
+                                openState={{
+                                  sourcesOpen,
+                                  spotifyOpen,
+                                }}
+                                onToggleSources={(event) => handleAtlasSourcesToggle(event, trackKey)}
+                                onToggleSpotify={(event) => handleAtlasSpotifyToggle(event, trackKey)}
+                                sourceGroups={buildArtistTrackSourceGroups(trackKey, track.setLinks)}
+                                sourceLabel={`Sets (${track.setLinks.length})`}
+                                spotifyTrackId={track.spotifyTrackId}
                                 style={atlasCardStyles[trackKey]}
-                              >
-                                <div className="track-art">
-                                  {track.albumArt ? (
-                                    <img alt={track.title} loading="lazy" src={track.albumArt} />
-                                  ) : (
-                                    <div className="track-art-fallback">No Art</div>
-                                  )}
-                                </div>
-                                <div className="track-body">
-                                  <h4 className="track-title">
-                                    {track.artist} - {track.title}
-                                  </h4>
-                                  <p className="muted">
-                                    Confidence{" "}
-                                    <span className={joinClasses("set-track-conf", track.confidence.toLowerCase())}>
-                                      {track.confidence}
-                                    </span>
-                                  </p>
-                                  <div className="actions">
-                                    {track.spotifyTrackId ? (
-                                      <button
-                                        onClick={(event) => handleAtlasSpotifyToggle(event, trackKey)}
-                                        type="button"
-                                      >
-                                        {spotifyOpen ? "Hide Spotify" : "Spotify"}
-                                      </button>
-                                    ) : null}
-                                    <button
-                                      onClick={(event) => handleAtlasSourcesToggle(event, trackKey)}
-                                      type="button"
-                                    >
-                                      {sourcesOpen ? "Hide Sets" : `Sets (${track.setLinks.length})`}
-                                    </button>
-                                  </div>
-                                  <div className={joinClasses("source-panel", sourcesOpen && "open")}>
-                                    {track.setLinks.length > 0 ? (
-                                      <ul className="source-list">
-                                        {track.setLinks.map((source) => (
-                                          <li key={`${trackKey}:${source.href}`}>
-                                            <a href={source.href} rel="noopener" target="_blank">
-                                              {source.label}
-                                            </a>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    ) : (
-                                      <div className="empty">No set links available.</div>
-                                    )}
-                                  </div>
-                                  {spotifyOpen && track.spotifyTrackId
-                                    ? renderSpotifyEmbed(track.spotifyTrackId)
-                                    : null}
-                                </div>
-                              </article>
+                                title={track.title}
+                                titlePrefix={`${track.artist} - `}
+                              />
                             );
                           })}
                         </div>
@@ -1943,31 +1979,7 @@ export function ArchiveArtistExplorer({
                     {atlasRowsAll.length === 0 ? (
                       <div className="no-results">No taxonomy entries match current controls.</div>
                     ) : null}
-
-                    {atlasLens !== "tracks" ? (
-                      <div className="pager">
-                        <button
-                          className="btn"
-                          disabled={currentAtlasPage === 0}
-                          onClick={() => setAtlasPage((current) => Math.max(0, current - 1))}
-                          type="button"
-                        >
-                          Prev
-                        </button>
-                        <span>
-                          Page {currentAtlasPage + 1} / {Math.max(1, maxAtlasPage + 1)}
-                        </span>
-                        <button
-                          className="btn"
-                          disabled={currentAtlasPage >= maxAtlasPage}
-                          onClick={() => setAtlasPage((current) => Math.min(maxAtlasPage, current + 1))}
-                          type="button"
-                        >
-                          Next
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
+                  </ArchiveTaxonomyPanel>
                 </div>
               </aside>
             </div>
@@ -2013,10 +2025,10 @@ export function ArchiveArtistExplorer({
                     }}
                     value={setSort}
                   >
-                    <option value="default">Default</option>
-                    <option value="rate">Recognition Rate</option>
-                    <option value="tracks">Track Count</option>
-                    <option value="duration">Duration</option>
+                    <option value="default">DEFAULT</option>
+                    <option value="rate">RECOGNITION RATE</option>
+                    <option value="tracks">TRACK COUNT</option>
+                    <option value="duration">DURATION</option>
                   </select>
                 </div>
               </div>

@@ -1,36 +1,40 @@
 .toggle {
   display: flex;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
+  min-height: var(--dark-control-height-dense);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--dark-border);
+  border-radius: var(--dark-radius-control);
   overflow: hidden;
   font-family: "Space Mono", monospace;
-  font-size: 11px;
-  letter-spacing: 0.05em;
+  font-size: var(--archive-header-control-size, 11px);
+  letter-spacing: var(--archive-header-control-letter-spacing, 0.07em);
+  text-transform: uppercase;
 }
 
 .option {
-  padding: 5px 12px;
-  color: rgba(255, 255, 255, 0.3);
+  min-height: inherit;
+  padding: 0 10px;
+  color: var(--dark-text-dim);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.1s, color 0.1s;
+  text-transform: uppercase;
+  transition: background var(--dark-transition-fast), color var(--dark-transition-fast);
   user-select: none;
   background: none;
   border: none;
 }
 
 .option:hover {
-  color: rgba(255, 255, 255, 0.7);
+  color: #fff;
 }
 
 .option.active {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(240, 240, 240, 0.86);
 }
 
 .option.disabled {
-  color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.22);
   cursor: default;
   position: relative;
 }
@@ -39,13 +43,13 @@
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 4px;
-  color: #aaa;
+  background: var(--dark-surface-raised);
+  border: 1px solid var(--dark-border);
+  border-radius: var(--dark-radius-control);
+  color: var(--dark-text-muted);
   font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 5px 10px;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
   white-space: nowrap;
   z-index: 200;
   pointer-events: none;

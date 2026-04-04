@@ -1,0 +1,41 @@
+:root {
+  --dark-bg: #0a0a0a;
+  --dark-bg-elevated: #0f0f0f;
+  --dark-surface: #111111;
+  --dark-surface-raised: #171717;
+  --dark-surface-strong: #1b1b1b;
+  --dark-border: #2c2c2c;
+  --dark-border-soft: #242424;
+  --dark-text-strong: #f3f3f3;
+  --dark-text: #d4d4d4;
+  --dark-text-muted: #8f8f8f;
+  --dark-text-dim: #666666;
+  --dark-brand-lime: #d8ff5a;
+  --dark-brand-violet: #7f51ff;
+  --dark-status-success: #3a8a57;
+  --dark-status-success-soft: rgba(58, 138, 87, 0.16);
+  --dark-status-warning: #d2ae32;
+  --dark-status-warning-soft: rgba(210, 174, 50, 0.16);
+  --dark-status-danger: #a24a4a;
+  --dark-status-danger-soft: rgba(162, 74, 74, 0.16);
+  --dark-status-neutral: #6c6c6c;
+  --dark-status-neutral-soft: rgba(108, 108, 108, 0.16);
+  --dark-radius-badge: 4px;
+  --dark-radius-control: 8px;
+  --dark-radius-panel: 12px;
+  --dark-control-height-dense: 28px;
+  --dark-control-height: 36px;
+  --dark-control-height-lg: 44px;
+  --dark-space-1: 4px;
+  --dark-space-2: 8px;
+  --dark-space-3: 12px;
+  --dark-space-4: 16px;
+  --dark-space-5: 24px;
+  --dark-space-6: 32px;
+  --dark-transition-fast: 120ms ease;
+  --dark-transition-base: 180ms ease;
+  --dark-page-gradient:
+    radial-gradient(circle at top right, rgba(127, 81, 255, 0.12), transparent 30%),
+    radial-gradient(circle at top left, rgba(216, 255, 90, 0.08), transparent 28%),
+    linear-gradient(180deg, #090909 0%, #0c0c0c 100%);
+}

@@ -5,6 +5,7 @@ import { Providers } from "@/components/providers";
 import { env } from "@/lib/env";
 import { socialPreview } from "@/lib/social-preview";
 
+import "./dark-theme.css";
 import "./globals.css";
 
 const manrope = Manrope({

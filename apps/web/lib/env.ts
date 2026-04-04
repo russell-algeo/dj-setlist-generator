@@ -1,6 +1,51 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import { parse } from "dotenv";
+
+const resolveWorkspaceRoot = () => {
+  let current = process.cwd();
+
+  while (true) {
+    if (
+      fs.existsSync(path.join(current, "pnpm-workspace.yaml")) ||
+      fs.existsSync(path.join(current, ".git"))
+    ) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return process.cwd();
+    }
+    current = parent;
+  }
+};
+
+const fallbackEnv = (() => {
+  const workspaceRoot = resolveWorkspaceRoot();
+  const merged: Record<string, string> = {};
+
+  for (const filename of [".env", ".env.local"]) {
+    const filepath = path.join(workspaceRoot, filename);
+    if (!fs.existsSync(filepath)) {
+      continue;
+    }
+
+    Object.assign(merged, parse(fs.readFileSync(filepath)));
+  }
+
+  return merged;
+})();
+
 const get = (key: string) => {
-  const value = process.env[key];
-  return value && value.length > 0 ? value : undefined;
+  const runtimeValue = process.env[key];
+  if (runtimeValue && runtimeValue.length > 0) {
+    return runtimeValue;
+  }
+
+  const fallbackValue = fallbackEnv[key];
+  return fallbackValue && fallbackValue.length > 0 ? fallbackValue : undefined;
 };
 
 const getPositiveInt = (key: string, defaultValue: number) => {

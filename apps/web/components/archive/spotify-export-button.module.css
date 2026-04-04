@@ -1,0 +1,219 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.trigger {
+  min-height: var(--dark-control-height-dense);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(12 48 24 / 45%);
+  border: 1px solid #1db954;
+  border-radius: var(--dark-radius-control);
+  color: #1db954;
+  font-family: "Space Mono", monospace;
+  font-size: var(--archive-header-control-size, 11px);
+  letter-spacing: var(--archive-header-control-letter-spacing, 0.07em);
+  padding: 0 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1;
+  text-transform: uppercase;
+  transition:
+    border-color var(--dark-transition-fast),
+    color var(--dark-transition-fast),
+    background var(--dark-transition-fast);
+}
+
+.trigger:hover {
+  border-color: #1db954;
+  color: #1db954;
+  background: rgb(12 48 24 / 45%);
+}
+
+.triggerDisabled {
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.08);
+  cursor: default;
+}
+
+.triggerDisabled:hover {
+  color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.triggerSuccess {
+  color: #1db954;
+  border-color: #1db954;
+  background: rgb(12 48 24 / 45%);
+}
+
+.triggerSuccess:hover {
+  color: #1db954;
+  border-color: #1db954;
+  background: rgb(12 48 24 / 45%);
+}
+
+.tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--dark-surface-raised);
+  border: 1px solid var(--dark-border);
+  border-radius: var(--dark-radius-control);
+  color: var(--dark-text-muted);
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  white-space: nowrap;
+  z-index: 200;
+  pointer-events: none;
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 296px;
+  max-width: min(92vw, 340px);
+  background: rgba(10, 10, 10, 0.98);
+  border: 1px solid var(--dark-border);
+  border-radius: var(--dark-radius-panel);
+  padding: 16px;
+  z-index: 220;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.42);
+}
+
+.panelTitle {
+  margin: 0;
+  color: #fff;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.panelSubtitle {
+  margin: 6px 0 0;
+  color: var(--dark-text-muted);
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.filterChip {
+  min-height: var(--dark-control-height-dense);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid var(--dark-border);
+  border-radius: var(--dark-radius-badge);
+  background: var(--dark-surface-raised);
+  color: var(--dark-text);
+  font-family: "Space Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.filterChip:hover {
+  border-color: #fff;
+  color: #fff;
+}
+
+.filterChipActive {
+  border-color: var(--dark-brand-lime);
+  color: var(--dark-brand-lime);
+  background: #0f1210;
+}
+
+.summary {
+  margin-top: 12px;
+  color: #f0f0f0;
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.helper {
+  margin-top: 8px;
+  color: var(--dark-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.error {
+  margin-top: 8px;
+  color: #d7a3a3;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.cancelBtn,
+.submitBtn {
+  min-height: var(--dark-control-height-dense);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--dark-radius-control);
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 14px;
+}
+
+.cancelBtn {
+  border: 1px solid var(--dark-border);
+  background: transparent;
+  color: var(--dark-text-muted);
+  cursor: pointer;
+}
+
+.submitBtn {
+  border: 1px solid var(--dark-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  color: #fff;
+  cursor: pointer;
+}
+
+.submitBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .wrap {
+    align-items: stretch;
+  }
+
+  .panel {
+    left: 0;
+    right: auto;
+    min-width: min(100%, 320px);
+  }
+}

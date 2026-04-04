@@ -248,7 +248,7 @@ export function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
 
               <div
                 style={{
-                  borderRadius: 6,
+                  borderRadius: 0,
                   border: `1px solid ${stateColors.active}44`,
                   background: "#131108",
                   padding: "12px 14px",

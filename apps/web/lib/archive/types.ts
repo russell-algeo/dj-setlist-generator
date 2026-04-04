@@ -1,4 +1,5 @@
 export type ArchiveConfidence = "HIGH" | "MEDIUM" | "LOW" | "UNCERTAIN";
+export type SpotifyExportConfidenceFilter = "all" | "HIGH" | "MEDIUM" | "LOW";
 
 export type ArchiveEntityResolution =
   | { entityType: "artist"; entityId: string; slug: string }
@@ -234,4 +235,19 @@ export type ArchiveHomeBaseSummary = {
 export type ArchiveHomeConnectionsResponse = {
   connections: ArchiveHomeConnection[];
   generatedAt: string | null;
+};
+
+export type SpotifyExportRequest = {
+  entityType: "artist" | "set";
+  slug: string;
+  confidenceFilter: SpotifyExportConfidenceFilter;
+  scope?: "global" | "mine";
+};
+
+export type SpotifyExportResponse = {
+  playlistId: string;
+  playlistName: string;
+  playlistUrl: string;
+  tracksAdded: number;
+  confidenceFilter: SpotifyExportConfidenceFilter;
 };

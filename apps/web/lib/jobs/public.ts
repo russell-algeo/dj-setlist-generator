@@ -69,6 +69,14 @@ export type SubmissionRunWorkflowStepDto = WorkflowStepDto;
 
 export type SubmissionRunEventDto = TimelineItemDto;
 
+export type SubmissionRunEventsPageDto = {
+  events: SubmissionRunEventDto[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+};
+
 export type SubmissionRunActionSummary = SubmissionActionSummary & {
   retryBudgetRemaining: number;
   retryExhausted: boolean;

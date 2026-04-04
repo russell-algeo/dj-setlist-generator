@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionActor, getSpotifyConnectionForUser } from "@/lib/auth/session";
+import { env } from "@/lib/env";
 
 export async function GET() {
   const actor = await getSessionActor();
@@ -16,6 +17,7 @@ export async function GET() {
   const spotifyConnected = Boolean(
     connection && connection.refreshTokenCiphertext && !connection.revokedAt,
   );
+  const spotifyConfigured = Boolean(env.spotifyClientId && env.spotifyClientSecret);
 
-  return NextResponse.json({ spotifyConnected });
+  return NextResponse.json({ spotifyConfigured, spotifyConnected });
 }

@@ -13,8 +13,13 @@ import {
 
 import { buildArtistHref, buildSetHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
+import {
+  ArchiveEvidenceTrackCard,
+  type ArchiveEvidenceTrackCardSourceGroup,
+} from "@/components/archive/archive-evidence-track-card";
 import { ArchiveSetCard } from "@/components/archive/archive-set-card";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { ArchiveTaxonomyPanel } from "@/components/archive/archive-taxonomy-panel";
 import { InlineSubmitButton } from "@/components/archive/inline-submit-button";
 import { ARCHIVE_HOME_EXPLORER_CSS } from "@/components/archive/archive-home-explorer.styles";
 import type {
@@ -69,17 +74,12 @@ const NETWORK_LABEL_OUTSET = 4;
 const NETWORK_LABEL_OUTSET_RANGE = 10;
 const NETWORK_LABEL_HALO_RANGE = 6;
 const NETWORK_SELECTED_LENS_FLOOR = 0.2;
+const OPEN_EVIDENCE_ACTION_ROW_HEIGHT = 36;
 const PAGE = {
   evidence: 9,
   pairRows: 10,
   taxonomy: 10,
 } as const;
-const CONFIDENCE_COLOR: Record<ArchiveConfidence, string> = {
-  HIGH: "#6fffa4",
-  LOW: "#ffa55a",
-  MEDIUM: "#ffd166",
-  UNCERTAIN: "#7b7b7b",
-};
 const FALLBACK_MEDIA = [
   ["#0b0b0b", "#f2f2f2", "#d8ff5a"],
   ["#101114", "#eceef2", "#7f51ff"],
@@ -262,13 +262,14 @@ const buildTrackCardStyle = (
     const targetPanelHeight = 91.2;
     const controls = actionsWrap ?? body;
     const actionsHeight = controls
-      ? Math.max(28, Math.round(controls.getBoundingClientRect().height))
-      : 32;
+      ? Math.max(OPEN_EVIDENCE_ACTION_ROW_HEIGHT, Math.round(controls.getBoundingClientRect().height))
+      : OPEN_EVIDENCE_ACTION_ROW_HEIGHT;
     const bodyHeight = Math.min(cardHeight, actionsHeight + targetPanelHeight);
     const artHeight = Math.max(0, cardHeight - bodyHeight);
     const panelHeight = Math.max(0, bodyHeight - actionsHeight);
 
     return {
+      "--open-action-row-height": `${actionsHeight}px`,
       "--open-art-height": `${Math.max(0, artHeight)}px`,
       "--open-body-height": `${Math.max(0, bodyHeight)}px`,
       "--open-card-height": `${cardHeight}px`,
@@ -520,22 +521,9 @@ const projectPairTrackByConfidence = (
   };
 };
 
-const TrackCard = ({
-  cardClassName,
-  openState,
-  onToggleSources,
-  onToggleSpotify,
-  track,
-  style,
-}: {
-  cardClassName?: string;
-  openState: TrackCardOpenState;
-  onToggleSources: (event: MouseEvent<HTMLElement>) => void;
-  onToggleSpotify: (event: MouseEvent<HTMLButtonElement>) => void;
-  style?: TrackCardStyle | null;
-  track: ArchiveHomePairTrack | ArchiveHomeTrackCatalogItem;
-}) => {
-  const trackId = extractSpotifyTrackId(track.spotifyUrl);
+const buildTrackCardSourceGroups = (
+  track: ArchiveHomePairTrack | ArchiveHomeTrackCatalogItem,
+): ArchiveEvidenceTrackCardSourceGroup[] => {
   const sourceGroups = "artistRefs" in track
     ? track.artistRefs
     : [
@@ -552,113 +540,31 @@ const TrackCard = ({
           setRefs: track.setsB,
         },
       ].filter((group) => group.setRefs.length > 0);
-  const sourceDjs = sourceGroups.length;
-  const sourceSets = sourceGroups.reduce((total, group) => total + group.setRefs.length, 0);
-  const sourceLabel = `Sets (${fmt(sourceDjs)} DJs, ${fmt(sourceSets)} Sets)`;
-  const confidence = primaryConfidenceFromCounts(track.confidenceCounts);
 
-  return (
-    <article
-      className={joinClasses(
-        "track-card",
-        cardClassName,
-        openState.sourcesOpen && "sources-open",
-        openState.spotifyOpen && "embed-open",
-      )}
-      data-track-key={track.trackKey}
-      style={style ?? undefined}
-    >
-      <div className="track-art">
-        {track.albumArt ? <img alt={track.title} loading="lazy" src={track.albumArt} /> : null}
-      </div>
-      <div className="track-body">
-        <h4 className="track-title">
-          {track.artist} - {track.title}
-        </h4>
-        <p className="muted">
-          Confidence{" "}
-          <span
-            className="set-track-conf"
-            style={{
-              borderColor: CONFIDENCE_COLOR[confidence],
-              color: CONFIDENCE_COLOR[confidence],
-            }}
-          >
-            {confidence}
-          </span>
-        </p>
-        <div className="actions">
-          {trackId ? (
-            <button data-action="spotify-embed" data-url={track.spotifyUrl ?? ""} onClick={onToggleSpotify} type="button">
-              {openState.spotifyOpen ? "Hide Spotify" : "Spotify"}
-            </button>
-          ) : null}
-          <button
-            data-action="toggle-sources"
-            data-closed-label={sourceLabel}
-            data-open-label="Hide Sets"
-            onClick={onToggleSources}
-            type="button"
-          >
-            {openState.sourcesOpen ? "Hide Sets" : sourceLabel}
-          </button>
-        </div>
-        {openState.spotifyOpen && trackId ? (
-          <div className="spotify-embed">
-            <iframe
-              allow="autoplay; clipboard-write; encrypted-media"
-              src={`https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`}
-              title="Spotify embed"
-            />
-          </div>
-        ) : null}
-        <div className={joinClasses("source-panel", openState.sourcesOpen && "open")}>
-          {sourceGroups.length ? (
-            sourceGroups.map((group, index) => {
-              const queryHref =
-                "artistSlug" in group && group.artistSlug
-                  ? buildTrackQueryHref({
-                      artistSlug: group.artistSlug,
-                      query: `${track.artist} ${track.title}`.trim(),
-                    })
-                  : null;
-              return (
-                <div className="source-group" key={`${track.trackKey}-source-${index}`}>
-                  <h5>
-                    {queryHref ? (
-                      <a href={queryHref}>{group.artistName || `Source ${index + 1}`}</a>
-                    ) : (
-                      group.artistName || `Source ${index + 1}`
-                    )}
-                  </h5>
-                  {group.setRefs.length ? (
-                    <ul className="source-list">
-                      {group.setRefs.slice(0, 8).map((setRef) => (
-                        <li key={`${track.trackKey}-${setRef.setSlug}-${setRef.trackPosition}`}>
-                          <a
-                            href={buildTrackSetHref({
-                              setSlug: setRef.setSlug,
-                              trackPosition: setRef.trackPosition,
-                            })}
-                          >
-                            {setRef.title}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="source-empty">No set links</p>
-                  )}
-                </div>
-              );
-            })
-          ) : (
-            <div className="empty">No provenance rows.</div>
-          )}
-        </div>
-      </div>
-    </article>
-  );
+  return sourceGroups.map((group, index) => {
+    const queryHref =
+      "artistSlug" in group && group.artistSlug
+        ? buildTrackQueryHref({
+            artistSlug: group.artistSlug,
+            query: `${track.artist} ${track.title}`.trim(),
+          })
+        : null;
+
+    return {
+      emptyLabel: "No set links",
+      id: `${track.trackKey}-source-${index}`,
+      links: group.setRefs.slice(0, 8).map((setRef) => ({
+        href: buildTrackSetHref({
+          setSlug: setRef.setSlug,
+          trackPosition: setRef.trackPosition,
+        }),
+        id: `${track.trackKey}-${setRef.setSlug}-${setRef.trackPosition}`,
+        label: setRef.title,
+      })),
+      title: group.artistName || `Source ${index + 1}`,
+      titleHref: queryHref,
+    };
+  });
 };
 
 export function ArchiveHomeExplorer({
@@ -741,6 +647,7 @@ export function ArchiveHomeExplorer({
     {},
   );
   const [loadingTracklists, setLoadingTracklists] = useState<Record<string, boolean>>({});
+  const [tracklistErrors, setTracklistErrors] = useState<Record<string, string>>({});
 
   const artistCards = initial.artistCards;
   // In workspace mode, do not pre-populate the atlas cache with server-rendered data so the
@@ -834,6 +741,8 @@ export function ArchiveHomeExplorer({
     const dockedSet = new Set(docked.map((artist) => artist.slug));
     return [...docked, ...visibleArtists.filter((artist) => !dockedSet.has(artist.slug))];
   }, [allArtistsSelected, dockedSelectedArtistSlugs, visibleArtists]);
+  const clearArtistSelectionSlug =
+    focusArtistSlug ?? orderedArtists[0]?.slug ?? selectedArtistSlugs[0] ?? null;
 
   const normalizedTaxonomyThreshold = normalizeThresholdValue(taxonomyThreshold, THRESHOLD_LEVELS);
   const thresholdScopedTaxonomyTracks = useMemo(
@@ -1345,6 +1254,11 @@ export function ArchiveHomeExplorer({
       return;
     }
 
+    setTracklistErrors((current) => {
+      const next = { ...current };
+      delete next[slug];
+      return next;
+    });
     setLoadingTracklists((current) => ({ ...current, [slug]: true }));
     void fetch(`/api/archive/home/sets/${encodeURIComponent(slug)}/tracklist`)
       .then(async (response) => {
@@ -1365,6 +1279,10 @@ export function ArchiveHomeExplorer({
       })
       .catch((error) => {
         console.error("[archive-home] set tracklist request failed", error);
+        setTracklistErrors((current) => ({
+          ...current,
+          [slug]: "Unable to load tracklist right now.",
+        }));
       })
       .finally(() => {
         setLoadingTracklists((current) => ({
@@ -1755,7 +1673,7 @@ export function ArchiveHomeExplorer({
                           className={joinClasses(
                             "artist-card",
                             focused && "focus",
-                            selected && !allArtistsSelected && "selected",
+                            selected && "selected",
                             hoverLatchedArtistSlug === artistCard.slug && "hover-latched",
                           )}
                           data-action="focus-artist"
@@ -1771,7 +1689,7 @@ export function ArchiveHomeExplorer({
                             <div className="artist-meta-row">
                               <div className="card-actions">
                                 <button
-                                  className={joinClasses("chip-btn", selected && !allArtistsSelected && "active")}
+                                  className={joinClasses("chip-btn", selected && "active")}
                                   data-action="toggle-compare-artist"
                                   onClick={(event) => {
                                     event.preventDefault();
@@ -1882,24 +1800,25 @@ export function ArchiveHomeExplorer({
                         }}
                         type="button"
                       >
-                        {allArtistsSelected ? "All Artists" : "Select All"}
+                        Select All
                       </button>
                       {selectedArtistSlugs.length > 1 ? (
                         <button
                           className="chip-btn"
                           onClick={() => {
-                            if (!focusArtistSlug) {
+                            if (!clearArtistSelectionSlug) {
                               return;
                             }
-                            latestSelectedArtistSlugsRef.current = [focusArtistSlug];
-                            setSelectedArtistSlugs([focusArtistSlug]);
-                            setDockedSelectedArtistSlugs([focusArtistSlug]);
+                            latestSelectedArtistSlugsRef.current = [clearArtistSelectionSlug];
+                            setFocusArtistSlug(clearArtistSelectionSlug);
+                            setSelectedArtistSlugs([clearArtistSelectionSlug]);
+                            setDockedSelectedArtistSlugs([clearArtistSelectionSlug]);
                             setTaxonomyActiveName(null);
                             setTaxonomyPage(0);
                           }}
                           type="button"
                         >
-                          Solo Focus
+                          Clear
                         </button>
                       ) : null}
                     </div>
@@ -1925,120 +1844,100 @@ export function ArchiveHomeExplorer({
                 </div>
 
                 <div className="taxonomy-workbench">
-                  <div className="taxonomy-panel">
-                    <div className="panel-head taxonomy-head">
-                      <h3 className="panel-title" style={{ lineHeight: "normal" }}>
-                        Taxonomy Atlas
-                      </h3>
-                      <div className="lens-tabs" id="taxonomyTabs">
-                        {[
-                          { id: "genres", label: "Genres" },
-                          { id: "labels", label: "Labels" },
-                          { id: "track-artists", label: "Artists" },
-                          { id: "tracks", label: "Tracks" },
-                        ].map((lens) => (
-                          <button
-                            className={joinClasses("chip-btn", taxonomyLens === lens.id && "active")}
-                            key={lens.id}
-                            onClick={() => {
-                              setTaxonomyLens(lens.id as ArchiveHomeTaxonomyLens);
-                              setTaxonomyActiveName(null);
-                              setTaxonomyPage(0);
-                            }}
-                            type="button"
-                          >
-                            {lens.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                  <ArchiveTaxonomyPanel
+                    className="taxonomy-panel"
+                    confidenceContainerId="taxonomyTrackConfFilters"
+                    confidenceFilters={CONF_FILTER_LEVELS.map((filter) => {
+                      const count =
+                        filter === "all"
+                          ? thresholdScopedTaxonomyTracks.length
+                          : thresholdScopedTaxonomyTracks.filter(
+                              (track) => track.confidenceCounts[filter] > 0,
+                            ).length;
 
-                    <div className="taxonomy-controls-bar">
-                      <div className="control taxonomy-search-control">
-                        <input
-                          id="taxonomySearch"
-                          onChange={(event) => {
-                            setTaxonomyQuery(event.target.value);
-                            setTaxonomyPage(0);
-                          }}
-                          placeholder="search"
-                          type="text"
-                          value={taxonomyQuery}
-                        />
-                      </div>
-                      <div className="taxonomy-controls-row">
-                        <div className="pill-row" id="taxonomyThresholds">
-                          <div className="threshold-stepper">
+                      return {
+                        active: taxonomyConfidence === filter,
+                        id: filter,
+                        label: filter === "all" ? `All (${fmt(count)})` : filter,
+                        onSelect: () => {
+                          setTaxonomyConfidence(filter);
+                          setTaxonomyPage(0);
+                          setTaxonomyActiveName(null);
+                        },
+                      };
+                    })}
+                    lensOptions={[
+                      { active: taxonomyLens === "genres", id: "genres", label: "Genres" },
+                      { active: taxonomyLens === "labels", id: "labels", label: "Labels" },
+                      { active: taxonomyLens === "track-artists", id: "track-artists", label: "Artists" },
+                      { active: taxonomyLens === "tracks", id: "tracks", label: "Tracks" },
+                    ]}
+                    lensTabsId="taxonomyTabs"
+                    onLensChange={(lensId) => {
+                      setTaxonomyLens(lensId as ArchiveHomeTaxonomyLens);
+                      setTaxonomyActiveName(null);
+                      setTaxonomyPage(0);
+                    }}
+                    pager={
+                      <div className="pager" id="taxonomyPager">
+                        {taxonomyLens !== "tracks" ? (
+                          <>
                             <button
-                              className="chip-btn threshold-arrow"
-                              disabled={taxonomyThreshold === THRESHOLD_LEVELS[0]}
-                              onClick={() =>
-                                setTaxonomyThreshold((current) =>
-                                  stepThresholdValue(current, THRESHOLD_LEVELS, -1),
-                                )
-                              }
+                              disabled={safeTaxonomyPage <= 0}
+                              onClick={() => setTaxonomyPage((current) => current - 1)}
                               type="button"
                             >
-                              ▼
+                              Prev
                             </button>
-                            <span className="chip-btn threshold-value">{fmt(taxonomyThreshold)}+ SETS</span>
+                            <span className="info">
+                              Page {safeTaxonomyPage + 1} / {taxonomyTotalPages}
+                            </span>
                             <button
-                              className="chip-btn threshold-arrow"
-                              disabled={taxonomyThreshold === THRESHOLD_LEVELS[THRESHOLD_LEVELS.length - 1]}
-                              onClick={() =>
-                                setTaxonomyThreshold((current) =>
-                                  stepThresholdValue(current, THRESHOLD_LEVELS, 1),
-                                )
-                              }
+                              disabled={safeTaxonomyPage >= taxonomyTotalPages - 1}
+                              onClick={() => setTaxonomyPage((current) => current + 1)}
                               type="button"
                             >
-                              ▲
+                              Next
                             </button>
-                          </div>
-                        </div>
-                        <div className="pill-row" id="taxonomyTrackConfFilters">
-                          {CONF_FILTER_LEVELS.map((filter) => {
-                            const count =
-                              filter === "all"
-                                ? thresholdScopedTaxonomyTracks.length
-                                : thresholdScopedTaxonomyTracks.filter(
-                                    (track) => track.confidenceCounts[filter] > 0,
-                                  ).length;
-                            return (
-                              <button
-                                className={joinClasses("chip-btn", taxonomyConfidence === filter && "active")}
-                                key={filter}
-                                onClick={() => {
-                                  setTaxonomyConfidence(filter);
-                                  setTaxonomyPage(0);
-                                  setTaxonomyActiveName(null);
-                                }}
-                                type="button"
-                              >
-                                {filter === "all" ? `All (${fmt(count)})` : filter}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <div className="control taxonomy-sort-control">
-                          <span aria-hidden="true" className="taxonomy-sort-icon">
-                            ↕
-                          </span>
-                          <select
-                            id="taxonomySort"
-                            onChange={(event) =>
-                              setTaxonomySort(event.target.value === "alpha" ? "alpha" : "count")
-                            }
-                            value={taxonomySort}
-                          >
-                            <option value="count">Highest Usage</option>
-                            <option value="alpha">Alphabetical</option>
-                          </select>
-                        </div>
+                          </>
+                        ) : null}
                       </div>
-                    </div>
-
-                    <div className="rows" id="taxonomyRows">
+                    }
+                    rowsId="taxonomyRows"
+                    search={{
+                      id: "taxonomySearch",
+                      onChange: (value) => {
+                        setTaxonomyQuery(value);
+                        setTaxonomyPage(0);
+                      },
+                      placeholder: "search",
+                      value: taxonomyQuery,
+                    }}
+                    sort={{
+                      id: "taxonomySort",
+                      onChange: (value) => setTaxonomySort(value === "alpha" ? "alpha" : "count"),
+                      options: [
+                        { label: "HIGHEST USAGE", value: "count" },
+                        { label: "ALPHABETICAL", value: "alpha" },
+                      ],
+                      value: taxonomySort,
+                    }}
+                    threshold={{
+                      canDecrease: taxonomyThreshold !== THRESHOLD_LEVELS[0],
+                      canIncrease: taxonomyThreshold !== THRESHOLD_LEVELS[THRESHOLD_LEVELS.length - 1],
+                      containerId: "taxonomyThresholds",
+                      onDecrease: () =>
+                        setTaxonomyThreshold((current) =>
+                          stepThresholdValue(current, THRESHOLD_LEVELS, -1),
+                        ),
+                      onIncrease: () =>
+                        setTaxonomyThreshold((current) =>
+                          stepThresholdValue(current, THRESHOLD_LEVELS, 1),
+                        ),
+                      valueLabel: `${fmt(taxonomyThreshold)}+ SETS`,
+                    }}
+                    title="Taxonomy Atlas"
+                  >
                       {taxonomyLens === "tracks" ? (
                         projectedTaxonomyTracks.length ? (
                           <div className="inline-evidence">
@@ -2046,21 +1945,33 @@ export function ArchiveHomeExplorer({
                               Tracks | {fmt(projectedTaxonomyTracks.length)} matching tracks
                             </p>
                             <div className="evidence-grid">
-                              {projectedTaxonomyTracks.map((track) => (
-                                <TrackCard
-                                  key={track.trackKey}
-                                  openState={
-                                    trackCardStates[track.trackKey] ?? {
-                                      sourcesOpen: false,
-                                      spotifyOpen: false,
+                              {projectedTaxonomyTracks.map((track) => {
+                                const sourceGroups = buildTrackCardSourceGroups(track);
+                                const sourceDjs = sourceGroups.length;
+                                const sourceSets = sourceGroups.reduce((total, group) => total + group.links.length, 0);
+                                return (
+                                  <ArchiveEvidenceTrackCard
+                                    dataTrackKey={track.trackKey}
+                                    key={track.trackKey}
+                                    openState={
+                                      trackCardStates[track.trackKey] ?? {
+                                        sourcesOpen: false,
+                                        spotifyOpen: false,
+                                      }
                                     }
-                                  }
-                                  onToggleSources={toggleTrackSources(track.trackKey)}
-                                  onToggleSpotify={toggleTrackSpotify(track.trackKey)}
-                                  style={trackCardStyles[track.trackKey] ?? null}
-                                  track={track}
-                                />
-                              ))}
+                                    onToggleSources={toggleTrackSources(track.trackKey)}
+                                    onToggleSpotify={toggleTrackSpotify(track.trackKey)}
+                                    sourceGroups={sourceGroups}
+                                    sourceLabel={`Sets (${fmt(sourceDjs)} DJs, ${fmt(sourceSets)} Sets)`}
+                                    spotifyTrackId={extractSpotifyTrackId(track.spotifyUrl)}
+                                    style={trackCardStyles[track.trackKey] ?? null}
+                                    title={track.title}
+                                    titlePrefix={`${track.artist} - `}
+                                    confidence={primaryConfidenceFromCounts(track.confidenceCounts)}
+                                    albumArt={track.albumArt}
+                                  />
+                                );
+                              })}
                             </div>
                           </div>
                         ) : (
@@ -2106,21 +2017,33 @@ export function ArchiveHomeExplorer({
                                     ) : null}
                                   </div>
                                   <div className="evidence-grid">
-                                    {row.tracks.map((track) => (
-                                      <TrackCard
-                                        key={track.trackKey}
-                                        openState={
-                                          trackCardStates[track.trackKey] ?? {
-                                            sourcesOpen: false,
-                                            spotifyOpen: false,
+                                    {row.tracks.map((track) => {
+                                      const sourceGroups = buildTrackCardSourceGroups(track);
+                                      const sourceDjs = sourceGroups.length;
+                                      const sourceSets = sourceGroups.reduce((total, group) => total + group.links.length, 0);
+                                      return (
+                                        <ArchiveEvidenceTrackCard
+                                          albumArt={track.albumArt}
+                                          confidence={primaryConfidenceFromCounts(track.confidenceCounts)}
+                                          dataTrackKey={track.trackKey}
+                                          key={track.trackKey}
+                                          openState={
+                                            trackCardStates[track.trackKey] ?? {
+                                              sourcesOpen: false,
+                                              spotifyOpen: false,
+                                            }
                                           }
-                                        }
-                                        onToggleSources={toggleTrackSources(track.trackKey)}
-                                        onToggleSpotify={toggleTrackSpotify(track.trackKey)}
-                                              style={trackCardStyles[track.trackKey] ?? null}
-                                        track={track}
-                                      />
-                                    ))}
+                                          onToggleSources={toggleTrackSources(track.trackKey)}
+                                          onToggleSpotify={toggleTrackSpotify(track.trackKey)}
+                                          sourceGroups={sourceGroups}
+                                          sourceLabel={`Sets (${fmt(sourceDjs)} DJs, ${fmt(sourceSets)} Sets)`}
+                                          spotifyTrackId={extractSpotifyTrackId(track.spotifyUrl)}
+                                          style={trackCardStyles[track.trackKey] ?? null}
+                                          title={track.title}
+                                          titlePrefix={`${track.artist} - `}
+                                        />
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               ) : null}
@@ -2130,31 +2053,7 @@ export function ArchiveHomeExplorer({
                       ) : (
                         <div className="empty">No taxonomy entries match current scope and query.</div>
                       )}
-                    </div>
-                    <div className="pager" id="taxonomyPager">
-                      {taxonomyLens !== "tracks" ? (
-                        <>
-                          <button
-                            disabled={safeTaxonomyPage <= 0}
-                            onClick={() => setTaxonomyPage((current) => current - 1)}
-                            type="button"
-                          >
-                            Prev
-                          </button>
-                          <span className="info">
-                            Page {safeTaxonomyPage + 1} / {taxonomyTotalPages}
-                          </span>
-                          <button
-                            disabled={safeTaxonomyPage >= taxonomyTotalPages - 1}
-                            onClick={() => setTaxonomyPage((current) => current + 1)}
-                            type="button"
-                          >
-                            Next
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
+                  </ArchiveTaxonomyPanel>
                 </div>
               </aside>
             </div>
@@ -2313,145 +2212,152 @@ export function ArchiveHomeExplorer({
               </div>
             </div>
 
-            <div className="pair-panel" style={{ marginTop: 12 }}>
-              <div className="panel-head taxonomy-head">
-                <h3 className="panel-title" id="pairTitle" style={{ lineHeight: "normal" }}>
-                  {pairPayload
-                    ? `Pair Analysis Workspace: ${pairPayload.artistA.name} x ${pairPayload.artistB.name}`
-                    : "Pair Analysis Workspace"}
-                </h3>
-                <div className="lens-tabs" id="pairTabs">
-                  {pairPayload
-                    ? [
-                        { id: "genres", label: "Genres" },
-                        { id: "labels", label: "Labels" },
-                        { id: "artists", label: "Artists" },
-                        { id: "tracks", label: "Tracks" },
-                      ].map((lens) => (
-                        <button
-                          className={joinClasses("chip-btn", pairLens === lens.id && "active")}
-                          key={lens.id}
-                          onClick={() => {
-                            setPairLens(lens.id as PairLens);
-                            setPairPage(0);
-                            setPairActiveName(null);
-                          }}
-                          type="button"
-                        >
-                          {lens.label}
-                        </button>
-                      ))
-                    : null}
+            <ArchiveTaxonomyPanel
+              className="pair-panel"
+              confidenceContainerId="pairTrackConfFilters"
+              confidenceFilters={
+                pairPayload
+                  ? CONF_FILTER_LEVELS.map((filter) => {
+                      const count =
+                        filter === "all"
+                          ? pairPayload.sharedTracks.length
+                          : pairPayload.sharedTracks.filter(
+                              (track) => track.confidenceCounts[filter] > 0,
+                            ).length;
+                      return {
+                        active: pairConfidence === filter,
+                        id: filter,
+                        label: filter === "all" ? `All (${fmt(count)})` : filter,
+                        onSelect: () => {
+                          setPairConfidence(filter);
+                          setPairPage(0);
+                          setPairActiveName(null);
+                        },
+                      };
+                    })
+                  : []
+              }
+              lensOptions={
+                pairPayload
+                  ? [
+                      { active: pairLens === "genres", id: "genres", label: "Genres" },
+                      { active: pairLens === "labels", id: "labels", label: "Labels" },
+                      { active: pairLens === "artists", id: "artists", label: "Artists" },
+                      { active: pairLens === "tracks", id: "tracks", label: "Tracks" },
+                    ]
+                  : []
+              }
+              lensTabsId="pairTabs"
+              onLensChange={(lensId) => {
+                setPairLens(lensId as PairLens);
+                setPairPage(0);
+                setPairActiveName(null);
+              }}
+              pager={
+                <div className="pager" id="pairPager">
+                  {pairPayload && pairLens !== "tracks" ? (
+                    <>
+                      <button
+                        disabled={safePairPage <= 0}
+                        onClick={() => setPairPage((current) => current - 1)}
+                        type="button"
+                      >
+                        Prev
+                      </button>
+                      <span className="info">
+                        Page {safePairPage + 1} / {pairTotalPages}
+                      </span>
+                      <button
+                        disabled={safePairPage >= pairTotalPages - 1}
+                        onClick={() => setPairPage((current) => current + 1)}
+                        type="button"
+                      >
+                        Next
+                      </button>
+                    </>
+                  ) : null}
                 </div>
-              </div>
-              <p className="panel-copy" id="pairSummary">
-                {pairPayload
+              }
+              rowsId="pairRows"
+              search={{
+                id: "pairSearch",
+                onChange: (value) => {
+                  setPairQuery(value);
+                  setPairPage(0);
+                  setPairActiveName(null);
+                },
+                placeholder: "search pair entries",
+                value: pairQuery,
+              }}
+              sort={{
+                id: "pairSort",
+                onChange: (value) => setPairSort(value === "alpha" ? "alpha" : "count"),
+                options: [
+                  { label: "HIGHEST USAGE", value: "count" },
+                  { label: "ALPHABETICAL", value: "alpha" },
+                ],
+                value: pairSort,
+              }}
+              style={{ marginTop: 12 }}
+              summary={
+                pairPayload
                   ? `Score ${fmt(pairPayload.normalizedScore)} | ${fmt(pairPayload.sharedTracksCount)} tracks | ${fmt(pairPayload.sharedLabelsCount)} labels | ${fmt(pairPayload.sharedGenresCount)} genres`
-                  : "Pick an edge in the network or select exactly two artists."}
-              </p>
-
-              <div className="taxonomy-controls-bar">
-                <div className="control taxonomy-search-control">
-                  <input
-                    id="pairSearch"
-                    onChange={(event) => {
-                      setPairQuery(event.target.value);
-                      setPairPage(0);
-                      setPairActiveName(null);
-                    }}
-                    placeholder="search pair entries"
-                    type="text"
-                    value={pairQuery}
-                  />
-                </div>
-                <div className="taxonomy-controls-row">
-                  <div className="pill-row" id="pairThresholds">
-                    {pairPayload ? (
-                      <div className="threshold-stepper">
-                        <button
-                          className="chip-btn threshold-arrow"
-                          disabled={pairThreshold === THRESHOLD_LEVELS[0]}
-                          onClick={() => setPairThreshold((current) => stepThresholdValue(current, THRESHOLD_LEVELS, -1))}
-                          type="button"
-                        >
-                          ▼
-                        </button>
-                        <span className="chip-btn threshold-value">{fmt(pairThreshold)}+ SETS</span>
-                        <button
-                          className="chip-btn threshold-arrow"
-                          disabled={pairThreshold === THRESHOLD_LEVELS[THRESHOLD_LEVELS.length - 1]}
-                          onClick={() => setPairThreshold((current) => stepThresholdValue(current, THRESHOLD_LEVELS, 1))}
-                          type="button"
-                        >
-                          ▲
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="pill-row" id="pairTrackConfFilters">
-                    {pairPayload
-                      ? CONF_FILTER_LEVELS.map((filter) => {
-                          const count =
-                            filter === "all"
-                              ? pairPayload.sharedTracks.length
-                              : pairPayload.sharedTracks.filter(
-                                  (track) => track.confidenceCounts[filter] > 0,
-                                ).length;
-                          return (
-                            <button
-                              className={joinClasses("chip-btn", pairConfidence === filter && "active")}
-                              key={filter}
-                              onClick={() => {
-                                setPairConfidence(filter);
-                                setPairPage(0);
-                                setPairActiveName(null);
-                              }}
-                              type="button"
-                            >
-                              {filter === "all" ? `All (${fmt(count)})` : filter}
-                            </button>
-                          );
-                        })
-                      : null}
-                  </div>
-                  <div className="control taxonomy-sort-control">
-                    <span aria-hidden="true" className="taxonomy-sort-icon">
-                      ↕
-                    </span>
-                    <select
-                      id="pairSort"
-                      onChange={(event) => setPairSort(event.target.value === "alpha" ? "alpha" : "count")}
-                      value={pairSort}
-                    >
-                      <option value="count">Highest Usage</option>
-                      <option value="alpha">Alphabetical</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rows" id="pairRows">
+                  : "Pick an edge in the network or select exactly two artists."
+              }
+              threshold={
+                pairPayload
+                  ? {
+                      canDecrease: pairThreshold !== THRESHOLD_LEVELS[0],
+                      canIncrease: pairThreshold !== THRESHOLD_LEVELS[THRESHOLD_LEVELS.length - 1],
+                      containerId: "pairThresholds",
+                      onDecrease: () =>
+                        setPairThreshold((current) => stepThresholdValue(current, THRESHOLD_LEVELS, -1)),
+                      onIncrease: () =>
+                        setPairThreshold((current) => stepThresholdValue(current, THRESHOLD_LEVELS, 1)),
+                      valueLabel: `${fmt(pairThreshold)}+ SETS`,
+                    }
+                  : null
+              }
+              title={
+                pairPayload
+                  ? `Pair Analysis Workspace: ${pairPayload.artistA.name} x ${pairPayload.artistB.name}`
+                  : "Pair Analysis Workspace"
+              }
+              titleId="pairTitle"
+            >
                 {pairPayload ? (
                   pairLens === "tracks" ? (
                     <div className="inline-evidence">
                       <p className="inline-head">Tracks | {fmt(pairRows.length)} matching tracks</p>
                       <div className="evidence-grid">
                         {pairRows.flatMap((row) =>
-                          row.tracks.map((track) => (
-                            <TrackCard
-                              key={track.trackKey}
-                              openState={
-                                trackCardStates[track.trackKey] ?? {
-                                  sourcesOpen: false,
-                                  spotifyOpen: false,
+                          row.tracks.map((track) => {
+                            const sourceGroups = buildTrackCardSourceGroups(track);
+                            const sourceDjs = sourceGroups.length;
+                            const sourceSets = sourceGroups.reduce((total, group) => total + group.links.length, 0);
+                            return (
+                              <ArchiveEvidenceTrackCard
+                                albumArt={track.albumArt}
+                                confidence={primaryConfidenceFromCounts(track.confidenceCounts)}
+                                dataTrackKey={track.trackKey}
+                                key={track.trackKey}
+                                openState={
+                                  trackCardStates[track.trackKey] ?? {
+                                    sourcesOpen: false,
+                                    spotifyOpen: false,
+                                  }
                                 }
-                              }
-                              onToggleSources={toggleTrackSources(track.trackKey)}
-                              onToggleSpotify={toggleTrackSpotify(track.trackKey)}
-                              style={trackCardStyles[track.trackKey] ?? null}
-                              track={track}
-                            />
-                          )),
+                                onToggleSources={toggleTrackSources(track.trackKey)}
+                                onToggleSpotify={toggleTrackSpotify(track.trackKey)}
+                                sourceGroups={sourceGroups}
+                                sourceLabel={`Sets (${fmt(sourceDjs)} DJs, ${fmt(sourceSets)} Sets)`}
+                                spotifyTrackId={extractSpotifyTrackId(track.spotifyUrl)}
+                                style={trackCardStyles[track.trackKey] ?? null}
+                                title={track.title}
+                                titlePrefix={`${track.artist} - `}
+                              />
+                            );
+                          }),
                         )}
                       </div>
                     </div>
@@ -2486,21 +2392,33 @@ export function ArchiveHomeExplorer({
                                 </p>
                               </div>
                               <div className="evidence-grid">
-                                {row.tracks.map((track) => (
-                                  <TrackCard
-                                    key={track.trackKey}
-                                    openState={
-                                      trackCardStates[track.trackKey] ?? {
-                                        sourcesOpen: false,
-                                        spotifyOpen: false,
+                                {row.tracks.map((track) => {
+                                  const sourceGroups = buildTrackCardSourceGroups(track);
+                                  const sourceDjs = sourceGroups.length;
+                                  const sourceSets = sourceGroups.reduce((total, group) => total + group.links.length, 0);
+                                  return (
+                                    <ArchiveEvidenceTrackCard
+                                      albumArt={track.albumArt}
+                                      confidence={primaryConfidenceFromCounts(track.confidenceCounts)}
+                                      dataTrackKey={track.trackKey}
+                                      key={track.trackKey}
+                                      openState={
+                                        trackCardStates[track.trackKey] ?? {
+                                          sourcesOpen: false,
+                                          spotifyOpen: false,
+                                        }
                                       }
-                                    }
-                                    onToggleSources={toggleTrackSources(track.trackKey)}
-                                    onToggleSpotify={toggleTrackSpotify(track.trackKey)}
+                                      onToggleSources={toggleTrackSources(track.trackKey)}
+                                      onToggleSpotify={toggleTrackSpotify(track.trackKey)}
+                                      sourceGroups={sourceGroups}
+                                      sourceLabel={`Sets (${fmt(sourceDjs)} DJs, ${fmt(sourceSets)} Sets)`}
+                                      spotifyTrackId={extractSpotifyTrackId(track.spotifyUrl)}
                                       style={trackCardStyles[track.trackKey] ?? null}
-                                    track={track}
-                                  />
-                                ))}
+                                      title={track.title}
+                                      titlePrefix={`${track.artist} - `}
+                                    />
+                                  );
+                                })}
                               </div>
                             </div>
                           ) : null}
@@ -2513,31 +2431,7 @@ export function ArchiveHomeExplorer({
                 ) : (
                   <div className="empty">No active pair selected.</div>
                 )}
-              </div>
-              <div className="pager" id="pairPager">
-                {pairPayload && pairLens !== "tracks" ? (
-                  <>
-                    <button
-                      disabled={safePairPage <= 0}
-                      onClick={() => setPairPage((current) => current - 1)}
-                      type="button"
-                    >
-                      Prev
-                    </button>
-                    <span className="info">
-                      Page {safePairPage + 1} / {pairTotalPages}
-                    </span>
-                    <button
-                      disabled={safePairPage >= pairTotalPages - 1}
-                      onClick={() => setPairPage((current) => current + 1)}
-                      type="button"
-                    >
-                      Next
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            </div>
+            </ArchiveTaxonomyPanel>
           </div>
         </section>
 
@@ -2554,7 +2448,7 @@ export function ArchiveHomeExplorer({
             </div>
 
             <div className="set-panel">
-              <div className="controls-grid" style={{ marginBottom: 10, marginTop: 0 }}>
+              <div className="controls-grid set-library-controls" style={{ marginBottom: 10, marginTop: 0 }}>
                 <div className="control">
                   <label htmlFor="setSearch">Search Sets</label>
                   <input
@@ -2580,7 +2474,7 @@ export function ArchiveHomeExplorer({
                   >
                     {setLibrary.artistOptions.map((artistOption) => (
                       <option key={artistOption} value={artistOption}>
-                        {artistOption === "ALL" ? "All Artists" : artistOption}
+                        {artistOption === "ALL" ? "ALL ARTISTS" : artistOption.toUpperCase()}
                       </option>
                     ))}
                   </select>
@@ -2595,10 +2489,10 @@ export function ArchiveHomeExplorer({
                     }}
                     value={setSort}
                   >
-                    <option value="default">Default</option>
-                    <option value="rate">Recognition Rate</option>
-                    <option value="tracks">Track Count</option>
-                    <option value="duration">Duration</option>
+                    <option value="default">DEFAULT</option>
+                    <option value="rate">RECOGNITION RATE</option>
+                    <option value="tracks">TRACK COUNT</option>
+                    <option value="duration">DURATION</option>
                   </select>
                 </div>
               </div>
@@ -2608,6 +2502,7 @@ export function ArchiveHomeExplorer({
                   setLibrary.items.map((setItem) => {
                     const expanded = expandedSets.includes(setItem.slug);
                     const tracklist = setTracklists[setItem.slug] ?? [];
+                    const tracklistError = tracklistErrors[setItem.slug];
                     const tracklistLoading = loadingTracklists[setItem.slug] ?? false;
                     return (
                       <ArchiveSetCard
@@ -2651,7 +2546,7 @@ export function ArchiveHomeExplorer({
                           label: `${track.artist} - ${track.title}`,
                           startTimeFormatted: track.startTimeFormatted,
                         }))}
-                        tracklistEmptyLabel="No recognized tracks in this set."
+                        tracklistEmptyLabel={tracklistError ?? "No recognized tracks in this set."}
                         tracklistExpanded={expanded}
                         tracklistLoading={tracklistLoading}
                       />

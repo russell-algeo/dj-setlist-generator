@@ -28,6 +28,10 @@ import type {
 import { ARCHIVE_SET_LIBRARY_PAGE_SIZE } from "@/lib/archive/constants";
 import type { ArchiveConfidence } from "@/lib/archive/types";
 import {
+  applyArtistCardImageFallbacks,
+  buildHomeHeroPayload,
+} from "@/lib/archive/home-visuals";
+import {
   asRecord,
   buildTrackKey,
   formatDuration,
@@ -59,6 +63,11 @@ type HomeArtistCardRow = {
   slug: string;
   totalAppearances: number | string;
   uniqueTracks: number | string;
+};
+
+type HomeArtistCoverImageRow = {
+  artistSlug: string;
+  imageUrl: string | null;
 };
 
 type HomeGlobalStatsRow = {
@@ -225,17 +234,6 @@ const primaryConfidenceFromCounts = (
   }
 
   return best;
-};
-
-const randomShuffle = <T,>(items: T[]) => {
-  const output = [...items];
-
-  for (let index = output.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [output[index], output[swapIndex]] = [output[swapIndex]!, output[index]!];
-  }
-
-  return output;
 };
 
 const buildTickerItems = ({
@@ -1199,21 +1197,42 @@ const getUserSetIds = async (db: ReturnType<typeof getDb>, userId: string): Prom
 
 export const getWorkspaceArtistCards = async (userId: string): Promise<ArchiveHomeArtistCard[]> => {
   const db = getDb();
-  const rows = await db
-    .select({
-      id: artists.id,
-      slug: artists.slug,
-      name: artists.name,
-      imageUrl: artists.imageUrl,
-      setCount: sql<number>`count(distinct ${sets.id})`,
-    })
-    .from(artists)
-    .innerJoin(setArtists, and(eq(setArtists.artistId, artists.id), eq(setArtists.role, "primary")))
-    .innerJoin(sets, eq(sets.id, setArtists.setId))
-    .innerJoin(setRuns, and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)))
-    .groupBy(artists.id, artists.slug, artists.name, artists.imageUrl)
-    .orderBy(asc(artists.name));
-  return rows.map((row) => ({
+  const [rows, coverImageResult] = await Promise.all([
+    db
+      .select({
+        id: artists.id,
+        slug: artists.slug,
+        name: artists.name,
+        imageUrl: artists.imageUrl,
+        setCount: sql<number>`count(distinct ${sets.id})`,
+      })
+      .from(artists)
+      .innerJoin(setArtists, and(eq(setArtists.artistId, artists.id), eq(setArtists.role, "primary")))
+      .innerJoin(sets, eq(sets.id, setArtists.setId))
+      .innerJoin(setRuns, and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)))
+      .groupBy(artists.id, artists.slug, artists.name, artists.imageUrl)
+      .orderBy(asc(artists.name)),
+    db.execute(sql<HomeArtistCoverImageRow>`
+      WITH user_sets AS (
+        SELECT DISTINCT s.id
+        FROM "app"."sets" s
+        JOIN "ops"."set_runs" sr
+          ON sr.source_url = s.source_url
+         AND sr.requested_by = ${userId}
+      )
+      SELECT DISTINCT ON (library.artist_slug)
+        library.artist_slug AS "artistSlug",
+        library.thumbnail_url AS "imageUrl"
+      FROM "app"."archive_home_set_library_index_mv" library
+      JOIN user_sets
+        ON user_sets.id = library.set_id
+      WHERE library.thumbnail_url IS NOT NULL
+        AND library.thumbnail_url <> ''
+      ORDER BY library.artist_slug, library.sort_recognition_rate DESC, library.set_slug ASC
+    `),
+  ]);
+
+  const artistCards = rows.map((row) => ({
     id: row.id,
     imageUrl: row.imageUrl,
     name: row.name,
@@ -1222,6 +1241,11 @@ export const getWorkspaceArtistCards = async (userId: string): Promise<ArchiveHo
     totalAppearances: 0,
     uniqueTracks: 0,
   }));
+  const fallbackImageBySlug = new Map(
+    asRows<HomeArtistCoverImageRow>(coverImageResult.rows).map((row) => [row.artistSlug, row.imageUrl]),
+  );
+
+  return applyArtistCardImageFallbacks(artistCards, fallbackImageBySlug);
 };
 
 export const getWorkspaceSetLibraryPayload = async ({
@@ -1321,6 +1345,48 @@ export const getWorkspaceSetLibraryPayload = async ({
   };
 };
 
+const getWorkspaceHeroSetCandidates = async (userId: string): Promise<ArchiveHomeHeroSet[]> => {
+  const db = getDb();
+  const result = await db.execute(sql<HomeHeroSetRow>`
+    WITH user_sets AS (
+      SELECT DISTINCT s.id
+      FROM "app"."sets" s
+      JOIN "ops"."set_runs" sr
+        ON sr.source_url = s.source_url
+       AND sr.requested_by = ${userId}
+    )
+    SELECT
+      library.set_id::text AS id,
+      library.set_slug AS slug,
+      library.set_title AS title,
+      library.artist_slug AS "artistSlug",
+      library.artist_name AS "artistName",
+      library.thumbnail_url AS "thumbnailUrl",
+      library.duration_seconds AS duration,
+      library.recognition_rate AS "recognitionRate",
+      library.total_tracks AS "totalTracks"
+    FROM "app"."archive_home_set_library_index_mv" library
+    JOIN user_sets
+      ON user_sets.id = library.set_id
+    WHERE library.thumbnail_url IS NOT NULL
+      AND library.thumbnail_url <> ''
+    ORDER BY library.sort_recognition_rate DESC, library.set_slug ASC
+    LIMIT 160
+  `);
+
+  return asRows<HomeHeroSetRow>(result.rows).map<ArchiveHomeHeroSet>((row) => ({
+    artistName: row.artistName ?? "Unknown Artist",
+    artistSlug: row.artistSlug ?? "",
+    duration: numberOrZero(row.duration),
+    id: row.id,
+    recognitionRate: nullableNumber(row.recognitionRate),
+    slug: row.slug,
+    thumbnailUrl: row.thumbnailUrl,
+    title: row.title,
+    totalTracks: numberOrZero(row.totalTracks),
+  }));
+};
+
 export const getWorkspaceNetworkPayload = async (
   userId: string,
 ): Promise<ArchiveHomeNetworkIndexPayload> => {
@@ -1365,42 +1431,6 @@ export const getWorkspaceNetworkPayload = async (
   };
 };
 
-const buildHeroPayload = ({
-  artistCards,
-  heroSetCandidates,
-  tickerItems,
-}: {
-  artistCards: ArchiveHomeArtistCard[];
-  heroSetCandidates: ArchiveHomeHeroSet[];
-  tickerItems: string[];
-}): ArchiveHomeBootstrapPayload["hero"] => {
-  const railBase = heroSetCandidates.length > 0 ? heroSetCandidates : [];
-  const shuffledSets = randomShuffle(railBase);
-  const railSets: ArchiveHomeHeroSet[] = [];
-
-  if (shuffledSets.length) {
-    const targetCount = Math.max(8, Math.min(12, shuffledSets.length * 2));
-
-    for (let index = 0; index < targetCount; index += 1) {
-      railSets.push(shuffledSets[index % shuffledSets.length]!);
-    }
-  }
-
-  const imagePool = artistCards.filter((artistCard) => Boolean(artistCard.imageUrl));
-  const heroArtist = imagePool.length > 0 ? randomShuffle(imagePool)[0] : null;
-  const heroImage =
-    heroArtist?.imageUrl ??
-    railSets.find((setItem) => Boolean(setItem.thumbnailUrl?.trim()))?.thumbnailUrl ??
-    null;
-
-  return {
-    imageAlt: heroArtist ? `${heroArtist.name} artist profile image` : "Set signal visual",
-    imageUrl: heroImage,
-    railSets,
-    tickerItems,
-  };
-};
-
 export const getArchiveHomeExplorerInitial = async ({
   artistFilter = "ALL",
   compareMode = "union",
@@ -1432,7 +1462,7 @@ export const getArchiveHomeExplorerInitial = async ({
       isWorkspace
         ? getWorkspaceSetLibraryPayload({ artistFilter, page, query, sort, userId: userId! })
         : getArchiveHomeSetLibraryPayload({ artistFilter, page, query, sort }),
-      isWorkspace ? Promise.resolve<ArchiveHomeHeroSet[]>([]) : getHeroSetCandidates(),
+      isWorkspace ? getWorkspaceHeroSetCandidates(userId!) : getHeroSetCandidates(),
     ]);
 
   const resolvedSelected =
@@ -1455,7 +1485,7 @@ export const getArchiveHomeExplorerInitial = async ({
     artistCards,
     generatedAt: globalStatsResult.generatedAt,
     globalStats: globalStatsResult.globalStats,
-    hero: buildHeroPayload({
+    hero: buildHomeHeroPayload({
       artistCards,
       heroSetCandidates,
       tickerItems,

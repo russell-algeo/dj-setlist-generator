@@ -19,6 +19,7 @@ import {
   type SubmissionDetailDto,
   type SubmissionListItemDto,
   type SubmissionRunActionSummary,
+  type SubmissionRunEventsPageDto,
   type TimelineItemDto,
 } from "@/lib/jobs/public";
 import { getSubmissionDetail } from "@/lib/jobs/submissions";
@@ -478,4 +479,59 @@ export const getPublicSubmissionDetail = async (submissionId: string) => {
   }
 
   return serializeSubmissionDetail(detail, runEventsByRun);
+};
+
+export const getPublicSubmissionRunEventsPage = async ({
+  page,
+  pageSize,
+  setRunId,
+  submissionId,
+}: {
+  page: number;
+  pageSize: number;
+  setRunId: string;
+  submissionId: string;
+}): Promise<SubmissionRunEventsPageDto | null> => {
+  const [run] = await db
+    .select({ id: setRuns.id })
+    .from(setRuns)
+    .where(and(eq(setRuns.id, setRunId), eq(setRuns.submissionId, submissionId)))
+    .limit(1);
+
+  if (!run) {
+    return null;
+  }
+
+  const allEvents = await db
+    .select({
+      id: workerEvents.id,
+      eventType: workerEvents.eventType,
+      message: workerEvents.message,
+      createdAt: workerEvents.createdAt,
+      setRunId: workerEvents.setRunId,
+      details: workerEvents.details,
+    })
+    .from(workerEvents)
+    .where(
+      and(
+        eq(workerEvents.submissionId, submissionId),
+        eq(workerEvents.setRunId, setRunId),
+        inArray(workerEvents.eventType, [...publicRunTimelineEventTypes]),
+      ),
+    )
+    .orderBy(desc(workerEvents.createdAt));
+
+  const timelineItems = buildTimelineItems(selectCurrentAttemptEvents(allEvents));
+  const safePageSize = Math.max(1, Math.min(pageSize, 20));
+  const totalCount = timelineItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / safePageSize));
+  const currentPage = Math.max(1, Math.min(page, totalPages));
+
+  return {
+    events: timelineItems.slice((currentPage - 1) * safePageSize, currentPage * safePageSize),
+    page: currentPage,
+    pageSize: safePageSize,
+    totalCount,
+    totalPages,
+  };
 };

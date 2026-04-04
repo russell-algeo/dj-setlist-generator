@@ -18,14 +18,6 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  async rewrites() {
-    return [
-      {
-        source: "/",
-        destination: "/__archive-home.html",
-      },
-    ];
-  },
 };
 
 export default nextConfig;

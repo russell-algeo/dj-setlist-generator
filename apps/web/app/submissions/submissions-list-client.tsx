@@ -1,26 +1,49 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  OperatorNotice,
+  operatorUiStyles,
+} from "@/components/operator/operator-ui";
 import { formatTimestamp } from "@/lib/format";
 import type {
   PublicSubmissionFilter,
   SubmissionListItemDto,
 } from "@/lib/jobs/public";
 
-import { usePolledJson } from "./use-polled-json";
 import { StatusPill } from "./status-pill";
+import { usePolledJson } from "./use-polled-json";
 
 type SubmissionsListClientProps = {
   filterStatus: PublicSubmissionFilter;
+  initialPage: number;
   initialSubmissions: SubmissionListItemDto[];
 };
+
+const PAGE_SIZE = 20;
+const FILTER_TABS: Array<{ label: string; value: PublicSubmissionFilter }> = [
+  { label: "All", value: "all" },
+  { label: "Active", value: "active" },
+  { label: "Partial", value: "partial" },
+  { label: "Complete", value: "completed" },
+  { label: "Failed", value: "failed" },
+  { label: "Cancelled", value: "cancelled" },
+];
 
 const MODE_LABEL: Record<string, string> = {
   url: "Single Set URL",
   artist: "Artist Discovery",
   curated_artist: "Curated Artist",
 };
+
+const tableColumns = {
+  "--operator-columns": "minmax(240px, 2fr) 160px minmax(180px, 1.25fr) 160px 120px",
+  "--operator-min-width": "860px",
+} as CSSProperties;
 
 const submissionsHaveActiveWork = (items: SubmissionListItemDto[]) =>
   items.some((submission) => submission.hasActiveWork);
@@ -55,8 +78,14 @@ const describeCounts = (submission: SubmissionListItemDto) => {
 
 export function SubmissionsListClient({
   filterStatus,
+  initialPage,
   initialSubmissions,
 }: SubmissionsListClientProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const listAnchorRef = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(initialPage);
   const {
     data: submissions,
     isRefreshing,
@@ -65,130 +94,160 @@ export function SubmissionsListClient({
     isPollingPausedForInactivity,
     resumePolling,
   } = usePolledJson<SubmissionListItemDto[]>({
-    initialData: initialSubmissions,
-    url: filterStatus === "all" ? "/api/jobs" : `/api/jobs?status=${filterStatus}`,
-    shouldPoll: submissionsHaveActiveWork,
     getActivityToken: getListActivityToken,
+    initialData: initialSubmissions,
     parseResponse: async (response) => {
       const body = await response.json();
       return (body as { submissions: SubmissionListItemDto[] }).submissions;
     },
+    shouldPoll: submissionsHaveActiveWork,
+    url: filterStatus === "all" ? "/api/jobs" : `/api/jobs?status=${filterStatus}`,
   });
+  const totalPages = Math.max(1, Math.ceil(submissions.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageSubmissions = useMemo(
+    () => submissions.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [currentPage, submissions],
+  );
+
+  useEffect(() => {
+    setPage(initialPage);
+  }, [filterStatus, initialPage]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const navigateToPage = (nextPage: number) => {
+    const clampedPage = Math.max(1, Math.min(totalPages, nextPage));
+    setPage(clampedPage);
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (clampedPage <= 1) {
+      params.delete("page");
+    } else {
+      params.set("page", String(clampedPage));
+    }
+
+    const href = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    router.replace(href, { scroll: false });
+    requestAnimationFrame(() => {
+      listAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
 
   return (
-    <>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 16,
-          marginBottom: 12,
-          color: "#4f4f4f",
-          fontSize: 9,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-        }}
-      >
+    <div className={operatorUiStyles.stack} ref={listAnchorRef}>
+      <div className={operatorUiStyles.liveMetaRow}>
         <span>
           {submissionsHaveActiveWork(submissions)
             ? isPollingPausedForInactivity
               ? "Live updates paused after 5 minutes without new activity"
               : "Live updates active"
             : "Snapshot"}
+          {" · "}
+          {isRefreshing ? "Refreshing…" : `Updated ${formatTimestamp(lastUpdatedAt)}`}
         </span>
-        <span>{isRefreshing ? "Refreshing…" : `Updated ${formatTimestamp(lastUpdatedAt)}`}</span>
-      </div>
-
-      {submissionsHaveActiveWork(submissions) && isPollingPausedForInactivity ? (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        {submissionsHaveActiveWork(submissions) && isPollingPausedForInactivity ? (
           <button
+            className={`${operatorUiStyles.button} ${operatorUiStyles.buttonGhost}`}
             onClick={() => void resumePolling()}
-            style={{
-              border: "1px solid #2a2a2a",
-              borderRadius: 4,
-              background: "#111",
-              color: "#b5b5b5",
-              fontSize: 9,
-              letterSpacing: "0.08em",
-              padding: "5px 9px",
-              textTransform: "uppercase",
-            }}
             type="button"
           >
             Resume live updates
           </button>
-        </div>
-      ) : null}
-
-      {refreshError ? (
-        <div
-          style={{
-            marginBottom: 12,
-            padding: "10px 12px",
-            border: "1px solid #3a1a1a",
-            borderRadius: 6,
-            background: "#120a0a",
-            color: "#8a3a3a",
-            fontSize: 10,
-          }}
-        >
-          Live refresh failed: {refreshError}
-        </div>
-      ) : null}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2fr 1fr 1.25fr 1fr 80px",
-          gap: 12,
-          padding: "0 0 8px",
-          borderBottom: "1px solid #1a1a1a",
-          fontSize: 9,
-          color: "#444",
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          minWidth: 760,
-        }}
-      >
-        <span>Submission</span>
-        <span>Mode</span>
-        <span>Sets</span>
-        <span>Submitted</span>
-        <span style={{ textAlign: "right" }}>Status</span>
+        ) : null}
       </div>
 
-      {submissions.length === 0 ? (
-        <div style={{ padding: "40px 0", color: "#444", fontSize: 11, textAlign: "center" }}>
-          No submissions yet.
-        </div>
-      ) : (
-        submissions.map((submission) => (
-          <Link
-            key={submission.id}
-            href={`/submissions/${submission.id}`}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "2fr 1fr 1.25fr 1fr 80px",
-              gap: 12,
-              padding: "12px 0",
-              borderBottom: "1px solid #0f0f0f",
-              alignItems: "center",
-              textDecoration: "none",
-              color: "inherit",
-              minWidth: 760,
-            }}
-          >
-            <div>
-              <div style={{ color: "#ccc", fontSize: 11 }}>{submission.displayTitle}</div>
-              <div style={{ color: "#333", fontSize: 9, marginTop: 2 }}>{submission.id.slice(0, 8)}…</div>
+      {refreshError ? (
+        <OperatorNotice
+          body={`Live refresh failed: ${refreshError}`}
+          title="Refresh error"
+          tone="danger"
+        />
+      ) : null}
+
+      <section className={operatorUiStyles.panel}>
+        <div className={operatorUiStyles.panelBody}>
+          <div className={operatorUiStyles.segmentRail}>
+            {FILTER_TABS.map((tab) => (
+              <Link
+                className={`${operatorUiStyles.segmentLink} ${filterStatus === tab.value ? operatorUiStyles.segmentLinkActive : ""}`}
+                href={tab.value === "all" ? "/submissions" : `/submissions?status=${tab.value}`}
+                key={tab.value}
+              >
+                {tab.label}
+              </Link>
+            ))}
+          </div>
+
+          <div className={operatorUiStyles.tableScroller}>
+            <div className={operatorUiStyles.tableGrid} style={tableColumns}>
+              <div className={operatorUiStyles.tableHeaderRow} style={tableColumns}>
+                <span>Submission</span>
+                <span>Mode</span>
+                <span>Sets</span>
+                <span>Submitted</span>
+                <span className={operatorUiStyles.alignRight}>Status</span>
+              </div>
+
+              {submissions.length === 0 ? (
+                <div className={operatorUiStyles.emptyState}>No submissions yet.</div>
+              ) : (
+                pageSubmissions.map((submission) => (
+                  <Link
+                    className={`${operatorUiStyles.tableRow} ${operatorUiStyles.tableRowInteractive}`}
+                    href={`/submissions/${submission.id}`}
+                    key={submission.id}
+                    style={tableColumns}
+                  >
+                    <div>
+                      <div className={operatorUiStyles.cellTitle}>{submission.displayTitle}</div>
+                      <div className={operatorUiStyles.cellMeta}>
+                        {submission.id.slice(0, 8)}…
+                      </div>
+                    </div>
+                    <span className={operatorUiStyles.muted}>
+                      {MODE_LABEL[submission.mode] ?? submission.mode}
+                    </span>
+                    <div className={operatorUiStyles.muted}>{describeCounts(submission)}</div>
+                    <span className={operatorUiStyles.dim}>
+                      {formatTimestamp(submission.createdAt)}
+                    </span>
+                    <StatusPill align="right" status={submission.status} />
+                  </Link>
+                ))
+              )}
             </div>
-            <span style={{ color: "#666", fontSize: 10 }}>{MODE_LABEL[submission.mode] ?? submission.mode}</span>
-            <div style={{ color: "#666", fontSize: 10, lineHeight: 1.6 }}>{describeCounts(submission)}</div>
-            <span style={{ color: "#555", fontSize: 10 }}>{formatTimestamp(submission.createdAt)}</span>
-            <StatusPill align="right" status={submission.status} />
-          </Link>
-        ))
-      )}
-    </>
+          </div>
+
+          {submissions.length > PAGE_SIZE ? (
+            <div className={operatorUiStyles.paginationRow}>
+              <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonGhost} ${operatorUiStyles.paginationButtonPrev}`}
+                disabled={currentPage <= 1}
+                onClick={() => navigateToPage(currentPage - 1)}
+                type="button"
+              >
+                Prev
+              </button>
+              <span className={operatorUiStyles.paginationMeta}>
+                Page {currentPage} / {totalPages} | {submissions.length} submissions
+              </span>
+              <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonGhost} ${operatorUiStyles.paginationButtonNext}`}
+                disabled={currentPage >= totalPages}
+                onClick={() => navigateToPage(currentPage + 1)}
+                type="button"
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </div>
   );
 }

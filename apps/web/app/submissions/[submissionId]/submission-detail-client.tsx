@@ -1,7 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  OperatorMetricCard,
+  OperatorNotice,
+  operatorUiStyles,
+} from "@/components/operator/operator-ui";
 import { formatTimestamp } from "@/lib/format";
 import {
   sortSubmissionRuns,
@@ -9,19 +14,22 @@ import {
   type SubmissionRunSortMode,
 } from "@/lib/jobs/public";
 
-import { RunRow } from "./run-row";
-import { usePolledJson } from "../use-polled-json";
+import styles from "../operator.module.css";
 import { StatusPill } from "../status-pill";
+import { usePolledJson } from "../use-polled-json";
+import { RunRow } from "./run-row";
 import { WorkflowTimeline } from "./run-workflow-timeline";
 
 type SubmissionDetailClientProps = {
   initialDetail: SubmissionDetailDto;
 };
 
+const RUNS_PAGE_SIZE = 20;
+
 const MODE_LABEL: Record<string, string> = {
-  url: "Single Set URL",
   artist: "Artist Discovery",
   curated_artist: "Curated Artist",
+  url: "Single Set URL",
 };
 
 const detailHasActiveWork = (detail: SubmissionDetailDto) => detail.hasActiveWork;
@@ -30,35 +38,27 @@ const getOutcomeBanner = (detail: SubmissionDetailDto) => {
   switch (detail.submission.status) {
     case "completed":
       return {
-        title: "Submission complete",
         body: "All eligible set runs have finished processing.",
-        borderColor: "#1f3a22",
-        background: "#0c140d",
-        color: "#88b08a",
+        title: "Submission complete",
+        tone: "success" as const,
       };
     case "partial":
       return {
-        title: "Submission completed with failures",
         body: "Some set runs completed successfully while others failed or were cancelled.",
-        borderColor: "#4a3a10",
-        background: "#120f08",
-        color: "#b79b55",
+        title: "Submission completed with failures",
+        tone: "warning" as const,
       };
     case "failed":
       return {
-        title: "Submission failed",
         body: "No remaining active work was able to complete successfully.",
-        borderColor: "#4a1d1d",
-        background: "#140b0b",
-        color: "#b97a7a",
+        title: "Submission failed",
+        tone: "danger" as const,
       };
     case "cancelled":
       return {
-        title: "Submission cancelled",
         body: "Queued work was cancelled and active work was asked to stop.",
-        borderColor: "#2f2f2f",
-        background: "#0f0f0f",
-        color: "#8a8a8a",
+        title: "Submission cancelled",
+        tone: "neutral" as const,
       };
     default:
       return null;
@@ -69,8 +69,10 @@ export function SubmissionDetailClient({
   initialDetail,
 }: SubmissionDetailClientProps) {
   const [sortMode, setSortMode] = useState<SubmissionRunSortMode>("status_first");
+  const [runPage, setRunPage] = useState(1);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
+  const runListRef = useRef<HTMLDivElement>(null);
 
   const {
     data: detail,
@@ -81,24 +83,29 @@ export function SubmissionDetailClient({
     isPollingPausedForInactivity,
     resumePolling,
   } = usePolledJson<SubmissionDetailDto>({
-    initialData: initialDetail,
-    url: `/api/jobs/${initialDetail.submission.id}`,
-    shouldPoll: detailHasActiveWork,
     getActivityToken: (nextDetail) => nextDetail.lastActivityAt,
+    initialData: initialDetail,
+    shouldPoll: detailHasActiveWork,
+    url: `/api/jobs/${initialDetail.submission.id}`,
   });
 
   const sortedRuns = sortSubmissionRuns(detail.runs, sortMode);
-
+  const totalRunPages = Math.max(1, Math.ceil(sortedRuns.length / RUNS_PAGE_SIZE));
+  const currentRunPage = Math.min(runPage, totalRunPages);
+  const pagedRuns = useMemo(
+    () => sortedRuns.slice((currentRunPage - 1) * RUNS_PAGE_SIZE, currentRunPage * RUNS_PAGE_SIZE),
+    [currentRunPage, sortedRuns],
+  );
   const metricCards = [
-    { value: detail.counts.totalCount, label: "Total Sets" },
-    { value: detail.counts.queuedCount, label: "Queued" },
-    { value: detail.counts.inFlightCount, label: "In Flight" },
-    { value: detail.counts.completedCount, label: "Complete" },
-    { value: detail.counts.failedCount, label: "Failed" },
+    { label: "Total Sets", value: detail.counts.totalCount },
+    { label: "Queued", value: detail.counts.queuedCount },
+    { label: "In Flight", value: detail.counts.inFlightCount },
+    { label: "Complete", value: detail.counts.completedCount },
+    { label: "Failed", value: detail.counts.failedCount },
   ];
 
   if (detail.counts.cancelledCount > 0) {
-    metricCards.push({ value: detail.counts.cancelledCount, label: "Cancelled" });
+    metricCards.push({ label: "Cancelled", value: detail.counts.cancelledCount });
   }
 
   const outcomeBanner = getOutcomeBanner(detail);
@@ -111,11 +118,11 @@ export function SubmissionDetailClient({
 
     try {
       const response = await fetch(url, {
-        method: "POST",
         headers: {
-          "content-type": "application/json",
           accept: "application/json",
+          "content-type": "application/json",
         },
+        method: "POST",
       });
 
       if (!response.ok) {
@@ -131,441 +138,276 @@ export function SubmissionDetailClient({
     }
   };
 
+  const updateLabel = detail.hasActiveWork
+    ? isPollingPausedForInactivity
+      ? "Live updates paused after 5 minutes without new activity"
+      : "Live updates active"
+    : "Snapshot";
+
+  useEffect(() => {
+    setRunPage(1);
+  }, [sortMode]);
+
+  useEffect(() => {
+    if (runPage > totalRunPages) {
+      setRunPage(totalRunPages);
+    }
+  }, [runPage, totalRunPages]);
+
+  const navigateRunPage = (nextPage: number) => {
+    const clampedPage = Math.max(1, Math.min(totalRunPages, nextPage));
+    setRunPage(clampedPage);
+    requestAnimationFrame(() => {
+      runListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   return (
-    <>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 20,
-          marginBottom: 24,
-          paddingBottom: 20,
-          borderBottom: "1px solid #1a1a1a",
-        }}
-      >
-        <div>
-          <h1
-            style={{
-              color: "#fff",
-              fontSize: 14,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              margin: "0 0 8px",
-            }}
-          >
+    <div className={operatorUiStyles.stack}>
+      <section className={styles.summaryHeader}>
+        <div className={styles.summaryCopy}>
+          <h1 className={styles.summaryTitle}>
             {detail.submission.artistName ?? detail.submission.sourceUrl ?? detail.submission.id}
           </h1>
-          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 8 }}>
-            <span style={{ color: "#555", fontSize: 10 }}>
-              <strong style={{ color: "#888" }}>Mode:</strong>{" "}
-              {MODE_LABEL[detail.submission.mode] ?? detail.submission.mode}
+          <div className={styles.summaryMeta}>
+            <span>
+              <strong>Mode:</strong> {MODE_LABEL[detail.submission.mode] ?? detail.submission.mode}
             </span>
-            <span style={{ color: "#555", fontSize: 10 }}>
-              <strong style={{ color: "#888" }}>Submitted:</strong>{" "}
-              {formatTimestamp(detail.submission.createdAt)}
+            <span>
+              <strong>Submitted:</strong> {formatTimestamp(detail.submission.createdAt)}
+            </span>
+            <span>
+              <strong>Updated:</strong> {formatTimestamp(detail.submission.updatedAt)}
             </span>
           </div>
+
           {submissionAliases.length > 0 ? (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 10,
-              }}
-            >
-              <span
-                style={{
-                  color: "#666",
-                  fontSize: 10,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Aliases
-              </span>
+            <div className={styles.aliasRow}>
+              <span className={operatorUiStyles.label}>Aliases</span>
               {submissionAliases.map((alias) => (
-                <span
-                  key={alias}
-                  style={{
-                    border: "1px solid #1f1f1f",
-                    borderRadius: 999,
-                    background: "#111",
-                    color: "#b5b5b5",
-                    fontSize: 10,
-                    padding: "6px 10px",
-                  }}
-                >
+                <span className={styles.aliasChip} key={alias}>
                   {alias}
                 </span>
               ))}
             </div>
           ) : null}
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              gap: 10,
-              color: "#444",
-              fontSize: 9,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-            }}
-          >
+
+          <div className={operatorUiStyles.liveMetaRow}>
             <span>
-              {detail.hasActiveWork
-                ? isPollingPausedForInactivity
-                  ? "Live updates paused after 5 minutes without new activity"
-                  : "Live updates active"
-                : "Snapshot"}{" "}
-              · {isRefreshing ? "Refreshing…" : `Updated ${formatTimestamp(lastUpdatedAt)}`}
+              {updateLabel} · {isRefreshing ? "Refreshing…" : `Updated ${formatTimestamp(lastUpdatedAt)}`}
             </span>
+          </div>
+
+          {detail.lastActivityMessage ? (
+            <div className={styles.latestPanel}>
+              <div className={operatorUiStyles.label}>Latest Activity</div>
+              <div className={styles.latestText}>
+                {detail.lastActivityMessage} · {formatTimestamp(detail.lastActivityAt)}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className={styles.summaryAside}>
+          <StatusPill status={detail.submission.status} />
+          <div className={styles.summaryActions}>
             {detail.hasActiveWork && isPollingPausedForInactivity ? (
               <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonGhost}`}
                 onClick={() => void resumePolling()}
-                style={{
-                  border: "1px solid #2a2a2a",
-                  borderRadius: 4,
-                  background: "#111",
-                  color: "#b5b5b5",
-                  fontSize: 9,
-                  letterSpacing: "0.08em",
-                  padding: "5px 9px",
-                  textTransform: "uppercase",
-                }}
                 type="button"
               >
                 Resume live updates
               </button>
             ) : null}
+            {detail.actions.canRetry ? (
+              <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonPrimary}`}
+                disabled={pendingActionKey === "submission:retry"}
+                onClick={() =>
+                  void runAction(`/api/jobs/${detail.submission.id}/retry`, "submission:retry")
+                }
+                type="button"
+              >
+                {pendingActionKey === "submission:retry" ? "Retrying…" : "Retry Failed Sets"}
+              </button>
+            ) : null}
+            {detail.actions.canCancel ? (
+              <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonDanger}`}
+                disabled={pendingActionKey === "submission:cancel"}
+                onClick={() =>
+                  void runAction(`/api/jobs/${detail.submission.id}/cancel`, "submission:cancel")
+                }
+                type="button"
+              >
+                {pendingActionKey === "submission:cancel" ? "Cancelling…" : "Cancel Submission"}
+              </button>
+            ) : null}
           </div>
         </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
-          <StatusPill status={detail.submission.status} />
-
-          {detail.hasActiveWork ? (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {detail.actions.canRetry ? (
-                <button
-                  disabled={pendingActionKey === "submission:retry"}
-                  onClick={() =>
-                    void runAction(`/api/jobs/${detail.submission.id}/retry`, "submission:retry")
-                  }
-                  style={{
-                    border: "1px solid #2a2a2a",
-                    borderRadius: 4,
-                    background: "#111",
-                    color: "#b5b5b5",
-                    fontSize: 9,
-                    letterSpacing: "0.08em",
-                    padding: "6px 10px",
-                    textTransform: "uppercase",
-                  }}
-                  type="button"
-                >
-                  {pendingActionKey === "submission:retry" ? "Retrying…" : "Retry Failed Sets"}
-                </button>
-              ) : null}
-              {detail.actions.canCancel ? (
-                <button
-                  disabled={pendingActionKey === "submission:cancel"}
-                  onClick={() =>
-                    void runAction(`/api/jobs/${detail.submission.id}/cancel`, "submission:cancel")
-                  }
-                  style={{
-                    border: "1px solid #2a2a2a",
-                    borderRadius: 4,
-                    background: "#111",
-                    color: "#b5b5b5",
-                    fontSize: 9,
-                    letterSpacing: "0.08em",
-                    padding: "6px 10px",
-                    textTransform: "uppercase",
-                  }}
-                  type="button"
-                >
-                  {pendingActionKey === "submission:cancel" ? "Cancelling…" : "Cancel Submission"}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
+      </section>
 
       {refreshError ? (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: "10px 12px",
-            border: "1px solid #3a1a1a",
-            borderRadius: 6,
-            background: "#120a0a",
-            color: "#8a3a3a",
-            fontSize: 10,
-          }}
-        >
-          Live refresh failed: {refreshError}
-        </div>
+        <OperatorNotice
+          body={`Live refresh failed: ${refreshError}`}
+          title="Refresh error"
+          tone="danger"
+        />
       ) : null}
 
       {actionError ? (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: "10px 12px",
-            border: "1px solid #3a1a1a",
-            borderRadius: 6,
-            background: "#120a0a",
-            color: "#8a3a3a",
-            fontSize: 10,
-          }}
-        >
-          Action failed: {actionError}
-        </div>
+        <OperatorNotice
+          body={`Action failed: ${actionError}`}
+          title="Action error"
+          tone="danger"
+        />
       ) : null}
 
       {outcomeBanner ? (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: "14px 16px",
-            border: `1px solid ${outcomeBanner.borderColor}`,
-            borderRadius: 6,
-            background: outcomeBanner.background,
-            color: outcomeBanner.color,
-          }}
-        >
-          <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
-            {outcomeBanner.title}
-          </div>
-          <div style={{ fontSize: 11, lineHeight: 1.6 }}>{outcomeBanner.body}</div>
-          {detail.actions.canRetry ? (
-            <button
-              disabled={pendingActionKey === "submission:retry"}
-              onClick={() =>
-                void runAction(`/api/jobs/${detail.submission.id}/retry`, "submission:retry")
-              }
-              style={{
-                marginTop: 12,
-                border: "1px solid #2a2a2a",
-                borderRadius: 4,
-                background: "#111",
-                color: "#b5b5b5",
-                fontSize: 9,
-                letterSpacing: "0.08em",
-                padding: "6px 10px",
-                textTransform: "uppercase",
-              }}
-              type="button"
-            >
-              {pendingActionKey === "submission:retry" ? "Retrying…" : "Retry Failed Sets"}
-            </button>
-          ) : null}
-        </div>
+        <OperatorNotice
+          action={
+            detail.actions.canRetry ? (
+              <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonPrimary}`}
+                disabled={pendingActionKey === "submission:retry"}
+                onClick={() =>
+                  void runAction(`/api/jobs/${detail.submission.id}/retry`, "submission:retry")
+                }
+                type="button"
+              >
+                {pendingActionKey === "submission:retry" ? "Retrying…" : "Retry Failed Sets"}
+              </button>
+            ) : null
+          }
+          body={outcomeBanner.body}
+          title={outcomeBanner.title}
+          tone={outcomeBanner.tone}
+        />
       ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${metricCards.length}, minmax(0, 1fr))`,
-          gap: 12,
-          marginBottom: 28,
-        }}
-      >
-        {metricCards.map(({ value, label }) => (
-          <div
-            key={label}
-            style={{
-              background: "#111",
-              border: "1px solid #1c1c1c",
-              borderRadius: 6,
-              padding: "14px 16px",
-            }}
-          >
-            <div style={{ color: "#ddd", fontSize: 20, marginBottom: 4 }}>{value}</div>
-            <div style={{ color: "#444", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-              {label}
-            </div>
-          </div>
+      <section className={operatorUiStyles.metricGrid}>
+        {metricCards.map(({ label, value }) => (
+          <OperatorMetricCard key={label} label={label} value={value} />
         ))}
-      </div>
+      </section>
 
       {detail.recognitionRate !== null ? (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: "10px 14px",
-            background: "#0d0d0d",
-            border: "1px solid #1c1c1c",
-            borderRadius: 5,
-            display: "flex",
-            gap: 24,
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ color: "#666", fontSize: 10 }}>
-            <strong style={{ color: "#888" }}>Tracks identified:</strong> {detail.totalRecognized}
-          </span>
-          <span style={{ color: "#666", fontSize: 10 }}>
-            <strong style={{ color: "#888" }}>Recognition rate:</strong> {detail.recognitionRate}%
-          </span>
-          {detail.discoveryCandidateCount > 0 ? (
-            <span style={{ color: "#666", fontSize: 10 }}>
-              <strong style={{ color: "#888" }}>Discovery candidates:</strong> {detail.discoveryCandidateCount}
+        <section className={operatorUiStyles.factPanel}>
+          <div className={operatorUiStyles.factList}>
+            <span className={operatorUiStyles.fact}>
+              <strong>Tracks identified:</strong> {detail.totalRecognized}
             </span>
-          ) : null}
-        </div>
+            <span className={operatorUiStyles.fact}>
+              <strong>Recognition rate:</strong> {detail.recognitionRate}%
+            </span>
+            {detail.discoveryCandidateCount > 0 ? (
+              <span className={operatorUiStyles.fact}>
+                <strong>Discovery candidates:</strong> {detail.discoveryCandidateCount}
+              </span>
+            ) : null}
+          </div>
+        </section>
       ) : null}
 
       {detail.submission.mode === "artist" && detail.workflowSteps ? (
-        <div
-          style={{
-            marginBottom: 20,
-            padding: "12px 14px",
-            borderRadius: 6,
-            border: "1px solid #1c1c1c",
-            background: "#0f0f0f",
-          }}
-        >
-          <div
-            style={{
-              color: "#666",
-              fontSize: 9,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              marginBottom: 12,
-            }}
-          >
-            Submission timeline
-          </div>
+        <section className={styles.workflowPanel}>
+          <div className={operatorUiStyles.label}>Submission Timeline</div>
           <WorkflowTimeline steps={detail.workflowSteps} />
-        </div>
+        </section>
       ) : null}
 
       {detail.submission.mode === "artist" && detail.runs.length === 0 && detail.hasActiveWork ? (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: "10px 14px",
-            background: "#0d0d0d",
-            border: "1px solid #1c1c1c",
-            borderRadius: 5,
-            color: "#666",
-            fontSize: 10,
-          }}
-        >
-          Discovery is still running. Set runs will appear here as soon as discovery finishes and queued sets are created.
-        </div>
+        <OperatorNotice
+          body="Discovery is still running. Set runs will appear here as soon as discovery finishes and queued sets are created."
+          title="No set runs yet"
+          tone="neutral"
+        />
       ) : null}
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 10,
-        }}
-      >
-        <div style={{ color: "#555", fontSize: 10 }}>Run order</div>
-        <div
-          style={{
-            display: "flex",
-            border: "1px solid #1c1c1c",
-            borderRadius: 4,
-            overflow: "hidden",
-            background: "#111",
-          }}
-        >
-          <button
-            onClick={() => setSortMode("status_first")}
-            style={{
-              border: "none",
-              background: sortMode === "status_first" ? "#fff" : "transparent",
-              color: sortMode === "status_first" ? "#000" : "#666",
-              padding: "6px 10px",
-              fontSize: 9,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-            }}
-            type="button"
-          >
-            Status first
-          </button>
-          <button
-            onClick={() => setSortMode("original_order")}
-            style={{
-              border: "none",
-              borderLeft: "1px solid #222",
-              background: sortMode === "original_order" ? "#fff" : "transparent",
-              color: sortMode === "original_order" ? "#000" : "#666",
-              padding: "6px 10px",
-              fontSize: 9,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-            }}
-            type="button"
-          >
-            Original order
-          </button>
-        </div>
-      </div>
-
-      <div style={{ overflowX: "auto" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "2.2fr 0.8fr 0.8fr 160px 90px 16px",
-            gap: 10,
-            padding: "0 0 8px",
-            borderBottom: "1px solid #1a1a1a",
-            fontSize: 9,
-            color: "#444",
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            marginTop: 8,
-            minWidth: 860,
-          }}
-        >
-          <span>Set Title</span>
-          <span>Platform</span>
-          <span>Stage</span>
-          <span style={{ textAlign: "right" }}>Actions</span>
-          <span style={{ textAlign: "right" }}>Status</span>
-          <span />
+      <section className={operatorUiStyles.stack}>
+        <div className={styles.runSectionHeader}>
+          <div className={styles.runSectionLead}>Run order</div>
+          <div className={operatorUiStyles.segmentRail}>
+            <button
+              className={`${operatorUiStyles.segmentItem} ${sortMode === "status_first" ? operatorUiStyles.segmentItemActive : ""}`}
+              onClick={() => setSortMode("status_first")}
+              type="button"
+            >
+              Status first
+            </button>
+            <button
+              className={`${operatorUiStyles.segmentItem} ${sortMode === "original_order" ? operatorUiStyles.segmentItemActive : ""}`}
+              onClick={() => setSortMode("original_order")}
+              type="button"
+            >
+              Original order
+            </button>
+          </div>
         </div>
 
-        {sortedRuns.map((run) => (
-          <RunRow
-            key={run.id}
-            {...run}
-            retryPending={pendingActionKey === `run:${run.id}:retry`}
-            cancelPending={pendingActionKey === `run:${run.id}:cancel`}
-            onRetry={(runId) =>
-              void runAction(
-                `/api/jobs/${detail.submission.id}/runs/${runId}/retry`,
-                `run:${runId}:retry`,
-              )
-            }
-            onCancel={(runId) =>
-              void runAction(
-                `/api/jobs/${detail.submission.id}/runs/${runId}/cancel`,
-                `run:${runId}:cancel`,
-              )
-            }
-          />
-        ))}
-      </div>
+        <div className={styles.runSectionTable} ref={runListRef}>
+          {sortedRuns.length > 0 ? (
+            <div className={styles.runList}>
+              <div className={styles.runHeader}>
+                <span>Set Title</span>
+                <span>Platform</span>
+                <span>Stage</span>
+                <span>Actions</span>
+                <span className={styles.runHeaderStatus}>Status</span>
+                <span />
+              </div>
+              {pagedRuns.map((run) => (
+                <RunRow
+                  cancelPending={pendingActionKey === `run:${run.id}:cancel`}
+                  key={run.id}
+                  onCancel={(runId) =>
+                    void runAction(
+                      `/api/jobs/${detail.submission.id}/runs/${runId}/cancel`,
+                      `run:${runId}:cancel`,
+                    )
+                  }
+                  onRetry={(runId) =>
+                    void runAction(
+                      `/api/jobs/${detail.submission.id}/runs/${runId}/retry`,
+                      `run:${runId}:retry`,
+                    )
+                  }
+                  retryPending={pendingActionKey === `run:${run.id}:retry`}
+                  submissionId={detail.submission.id}
+                  {...run}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={operatorUiStyles.emptyState}>No set runs yet.</div>
+          )}
 
-      {detail.runs.length === 0 ? (
-        <div style={{ padding: "40px 0", color: "#444", fontSize: 11, textAlign: "center" }}>
-          No set runs yet.
+          {sortedRuns.length > RUNS_PAGE_SIZE ? (
+            <div className={operatorUiStyles.paginationRow}>
+              <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonGhost} ${operatorUiStyles.paginationButtonPrev}`}
+                disabled={currentRunPage <= 1}
+                onClick={() => navigateRunPage(currentRunPage - 1)}
+                type="button"
+              >
+                Prev
+              </button>
+              <span className={operatorUiStyles.paginationMeta}>
+                Page {currentRunPage} / {totalRunPages} | {sortedRuns.length} sets
+              </span>
+              <button
+                className={`${operatorUiStyles.button} ${operatorUiStyles.buttonGhost} ${operatorUiStyles.paginationButtonNext}`}
+                disabled={currentRunPage >= totalRunPages}
+                onClick={() => navigateRunPage(currentRunPage + 1)}
+                type="button"
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
         </div>
-      ) : null}
-    </>
+      </section>
+    </div>
   );
 }

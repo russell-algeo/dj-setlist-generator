@@ -70,6 +70,13 @@ const CONFIDENCE_CLASS: Record<ArchiveConfidence, string> = {
   UNCERTAIN: styles.miniSegmentUncertain,
 };
 
+const TRACK_CONFIDENCE_CLASS: Record<ArchiveConfidence, string> = {
+  HIGH: styles.trackConfidenceHigh,
+  LOW: styles.trackConfidenceLow,
+  MEDIUM: styles.trackConfidenceMedium,
+  UNCERTAIN: styles.trackConfidenceUncertain,
+};
+
 const renderAction = (action: ArchiveSetCardAction) => {
   if ("href" in action) {
     return (
@@ -153,7 +160,9 @@ export function ArchiveSetCard({
             {track.label}
           </a>
         </span>
-        <span className={styles.trackConfidence}>{track.confidence}</span>
+        <span className={joinClasses(styles.trackConfidence, TRACK_CONFIDENCE_CLASS[track.confidence])}>
+          {track.confidence}
+        </span>
       </div>
     ));
   }

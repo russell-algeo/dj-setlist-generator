@@ -1,22 +1,27 @@
 @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap");
 
 .root {
-  --bg: #0a0a0a;
-  --paper: #111111;
-  --paper-2: #161616;
-  --ink: #f3f3f3;
-  --muted: #ababab;
-  --lime: #d8ff5a;
-  --line: #2c2c2c;
-  --line-soft: #242424;
-  --radius: 4px;
+  --topbar-height: 48px;
+  --archive-header-brand-size: 16px;
+  --archive-header-nav-size: 11px;
+  --archive-header-control-size: 11px;
+  --archive-header-control-letter-spacing: 0.07em;
+  --bg: var(--dark-bg);
+  --paper: var(--dark-surface);
+  --paper-2: var(--dark-surface-raised);
+  --ink: var(--dark-text-strong);
+  --muted: var(--dark-text-muted);
+  --lime: var(--dark-brand-lime);
+  --line: var(--dark-border);
+  --line-soft: var(--dark-border-soft);
+  --radius: var(--dark-radius-control);
   --gutter: clamp(16px, 2vw, 28px);
   --section-pad: clamp(24px, 4.8vw, 72px);
   --section-pad-y: clamp(16px, 3.2vw, 44px);
   min-height: 100vh;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Manrope", var(--font-sans), sans-serif;
+  font-family: "Space Mono", var(--font-mono), monospace;
 }
 
 .root :global(*) {
@@ -47,17 +52,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px var(--section-pad);
+  gap: 14px;
+  min-height: var(--topbar-height);
+  padding: 10px var(--section-pad);
   margin: 0 auto;
   max-width: 1480px;
 }
 
 .root :global(.brand) {
   font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: 14px;
+  font-size: var(--archive-header-brand-size);
   line-height: 1;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #d8d8d8;
   white-space: nowrap;
@@ -66,12 +72,12 @@
 
 .root :global(.topnav) {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: var(--archive-header-nav-size);
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
@@ -92,7 +98,7 @@
 .root :global(.shell) {
   max-width: 1480px;
   margin: 0 auto;
-  padding: 64px var(--gutter) 72px;
+  padding: calc(var(--topbar-height) + 16px) var(--gutter) 72px;
 }
 
 .root :global(.preview-badge) {
@@ -114,6 +120,10 @@
   scroll-margin-top: 64px;
 }
 
+.root :global(.shell > .section:first-child) {
+  margin-top: 10px;
+}
+
 .root :global(.section-inner) {
   padding: var(--section-pad-y) var(--section-pad);
 }
@@ -128,6 +138,7 @@
 
 .root :global(.section-head h2) {
   margin: 0;
+  font-family: var(--font-sans), sans-serif;
   font-size: clamp(38px, 7.6vw, 82px);
   line-height: 0.88;
   letter-spacing: -0.04em;
@@ -139,9 +150,9 @@
   margin: 0;
   justify-self: end;
   max-width: 460px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #c0c0c0;
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--muted);
 }
 
 .root :global(.recurring-heading) {
@@ -164,16 +175,29 @@
 .root :global(.chip-btn) {
   border: 1px solid var(--line);
   background: var(--paper-2);
-  color: var(--muted);
-  border-radius: var(--radius);
-  padding: 7px 10px;
-  min-height: 22px;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  min-height: var(--dark-control-height-dense);
   cursor: pointer;
   font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: 11px;
-  letter-spacing: 0.05em;
+  font-size: 9px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+  line-height: 1;
+  transition: border-color var(--dark-transition-fast), color var(--dark-transition-fast), background var(--dark-transition-fast);
+}
+
+.root :global(.btn) {
+  border-radius: var(--dark-radius-control);
+}
+
+.root :global(.chip-btn) {
+  border-radius: var(--dark-radius-badge);
+  min-height: 24px;
+  padding: 0 8px;
 }
 
 .root :global(.btn:hover),
@@ -199,11 +223,12 @@
 .root :global(select) {
   width: 100%;
   border: 1px solid var(--line);
-  background: #171717;
+  min-height: var(--dark-control-height-lg);
+  background: var(--paper-2);
   color: var(--ink);
   border-radius: var(--radius);
-  padding: 9px 10px;
-  font-size: 13px;
+  padding: 11px 12px;
+  font-size: 11px;
   font-family: "Space Mono", var(--font-mono), monospace;
 }
 
@@ -215,6 +240,7 @@
 .root :global(select:focus) {
   outline: none;
   border-color: var(--lime);
+  box-shadow: 0 0 0 1px var(--lime);
 }
 
 .root :global(.controls-grid) {
@@ -252,13 +278,13 @@
 .root :global(.threshold-arrow) {
   width: 20px;
   min-width: 20px;
-  min-height: 18px;
-  height: 18px;
-  padding: 3px 0;
+  min-height: var(--dark-control-height-dense);
+  height: var(--dark-control-height-dense);
+  padding: 0;
   text-align: center;
   line-height: 1;
   font-size: 10px;
-  border-radius: 0;
+  border-radius: var(--dark-radius-badge);
 }
 
 .root :global(.threshold-value) {
@@ -266,15 +292,15 @@
   align-items: center;
   justify-content: center;
   min-width: 84px;
-  min-height: 21px;
-  height: 21px;
-  padding: 3px 6px;
+  min-height: var(--dark-control-height-dense);
+  height: var(--dark-control-height-dense);
+  padding: 0 8px;
   font-size: 9px;
   border-color: #3a3a3a;
   color: #f0f0f0;
   pointer-events: none;
   cursor: default;
-  border-radius: 0;
+  border-radius: var(--dark-radius-badge);
 }
 
 .root :global(.stats-grid) {
@@ -308,6 +334,7 @@
 .root :global(.stat-value) {
   display: block;
   color: var(--lime);
+  font-family: var(--font-sans), sans-serif;
   font-size: 22px;
   font-weight: 800;
   line-height: 1;
@@ -377,6 +404,7 @@
   bottom: clamp(14px, 3vw, 34px);
   margin: 0;
   max-width: calc(100% - clamp(22px, 4vw, 68px));
+  font-family: var(--font-sans), sans-serif;
   font-size: var(--artist-hero-title-fit-size, clamp(52px, 11.8vw, 170px));
   line-height: 0.86;
   text-transform: uppercase;
@@ -504,6 +532,7 @@
 
 .root :global(.artist-hero-card-title) {
   margin: 0;
+  font-family: var(--font-sans), sans-serif;
   font-size: 12px;
   line-height: 1.25;
   color: #f5f5f5;
@@ -527,6 +556,44 @@
   margin-top: 12px;
   display: grid;
   gap: 8px;
+}
+
+.root :global(.recurring-toolbar) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.root :global(.recurring-search-input) {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 26px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 10px;
+  border-radius: var(--dark-radius-badge);
+}
+
+.root :global(.recurring-filter-row) {
+  margin-left: auto;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.root :global(.recurring-filter-row .btn) {
+  min-height: 26px;
+  padding: 0 6px;
+  font-size: 9px;
+  border-radius: var(--dark-radius-badge);
+}
+
+.root :global(.recurring-filter-row .btn.active) {
+  border-color: var(--dark-brand-violet);
+  color: var(--dark-brand-violet);
+  background: rgb(127 81 255 / 12%);
 }
 
 .root :global(.recurring-grid) {
@@ -599,6 +666,7 @@
 
 .root :global(.track-title) {
   margin: 0;
+  font-family: var(--font-sans), sans-serif;
   font-size: 18px;
   line-height: 1.1;
   color: #fff;
@@ -617,19 +685,26 @@
   border: 1px solid var(--line);
   background: #171717;
   color: #f0f0f0;
-  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
   cursor: pointer;
   font-family: "Space Mono", var(--font-mono), monospace;
   font-size: 10px;
   letter-spacing: 0.06em;
+  line-height: 1;
   text-transform: uppercase;
   text-decoration: none;
+  border-radius: var(--dark-radius-badge);
+  transition: border-color var(--dark-transition-fast), color var(--dark-transition-fast), background var(--dark-transition-fast);
 }
 
 .root :global(.actions a:hover),
 .root :global(.actions button:hover) {
-  border-color: #fff;
-  color: #fff;
+  border-color: var(--dark-brand-lime);
+  color: var(--dark-brand-lime);
 }
 
 .root :global(.rec-card) {
@@ -670,13 +745,14 @@
 .root :global(.rec-card .actions a),
 .root :global(.rec-card .actions button) {
   font-size: 9px;
-  padding: 3px 5px;
+  min-height: 24px;
+  padding: 0 6px;
 }
 
 .root :global(.track-pill) {
   border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 4px 9px;
+  border-radius: var(--dark-radius-badge);
+  padding: 3px 7px;
   background: var(--paper-2);
   font-family: "Space Mono", var(--font-mono), monospace;
   font-size: 10px;
@@ -767,6 +843,9 @@
 
 .root :global(.spotify-embed iframe) {
   display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
 }
 
 .root :global(.atlas-layout) {
@@ -780,16 +859,28 @@
   max-width: 100%;
 }
 
+.root :global(.section-inline-actions) {
+  position: absolute;
+  top: 18px;
+  right: 24px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .root :global(.set-controls-inline) {
   margin-bottom: 0;
 }
 
 .root :global(.atlas-set-pane .set-controls-inline .control input) {
-  height: 34px;
-  min-height: 34px;
-  padding: 6px 8px;
-  font-size: 13px;
-  border-radius: 0;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 7px;
+  font-size: 10px;
+  border-radius: 8px;
+  font-family: "Space Mono", var(--font-mono), monospace;
 }
 
 .root :global(.set-explorer-controls) {
@@ -828,15 +919,20 @@
 
 .root :global(.set-explorer-controls .control select) {
   width: 100%;
+  text-transform: uppercase;
+}
+
+.root :global(.set-explorer-controls .control select option) {
+  text-transform: uppercase;
 }
 
 .root :global(.set-explorer-controls .control input),
 .root :global(.set-explorer-controls .control select) {
-  height: 30px;
-  min-height: 30px;
-  padding: 4px 8px;
-  font-size: 12px;
-  border-radius: 0;
+  height: var(--dark-control-height-dense);
+  min-height: var(--dark-control-height-dense);
+  padding: 0 8px;
+  font-size: 10px;
+  border-radius: var(--dark-radius-badge);
 }
 
 .root :global(.atlas-set-pane) {
@@ -987,6 +1083,7 @@
 .root :global(.artist-detail h3),
 .root :global(.status-card h3) {
   margin: 0;
+  font-family: var(--font-sans), sans-serif;
   font-size: 20px;
   line-height: 0.92;
   letter-spacing: -0.02em;
@@ -1089,6 +1186,7 @@
   row-gap: 0;
   width: 100%;
   margin: 0;
+  font-family: var(--font-sans), sans-serif;
   font-size: clamp(22px, 3.2vw, 46px);
   line-height: 0.9;
   letter-spacing: -0.03em;
@@ -1188,6 +1286,7 @@
 
 .root :global(.panel-title) {
   margin: 0;
+  font-family: var(--font-sans), sans-serif;
   font-size: 18px;
   text-transform: uppercase;
   letter-spacing: -0.01em;
@@ -1217,11 +1316,6 @@
   justify-content: flex-end;
 }
 
-.root :global(.taxonomy-head .chip-btn) {
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
 .root :global(.focus-mode .chip-btn.active),
 .root :global(.lens-tabs .chip-btn.active),
 .root :global(.taxonomy-controls-bar .chip-btn.active) {
@@ -1231,11 +1325,26 @@
 }
 
 .root :global(.focus-mode .chip-btn),
-.root :global(.lens-tabs .chip-btn) {
-  min-height: 27px;
-  padding: 5px 8px;
+.root :global(.lens-tabs .chip-btn),
+.root :global(.taxonomy-controls-bar .chip-btn),
+.root :global(.threshold-stepper .threshold-arrow),
+.root :global(.threshold-stepper .threshold-value) {
+  white-space: nowrap;
+  flex: 0 0 auto;
+  min-height: var(--dark-control-height-dense);
+  padding: 0 8px;
   font-size: 10px;
-  border-radius: 0;
+  border-radius: var(--dark-radius-badge);
+}
+
+.root :global(.taxonomy-controls-bar .taxonomy-fine-btn),
+.root :global(.taxonomy-controls-bar .threshold-stepper .taxonomy-fine-btn) {
+  height: 25px;
+  min-height: 25px;
+  padding: 0 7px;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  border-radius: var(--dark-radius-badge);
 }
 
 .root :global(.taxonomy-controls-bar) {
@@ -1272,7 +1381,7 @@
 .root :global(.taxonomy-sort-icon) {
   color: #c6c6c6;
   font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
   flex: 0 0 auto;
   user-select: none;
@@ -1323,6 +1432,7 @@
 }
 
 .root :global(.row-name) {
+  font-family: var(--font-sans), sans-serif;
   font-size: 13px;
   line-height: 1.1;
   color: #fff;
@@ -1364,13 +1474,6 @@
   gap: 4px;
 }
 
-.root :global(.taxonomy-controls-bar .chip-btn) {
-  white-space: nowrap;
-  flex: 0 0 auto;
-  padding: 3px 6px;
-  font-size: 9px;
-}
-
 .root :global(.taxonomy-search-control) {
   flex: 0 0 clamp(170px, 24vw, 260px);
   min-width: 0;
@@ -1388,11 +1491,47 @@
 .root :global(.taxonomy-controls-bar .control select),
 .root :global(.taxonomy-controls-row input),
 .root :global(.taxonomy-controls-row select) {
-  height: 18px;
-  min-height: 18px;
-  padding: 0 6px;
+  height: 25px;
+  min-height: 25px;
+  padding: 0 7px;
   font-size: 10px;
-  line-height: 18px;
+  line-height: 25px;
+  border-radius: var(--dark-radius-badge);
+}
+
+.root :global(.taxonomy-controls-bar .taxonomy-field),
+.root :global(.taxonomy-controls-row .taxonomy-field) {
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: "Space Mono", var(--font-mono), monospace;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.root :global(.taxonomy-controls-bar .taxonomy-field::placeholder),
+.root :global(.taxonomy-controls-row .taxonomy-field::placeholder) {
+  color: #818181;
+  opacity: 1;
+}
+
+.root :global(.taxonomy-controls-bar .taxonomy-field:focus),
+.root :global(.taxonomy-controls-row .taxonomy-field:focus) {
+  outline: none;
+  border-color: var(--lime);
+  box-shadow: 0 0 0 1px var(--lime);
+}
+
+.root :global(.taxonomy-controls-bar .taxonomy-fine-field::placeholder),
+.root :global(.taxonomy-controls-row .taxonomy-fine-field::placeholder) {
+  font-size: 10px;
+}
+
+.root :global(.taxonomy-controls-bar .taxonomy-select-field),
+.root :global(.taxonomy-controls-bar .taxonomy-select-field option),
+.root :global(.taxonomy-controls-row .taxonomy-select-field),
+.root :global(.taxonomy-controls-row .taxonomy-select-field option) {
+  text-transform: uppercase;
 }
 
 .root :global(.pager) {
@@ -1536,7 +1675,7 @@
   padding: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto var(--open-embed-height, 91.2px);
+  grid-template-rows: minmax(var(--open-action-row-height, 36px), auto) var(--open-embed-height, 91.2px);
   gap: 0;
   align-content: start;
 }
@@ -1546,7 +1685,7 @@
   padding: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto var(--open-source-height, 91.2px);
+  grid-template-rows: minmax(var(--open-action-row-height, 36px), auto) var(--open-source-height, 91.2px);
   gap: 0;
   align-content: start;
 }
@@ -1565,12 +1704,16 @@
 .root :global(.track-card.embed-open .track-body > .actions),
 .root :global(.track-card.sources-open .track-body > .actions) {
   margin: 0;
-  padding: 6px 6px 4px;
+  min-height: var(--open-action-row-height, 36px);
+  padding: 8px 6px 4px;
   border-bottom: 1px solid var(--line);
   background: #0f0f0f;
   gap: 6px;
+  align-items: center;
   flex-wrap: nowrap;
   overflow-x: auto;
+  overflow-y: hidden;
+  box-sizing: border-box;
   z-index: 3;
 }
 
@@ -1602,6 +1745,7 @@
   height: var(--open-embed-height, 91.2px);
   display: block;
   margin: 0;
+  border: 0;
   border-radius: 0;
 }
 
@@ -1643,7 +1787,8 @@
 
 .root :global(.atlas-track-card .actions a),
 .root :global(.atlas-track-card .actions button) {
-  padding: 3px 5px;
+  min-height: 22px;
+  padding: 0 6px;
   font-size: 9px;
 }
 
@@ -1663,7 +1808,7 @@
   padding: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto var(--open-embed-height, 91.2px);
+  grid-template-rows: minmax(var(--open-action-row-height, 36px), auto) var(--open-embed-height, 91.2px);
   gap: 0;
   align-content: start;
 }
@@ -1673,7 +1818,7 @@
   padding: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto var(--open-source-height, 91.2px);
+  grid-template-rows: minmax(var(--open-action-row-height, 36px), auto) var(--open-source-height, 91.2px);
   gap: 0;
   align-content: start;
 }
@@ -1692,12 +1837,16 @@
 .root :global(.atlas-track-card.embed-open .track-body > .actions),
 .root :global(.atlas-track-card.sources-open .track-body > .actions) {
   margin: 0;
-  padding: 6px 6px 4px;
+  min-height: var(--open-action-row-height, 36px);
+  padding: 8px 6px 4px;
   border-bottom: 1px solid var(--line);
   background: #0f0f0f;
   gap: 6px;
+  align-items: center;
   flex-wrap: nowrap;
   overflow-x: auto;
+  overflow-y: hidden;
+  box-sizing: border-box;
   z-index: 3;
 }
 
@@ -1735,6 +1884,7 @@
   height: var(--open-embed-height, 91.2px);
   display: block;
   margin: 0;
+  border: 0;
   border-radius: 0;
 }
 
@@ -1815,6 +1965,7 @@
 
 .root :global(.set-title) {
   margin: 0;
+  font-family: var(--font-sans), sans-serif;
   font-size: 16px;
   font-weight: 700;
   line-height: 1.25;
@@ -2055,12 +2206,29 @@
     justify-self: start;
     max-width: none;
   }
+
+  .root :global(.section-inline-actions) {
+    position: static;
+    display: flex;
+    justify-content: flex-end;
+    margin: 18px 24px 0;
+  }
 }
 
 @media (width <= 820px) {
   .root :global(.topbar-inner) {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .root :global(.recurring-toolbar) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .root :global(.recurring-filter-row) {
+    margin-left: 0;
+    flex-wrap: wrap;
   }
 
   .root :global(.stats-grid),
@@ -2081,5 +2249,10 @@
 
   .root :global(.artist-hero-title) {
     font-size: clamp(36px, 12vw, 72px);
+  }
+
+  .root :global(.section-inline-actions) {
+    justify-content: stretch;
+    margin: 14px 14px 0;
   }
 }

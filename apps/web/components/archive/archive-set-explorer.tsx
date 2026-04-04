@@ -1,10 +1,12 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
+import { buildSetSpotifyExportCounts } from "@/lib/archive/spotify-export";
 import type {
   ArchiveConfidence,
   ArchiveJourneyPoint,
@@ -127,7 +129,7 @@ type JourneyLayer = {
   points: JourneyPointNode[];
 };
 
-const CONFIDENCE_LEVELS: ArchiveConfidence[] = ["HIGH", "MEDIUM", "LOW", "UNCERTAIN"];
+const CONFIDENCE_LEVELS: ArchiveConfidence[] = ["HIGH", "MEDIUM", "LOW"];
 const JOURNEY_COLORS: Record<JourneyMetric, string> = {
   bpm: "#6fffa4",
   dance: "#7dc3ff",
@@ -654,7 +656,8 @@ export function ArchiveSetExplorer({
   detail: ArchiveSetDetail;
   initialQuery: string;
 }) {
-  const model = buildSetModel(detail);
+  const model = useMemo(() => buildSetModel(detail), [detail]);
+  const spotifyExportCounts = useMemo(() => buildSetSpotifyExportCounts(detail), [detail]);
   const [query, setQuery] = useState(initialQuery);
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
@@ -673,6 +676,7 @@ export function ArchiveSetExplorer({
   const deferredQuery = useDeferredValue(query);
   const heroMainRef = useRef<HTMLDivElement | null>(null);
   const heroTitleRef = useRef<HTMLHeadingElement | null>(null);
+  const heroSideRef = useRef<HTMLDivElement | null>(null);
   const heroViewportRef = useRef<HTMLDivElement | null>(null);
   const heroTrackRef = useRef<HTMLDivElement | null>(null);
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null);
@@ -1247,6 +1251,61 @@ export function ArchiveSetExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id, model.heroCards.length, model.heroTitleMinSize]);
 
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const heroMain = heroMainRef.current;
+    const heroSide = heroSideRef.current;
+    if (!heroMain || !heroSide) {
+      return;
+    }
+
+    let frame = 0;
+
+    const syncHeroSideHeight = () => {
+      heroSide.style.removeProperty("height");
+      if (window.matchMedia("(max-width: 1180px)").matches) {
+        return;
+      }
+
+      const nextHeight = Math.round(heroMain.getBoundingClientRect().height);
+      if (nextHeight > 0) {
+        heroSide.style.height = `${nextHeight}px`;
+      }
+    };
+
+    const scheduleSync = () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        syncHeroSideHeight();
+      });
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => scheduleSync());
+    resizeObserver?.observe(heroMain);
+    window.addEventListener("resize", scheduleSync);
+    void document.fonts?.ready.then(() => {
+      scheduleSync();
+    });
+    scheduleSync();
+
+    return () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+      heroSide.style.removeProperty("height");
+    };
+  }, [detail.id, model.heroCards.length]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1481,7 +1540,7 @@ export function ArchiveSetExplorer({
                     {detail.title}
                   </h2>
                 </div>
-                <div className="set-hero-side">
+                <div className="set-hero-side" ref={heroSideRef}>
                   {model.heroCards.length > 0 ? (
                     <div
                       className="set-hero-side-viewport"
@@ -1549,7 +1608,14 @@ export function ArchiveSetExplorer({
           </div>
         </section>
 
-        <section className="section" id="workspace">
+        <section className="section" id="workspace" style={{ position: "relative" }}>
+          <div className="section-inline-actions">
+            <SpotifyExportButton
+              counts={spotifyExportCounts}
+              entityType="set"
+              slug={detail.slug}
+            />
+          </div>
           <div className="section-inner">
             <div className="section-head">
               <h2 className="set-workspace-heading">Playback Workspace</h2>
@@ -1696,30 +1762,28 @@ export function ArchiveSetExplorer({
                 </div>
               </div>
 
-              {model.source.sourceUrl ? (
-                <a className="source-player-open" href={model.source.sourceUrl} rel="noopener" target="_blank">
-                  Open Source
-                </a>
-              ) : null}
-
-              <div className="journey-inline" id="journey">
-                <div className="journey-toolbar">
-                  <button
-                    aria-controls="journeyBody"
-                    aria-expanded={journeyOpen}
-                    className="btn journey-toggle-btn"
-                    id="journeyToggleBtn"
-                    onClick={() => {
-                      setJourneyOpen((current) => !current);
-                      setJourneyTooltip(null);
-                    }}
-                    type="button"
-                  >
-                    {journeyOpen ? "Hide Journey Lens" : "Show Journey Lens"}
-                  </button>
-                </div>
-                {!journeyOpen ? null : (
-                  <div className="journey-body" id="journeyBody">
+              <div className="workspace-actions">
+                {model.source.sourceUrl ? (
+                  <a className="source-player-open" href={model.source.sourceUrl} rel="noopener" target="_blank">
+                    Open Source
+                  </a>
+                ) : null}
+                <button
+                  aria-controls="journeyPanel"
+                  aria-expanded={journeyOpen}
+                  className={joinClasses("btn", "journey-toggle-btn", journeyOpen && "active")}
+                  id="journeyToggleBtn"
+                  onClick={() => {
+                    setJourneyOpen((current) => !current);
+                    setJourneyTooltip(null);
+                  }}
+                  type="button"
+                >
+                  {journeyOpen ? "Hide Journey Lens" : "Show Journey Lens"}
+                </button>
+              </div>
+              {!journeyOpen ? null : (
+                  <div className="journey-panel" id="journeyPanel">
                     <div className="journey-controls">
                       {(["bpm", "energy", "dance"] as JourneyMetric[]).map((metric) => (
                         <button
@@ -1852,16 +1916,15 @@ export function ArchiveSetExplorer({
                     </div>
                   </div>
                 )}
-              </div>
 
               <div className="timeline-track-atlas" id="tracks">
                 <h2 className="panel-title">Track Atlas</h2>
                 <p className="panel-sub">Search, slice, and inspect evidence for each detected track.</p>
                 <div className="track-explorer-panel">
                   <div className="track-head">
-                    <div className="controls">
+                    <div className="controls track-atlas-controls">
                       <input
-                        className="input"
+                        className="input compact-control"
                         id="trackSearchInput"
                         onChange={(event) => {
                           const nextValue = event.target.value;
@@ -1999,7 +2062,7 @@ export function ArchiveSetExplorer({
                                 <span className="track-title">{track.title}</span>
                               </div>
                               <div className="track-meta">
-                                <span className={joinClasses("pill", confidenceClass)}>{track.conf}</span>
+                                <span className={joinClasses("pill", "confidence-pill", confidenceClass)}>{track.conf}</span>
                               </div>
                             </div>
                             <div className="track-actions">

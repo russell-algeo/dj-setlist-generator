@@ -223,11 +223,13 @@ export function ArchiveHomePage({
 export function ArchiveArtistPage({
   artist,
   query,
+  scope,
 }: {
   artist: ArchiveArtistSummary;
   query: string;
+  scope: "global" | "mine";
 }) {
-  return <ArchiveArtistExplorer artist={artist} initialQuery={query} />;
+  return <ArchiveArtistExplorer artist={artist} initialQuery={query} scope={scope} />;
 }
 
 export function ArchiveSetPage({

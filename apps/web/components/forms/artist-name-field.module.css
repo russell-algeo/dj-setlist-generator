@@ -9,7 +9,7 @@
   right: 0;
   z-index: 40;
   border: 1px solid var(--artist-suggest-border, rgba(35, 30, 26, 0.14));
-  border-radius: 16px;
+  border-radius: var(--artist-suggest-radius, 12px);
   background: var(--artist-suggest-bg, rgba(255, 250, 241, 0.98));
   box-shadow: var(--artist-suggest-shadow, 0 24px 48px rgba(83, 51, 27, 0.16));
   overflow: hidden;

@@ -1,3 +1,68 @@
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: rgba(10, 10, 10, 0.96);
+  border-bottom: 1px solid var(--dark-border-soft, #242424);
+  backdrop-filter: blur(8px);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: nowrap;
+  width: 100%;
+  max-width: 1480px;
+  min-height: 48px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 10px clamp(16px, 2vw, 28px);
+}
+
+.brand {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: #d8d8d8;
+  font-family: var(--font-mono), monospace;
+  font-size: 16px;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.navLink {
+  color: #cfcfcf;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 2px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.navLink:hover {
+  color: #fff;
+  border-color: #d8ff5a;
+}
+
+.navLinkActive {
+  color: #f3f3f3;
+  border-color: #5d5d5d;
+}
+
 .topbarRight {
   display: flex;
   align-items: center;
@@ -7,7 +72,23 @@
 
 .divider {
   width: 1px;
-  height: 18px;
-  background: rgba(255, 255, 255, 0.1);
-  margin: 0 4px;
+  height: 14px;
+  background: var(--dark-border);
+  margin: 0 2px;
+}
+
+@media (max-width: 900px) {
+  .inner {
+    gap: 10px;
+    padding-inline: 16px;
+  }
+
+  .brand {
+    font-size: 14px;
+  }
+
+  .nav {
+    gap: 10px;
+    font-size: 10px;
+  }
 }

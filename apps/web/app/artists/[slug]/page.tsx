@@ -43,5 +43,11 @@ export default async function ArtistDetailPage({ params, searchParams }: ArtistD
   }
 
   if (!artist) notFound();
-  return <ArchiveArtistPage artist={artist} query={queryParams.q?.trim() ?? ""} />;
+  return (
+    <ArchiveArtistPage
+      artist={artist}
+      query={queryParams.q?.trim() ?? ""}
+      scope={scope}
+    />
+  );
 }
