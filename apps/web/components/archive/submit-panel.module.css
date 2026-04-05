@@ -53,6 +53,15 @@
   pointer-events: none;
 }
 
+@media (max-width: 480px) {
+  .tooltip {
+    white-space: normal;
+    max-width: 200px;
+    right: auto;
+    left: 0;
+  }
+}
+
 .panel {
   position: fixed;
   top: 52px; /* header height */

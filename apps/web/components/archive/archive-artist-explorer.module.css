@@ -1,7 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap");
 
 .root {
-  --topbar-height: 48px;
   --archive-header-brand-size: 16px;
   --archive-header-nav-size: 11px;
   --archive-header-control-size: 11px;
@@ -15,9 +14,6 @@
   --line: var(--dark-border);
   --line-soft: var(--dark-border-soft);
   --radius: var(--dark-radius-control);
-  --gutter: clamp(16px, 2vw, 28px);
-  --section-pad: clamp(24px, 4.8vw, 72px);
-  --section-pad-y: clamp(16px, 3.2vw, 44px);
   min-height: 100vh;
   background: var(--bg);
   color: var(--ink);
@@ -37,68 +33,11 @@
   font: inherit;
 }
 
-.root :global(.topbar) {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 80;
-  background: rgb(10 10 10 / 96%);
-  border-bottom: 1px solid var(--line-soft);
-  backdrop-filter: blur(8px);
-}
-
-.root :global(.topbar-inner) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  min-height: var(--topbar-height);
-  padding: 10px var(--section-pad);
-  margin: 0 auto;
-  max-width: 1480px;
-}
-
-.root :global(.brand) {
-  font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: var(--archive-header-brand-size);
-  line-height: 1;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #d8d8d8;
-  white-space: nowrap;
-  padding-bottom: 2px;
-}
-
-.root :global(.topnav) {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: nowrap;
-  font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: var(--archive-header-nav-size);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.root :global(.topnav a) {
-  color: #cfcfcf;
-  border-bottom: 1px solid transparent;
-  line-height: 1;
-  padding-top: 2px;
-  padding-bottom: 2px;
-  transition: color 0.2s ease, border-color 0.2s ease;
-}
-
-.root :global(.topnav a:hover) {
-  color: #fff;
-  border-color: var(--lime);
-}
 
 .root :global(.shell) {
   max-width: 1480px;
   margin: 0 auto;
-  padding: calc(var(--topbar-height) + 16px) var(--gutter) 72px;
+  padding: calc(var(--topbar-height) + var(--page-below-topbar)) var(--page-gutter) 72px;
 }
 
 .root :global(.preview-badge) {
@@ -116,7 +55,7 @@
 .root :global(.section) {
   border: 1px solid var(--line);
   background: var(--paper);
-  margin-top: var(--gutter);
+  margin-top: var(--page-gutter);
   scroll-margin-top: 64px;
 }
 
@@ -125,7 +64,7 @@
 }
 
 .root :global(.section-inner) {
-  padding: var(--section-pad-y) var(--section-pad);
+  padding: var(--page-pad-y) var(--page-pad);
 }
 
 .root :global(.section-head) {
@@ -2216,11 +2155,6 @@
 }
 
 @media (width <= 820px) {
-  .root :global(.topbar-inner) {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
   .root :global(.recurring-toolbar) {
     flex-direction: column;
     align-items: stretch;
@@ -2254,5 +2188,171 @@
   .root :global(.section-inline-actions) {
     justify-content: stretch;
     margin: 14px 14px 0;
+  }
+}
+
+@media (width <= 480px) {
+  /* Change 7: recurring tracks — horizontal scroll with wide cards */
+  .root :global(.recurring-grid) {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(260px, 82vw);
+    grid-template-columns: none;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .root :global(.topnav) {
+    display: none;
+  }
+
+  .root :global(.section-inner) {
+    padding: 12px;
+  }
+
+  .root :global(.stats-grid) {
+    grid-template-columns: 1fr;
+  }
+
+  .root :global(.artist-hero-title) {
+    font-size: clamp(28px, 10vw, 52px);
+  }
+
+  /* Change 1: hide hero side-rail scroll wheel */
+  .root :global(.artist-hero-side) {
+    display: none;
+  }
+
+  .root :global(.atlas-layout) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .root :global(.artist-stack),
+  .root :global(.atlas-panel) {
+    min-width: 0;
+  }
+
+  /* Item 1: set atlas pane — cap height to match artist atlas, enable scroll */
+  .root :global(.atlas-set-pane) {
+    min-width: 0;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  /* Atlas panel grid items — prevent overflow down the nesting chain */
+  .root :global(.focus-header),
+  .root :global(.taxonomy-workbench),
+  .root :global(.taxonomy-panel),
+  .root :global(.evidence-panel),
+  .root :global(.network-panel),
+  .root :global(.pair-panel),
+  .root :global(.set-panel),
+  .root :global(.panel-head) {
+    min-width: 0;
+  }
+  /* Taxonomy head tabs — wrap and scroll on mobile */
+  .root :global(.taxonomy-head) {
+    flex-wrap: wrap;
+  }
+  .root :global(.lens-tabs) {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  /* Hero fills full width — collapse two-column hero to single column */
+  .root :global(.artist-hero) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .root :global(.shell) {
+    overflow-x: hidden;
+  }
+
+  /* Change 3: evidence track cards — wide horizontal scroll */
+  .root :global(.evidence-grid),
+  .root :global(.inline-evidence .evidence-grid) {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(240px, 80vw);
+    grid-template-columns: none;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+  }
+
+  /* Change 4 & 5: taxonomy controls — wrap into two rows */
+  .root :global(.taxonomy-controls-row) {
+    flex-wrap: wrap;
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .root :global(.taxonomy-search-control) {
+    flex: 0 0 100%;
+  }
+
+  /* Change 8: artist set explorer — single column */
+  .root :global(.set-grid) {
+    column-count: 1;
+  }
+
+  /* Item 6: taxonomy controls bar — wrap all controls, no horizontal overflow */
+  .root :global(.taxonomy-controls-bar) {
+    flex-wrap: wrap;
+    overflow: hidden;
+  }
+
+  .root :global(.taxonomy-controls-bar .pill-row) {
+    flex-wrap: wrap;
+  }
+
+  /* Set Atlas section: push section-inner below the absolute buttons */
+  .root :global(#set-atlas-section .section-inner) {
+    padding-top: 52px;
+  }
+
+  /* Set Atlas: right-pad heading so it wraps before reaching the two-button stack */
+  .root :global(#set-atlas-section .section-head) {
+    padding-right: 220px;
+  }
+
+  /* Set Explorer "Add Sets" button floats at heading level —
+     add right padding to section-head so heading text doesn't run under the button */
+  .root :global(#sets-section .section-head) {
+    padding-right: 120px;
+  }
+
+  /* Item 9: recurring tracks heading — allow wrapping, smaller font */
+  .root :global(.recurring-heading) {
+    white-space: normal;
+    font-size: clamp(18px, 5.5vw, 28px);
+    word-break: break-word;
+  }
+
+  /* Item 11: disable 200% card expansion on mobile — keep within card bounds */
+  .root :global(.track-card.embed-open),
+  .root :global(.track-card.sources-open) {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Cancel the even-card negative margin that shifts cards left on desktop */
+  .root :global(.evidence-grid .track-card.embed-open:nth-child(even)),
+  .root :global(.inline-evidence .track-card.embed-open:nth-child(even)),
+  .root :global(.evidence-grid .track-card.sources-open:nth-child(even)),
+  .root :global(.inline-evidence .track-card.sources-open:nth-child(even)) {
+    margin-left: 0;
+  }
+
+  /* Constrain the spotify embed and iframe to card width */
+  .root :global(.spotify-embed),
+  .root :global(.spotify-inline) {
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .root :global(.spotify-embed iframe),
+  .root :global(.spotify-inline iframe) {
+    max-width: 100%;
+    width: 100% !important;
   }
 }

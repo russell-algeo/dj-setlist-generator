@@ -1609,7 +1609,7 @@ export function ArchiveSetExplorer({
         </section>
 
         <section className="section" id="workspace" style={{ position: "relative" }}>
-          <div className="section-inline-actions">
+          <div style={{ position: "absolute", right: 24, top: 18, zIndex: 2 }}>
             <SpotifyExportButton
               counts={spotifyExportCounts}
               entityType="set"

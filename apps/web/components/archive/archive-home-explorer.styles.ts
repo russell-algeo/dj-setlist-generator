@@ -1,5 +1,4 @@
 export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
-      --topbar-height: 48px;
       --archive-header-brand-size: 16px;
       --archive-header-nav-size: 11px;
       --archive-header-control-size: 11px;
@@ -14,9 +13,6 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       --line: #2c2c2c;
       --line-soft: #242424;
       --radius: 8px;
-      --gutter: clamp(16px, 2vw, 28px);
-      --section-pad: clamp(24px, 4.8vw, 72px);
-      --section-pad-y: clamp(16px, 3.2vw, 44px);
     }
 
     * { box-sizing: border-box; }
@@ -32,32 +28,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
 
     a { color: inherit; text-decoration: none; }
 
-    .shell { max-width: 1480px; margin: 0 auto; padding: calc(var(--topbar-height) + 16px) var(--gutter) 72px; }
-
-    .topbar {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 40;
-      background: rgba(10, 10, 10, 0.96);
-      border-bottom: 1px solid var(--line-soft);
-      backdrop-filter: blur(8px);
-    }
-
-    .topbar-inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: nowrap;
-      width: 100%;
-      max-width: 1480px;
-      min-height: var(--topbar-height);
-      min-width: 0;
-      margin: 0 auto;
-      padding: 10px var(--section-pad);
-    }
+    .shell { max-width: var(--page-max-width); margin: 0 auto; padding: calc(var(--topbar-height) + var(--page-below-topbar)) var(--page-gutter) 72px; }
 
     .brand,
     .logo {
@@ -75,15 +46,6 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       padding-bottom: 2px;
     }
 
-    .topbar-right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: auto;
-      flex: 0 0 auto;
-      white-space: nowrap;
-    }
-
     .logo {
       font-family: 'Space Mono', monospace;
       font-size: 10px;
@@ -92,36 +54,15 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       color: #d8d8d8;
     }
 
-    .topnav {
-      display: flex;
-      gap: 12px;
-      flex-wrap: nowrap;
-      align-items: center;
-      min-width: 0;
-      font-family: 'Space Mono', monospace;
-      font-size: var(--archive-header-nav-size);
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-    }
-
-    .topnav a {
-      color: #cfcfcf;
-      border-bottom: 1px solid transparent;
-      padding-bottom: 2px;
-      transition: color 0.2s ease, border-color 0.2s ease;
-    }
-
-    .topnav a:hover { color: #fff; border-color: var(--lime); }
-
     .section {
       border: 1px solid var(--line);
       background: var(--paper);
-      margin-top: var(--gutter);
+      margin-top: var(--page-gutter);
     }
 
     .section.dark { background: #0f0f0f; }
 
-    .section-inner { padding: var(--section-pad-y) var(--section-pad); }
+    .section-inner { padding: var(--page-pad-y) var(--page-pad); }
 
     .section-head {
       display: grid;
@@ -172,7 +113,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
 
     .hero .section-inner {
       position: relative;
-      padding-top: var(--section-pad-y);
+      padding-top: var(--page-pad-y);
       padding-bottom: clamp(14px, 2.4vw, 24px);
       display: grid;
       gap: 12px;
@@ -1862,8 +1803,8 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
     .footer {
       border: 1px solid var(--line);
       background: #111;
-      padding: var(--section-pad);
-      margin-top: var(--gutter);
+      padding: var(--page-pad);
+      margin-top: var(--page-gutter);
     }
 
     .footer h2 {
@@ -1928,7 +1869,6 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       .artist-grid { max-height: 210px; }
       .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .set-grid { column-count: 2; }
-      .topnav { display: none; }
     }
 
     @media (max-width: 680px) {
@@ -1950,4 +1890,125 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       .focus-stats { grid-template-columns: 1fr 1fr; }
       .section-head h2 { font-size: clamp(34px, 15vw, 58px); }
       .hero-title-overlay { font-size: clamp(58px, 22vw, 120px); }
+    }
+
+    @media (max-width: 480px) {
+      .topbar-right {
+        flex-wrap: wrap;
+        width: 100%;
+      }
+      .shell {
+        padding-left: 10px;
+        padding-right: 10px;
+        overflow-x: hidden;
+      }
+      /* Change 6: network graph — reduce dead space */
+      .network-wrap {
+        min-height: 380px;
+      }
+      .network-svg {
+        height: 380px;
+      }
+      .hero-stats,
+      .focus-stats {
+        grid-template-columns: 1fr;
+      }
+      .atlas-layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .artist-stack,
+      .atlas-panel {
+        min-width: 0;
+      }
+      /* Atlas panel grid items — prevent overflow down the nesting chain */
+      .focus-header,
+      .taxonomy-workbench,
+      .taxonomy-panel,
+      .evidence-panel,
+      .network-panel,
+      .pair-panel,
+      .set-panel,
+      .panel-head {
+        min-width: 0;
+      }
+      /* Taxonomy head tabs — wrap and scroll on mobile */
+      .taxonomy-head {
+        flex-wrap: wrap;
+      }
+      .lens-tabs {
+        overflow-x: auto;
+        max-width: 100%;
+      }
+      .artist-grid {
+        max-height: 260px;
+      }
+      .hero-title-overlay {
+        font-size: clamp(42px, 18vw, 80px);
+      }
+      .section-inner {
+        padding: 12px;
+      }
+      .section-head h2 {
+        font-size: clamp(28px, 12vw, 48px);
+      }
+      /* Change 1: hide hero side-rail scroll wheel */
+      .hero-side {
+        display: none;
+      }
+      /* Change 2: submit artist button — clear heading */
+      #artists .section-inner {
+        padding-top: 52px;
+      }
+      /* Change 3: evidence track cards — wide horizontal scroll */
+      .evidence-grid,
+      .inline-evidence .evidence-grid {
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(240px, 80vw);
+        grid-template-columns: none;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 8px;
+      }
+      /* Change 4 & 5: taxonomy controls — wrap into two rows */
+      .taxonomy-controls-row {
+        flex-wrap: wrap;
+        margin-left: 0;
+        width: 100%;
+      }
+      .taxonomy-search-control {
+        flex: 0 0 100%;
+      }
+      /* Item 6: taxonomy controls bar — wrap all controls, no horizontal overflow */
+      .taxonomy-controls-bar {
+        flex-wrap: wrap;
+        overflow: hidden;
+      }
+      .taxonomy-controls-bar .pill-row {
+        flex-wrap: wrap;
+      }
+      /* Item 11: disable 200% card expansion on mobile — keep within card bounds */
+      .track-card.embed-open,
+      .track-card.sources-open {
+        width: 100%;
+        max-width: 100%;
+      }
+      /* Cancel even-card negative margin */
+      .evidence-grid .track-card.embed-open:nth-child(even),
+      .inline-evidence .track-card.embed-open:nth-child(even),
+      .evidence-grid .track-card.sources-open:nth-child(even),
+      .inline-evidence .track-card.sources-open:nth-child(even) {
+        margin-left: 0;
+      }
+      /* Constrain spotify embed to card width */
+      .spotify-embed,
+      .spotify-inline {
+        max-width: 100%;
+        overflow: hidden;
+        box-sizing: border-box;
+      }
+      .spotify-embed iframe,
+      .spotify-inline iframe {
+        max-width: 100%;
+        width: 100% !important;
+      }
     }`;

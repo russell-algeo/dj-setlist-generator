@@ -240,6 +240,11 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   border-radius: 0;
+  display: inline-flex;
+  width: fit-content;
+  align-self: center;
+  justify-self: start;
+  flex-shrink: 0;
 }
 
 .trackConfidenceHigh {
@@ -277,5 +282,25 @@
 @media (width <= 820px) {
   .track {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .body {
+    padding: 8px;
+  }
+
+  .title {
+    font-size: 14px;
+  }
+
+  .actionLink,
+  .actionButton {
+    min-height: 28px;
+  }
+
+  .pill {
+    font-size: 9px;
+    padding: 2px 6px;
   }
 }

@@ -54,3 +54,12 @@
   z-index: 200;
   pointer-events: none;
 }
+
+@media (max-width: 480px) {
+  .tooltip {
+    white-space: normal;
+    max-width: 200px;
+    right: auto;
+    left: 0;
+  }
+}

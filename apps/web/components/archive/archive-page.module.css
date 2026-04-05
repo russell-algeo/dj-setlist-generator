@@ -459,3 +459,35 @@
     font-size: clamp(2.2rem, 14vw, 4.5rem);
   }
 }
+
+@media (max-width: 480px) {
+  .section {
+    border-radius: 16px;
+  }
+
+  .topbarInner,
+  .shell {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .statGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .heroTitle {
+    font-size: clamp(1.8rem, 12vw, 3.5rem);
+  }
+
+  .trackHeader {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .nav {
+    display: none;
+  }
+}

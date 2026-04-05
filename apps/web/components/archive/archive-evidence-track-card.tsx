@@ -106,8 +106,10 @@ export function ArchiveEvidenceTrackCard({
           <div className="spotify-embed">
             <iframe
               allow="autoplay; clipboard-write; encrypted-media"
+              height="80"
               src={`https://open.spotify.com/embed/track/${spotifyTrackId}?utm_source=generator&theme=0`}
               title="Spotify embed"
+              width="100%"
             />
           </div>
         ) : null}

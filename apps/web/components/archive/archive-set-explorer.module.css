@@ -1,5 +1,4 @@
 .root {
-  --topbar-height: 48px;
   --archive-header-brand-size: 16px;
   --archive-header-nav-size: 11px;
   --archive-header-control-size: 11px;
@@ -14,9 +13,6 @@
   --line: var(--dark-border);
   --line-soft: var(--dark-border-soft);
   --radius: var(--dark-radius-control);
-  --gutter: clamp(16px, 2vw, 28px);
-  --section-pad: clamp(24px, 4.8vw, 72px);
-  --section-pad-y: clamp(16px, 3.2vw, 44px);
   min-height: 100vh;
   background: var(--bg);
   color: var(--ink);
@@ -32,86 +28,21 @@
   text-decoration: none;
 }
 
-.root :global(.topbar) {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 80;
-  background: rgb(10 10 10 / 96%);
-  border-bottom: 1px solid var(--line-soft);
-  backdrop-filter: blur(8px);
-}
-
-.root :global(.topbar-inner) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  min-height: var(--topbar-height);
-  padding: 10px var(--section-pad);
-  margin: 0 auto;
-  max-width: 1480px;
-}
-
-.root :global(.brand) {
-  font-family: "Space Mono", var(--font-mono), monospace;
-  font-size: var(--archive-header-brand-size);
-  line-height: 1;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #d8d8d8;
-  white-space: nowrap;
-  padding-bottom: 2px;
-}
-
-.root :global(.topbar-right) {
-  margin-left: auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.root :global(.topnav) {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: nowrap;
-  font-family: var(--font-mono), monospace;
-  font-size: var(--archive-header-nav-size);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.root :global(.topnav a) {
-  color: #cfcfcf;
-  border-bottom: 1px solid transparent;
-  line-height: 1;
-  padding-top: 2px;
-  padding-bottom: 2px;
-  transition: color 0.2s ease, border-color 0.2s ease;
-}
-
-.root :global(.topnav a:hover) {
-  color: #fff;
-  border-color: var(--lime);
-}
 
 .root :global(.shell) {
   max-width: 1480px;
   margin: 0 auto;
-  padding: calc(var(--topbar-height) + 16px) var(--gutter) 72px;
+  padding: calc(var(--topbar-height) + var(--page-below-topbar)) var(--page-gutter) 72px;
 }
 
 .root :global(.detail-shell) {
-  padding-top: calc(var(--topbar-height) + 16px);
+  padding-top: calc(var(--topbar-height) + var(--page-below-topbar));
 }
 
 .root :global(.section) {
   border: 1px solid var(--line);
   background: var(--paper);
-  margin-top: var(--gutter);
+  margin-top: var(--page-gutter);
   scroll-margin-top: 64px;
 }
 
@@ -120,12 +51,12 @@
 }
 
 .root :global(.section-inner) {
-  padding: var(--section-pad-y) var(--section-pad);
+  padding: var(--page-pad-y) var(--page-pad);
 }
 
 .root :global(#overview .section-inner) {
   position: relative;
-  padding-top: var(--section-pad-y);
+  padding-top: var(--page-pad-y);
   display: grid;
   gap: 12px;
 }
@@ -1563,10 +1494,6 @@
 }
 
 @media (max-width: 1180px) {
-  .root :global(.topbar-right) {
-    gap: 10px;
-  }
-
   .root :global(.section-head) {
     grid-template-columns: 1fr;
   }
@@ -1601,12 +1528,6 @@
 }
 
 @media (max-width: 860px) {
-  .root :global(.topbar-right) {
-    width: 100%;
-    justify-content: space-between;
-    margin-left: 0;
-  }
-
   .root :global(.set-hero-title-overlay) {
     font-size: clamp(24px, 8.6vw, 56px);
     bottom: clamp(10px, 3.6vw, 18px);
@@ -1715,16 +1636,6 @@
 }
 
 @media (max-width: 720px) {
-  .root :global(.topbar-inner) {
-    padding-left: 14px;
-    padding-right: 14px;
-  }
-
-  .root :global(.topnav) {
-    gap: 10px;
-    font-size: 10px;
-  }
-
   .root :global(.section-inner) {
     padding: 14px;
   }
@@ -1739,5 +1650,151 @@
 
   .root :global(.section-head h2) {
     font-size: clamp(34px, 15vw, 58px);
+  }
+}
+
+@media (max-width: 480px) {
+  /* Reduce timeline bar to match set library mini-timeline height */
+  .root :global(.timeline-bar) {
+    height: 16px;
+  }
+
+  .root :global(.topnav) {
+    display: none;
+  }
+
+  .root :global(.topbar-right) {
+    flex-wrap: wrap;
+  }
+
+  /* Track layout: art | time-col | actions in row 1; title full-width in row 2 */
+  .root :global(.track-grid) {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    align-items: start;
+  }
+
+  .root :global(.track-index) {
+    display: none;
+  }
+
+  .root :global(.track-art) {
+    grid-column: 1;
+    grid-row: 1;
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+  }
+
+  .root :global(.track-time-col) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .root :global(.track-actions) {
+    grid-column: 3;
+    grid-row: 1;
+    flex-direction: column;
+    gap: 3px;
+    overflow-x: visible;
+    justify-content: flex-start;
+  }
+
+  .root :global(.track-main) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .root :global(.dock-art-frame) {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Item 3: dock — reduce dock-now and actions widths so scrubber has room */
+  .root :global(.dock-grid) {
+    --dock-now-width: 150px;
+    --dock-actions-width: 64px;
+  }
+
+  .root :global(.dock-now) {
+    grid-template-columns: 40px minmax(0, 1fr);
+    width: 150px;
+  }
+
+  .root :global(.set-hero-title-overlay) {
+    font-size: clamp(20px, 7vw, 36px);
+  }
+
+  .root :global(.set-hero-title-overlay.long) {
+    font-size: clamp(18px, 6vw, 32px);
+  }
+
+  .root :global(.set-hero-title-overlay.xlong) {
+    font-size: clamp(16px, 5.4vw, 28px);
+  }
+
+  .root :global(.section-inner) {
+    padding: 12px;
+  }
+
+  /* Change 1: hide hero side-rail scroll wheel */
+  .root :global(.set-hero-side) {
+    display: none;
+  }
+
+  /* Item 3: dock — shell clearance + push dock above iPhone home indicator */
+  .root :global(.shell) {
+    padding-bottom: 140px;
+  }
+
+  .root :global(.dock) {
+    width: calc(100vw - 20px);
+    padding: 6px 10px;
+    bottom: max(20px, env(safe-area-inset-bottom, 20px));
+  }
+
+  .root :global(.dock-now) {
+    gap: 6px;
+  }
+
+  /* Item 4 & 11: spotify/embedded players must not exceed card width */
+  .root :global(.spotify-inline),
+  .root :global(.track-details) {
+    max-width: 100%;
+    width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  /* Item 4 & 11: iframe inside players must not overflow */
+  .root :global(.spotify-inline iframe),
+  .root :global(.track-details iframe) {
+    max-width: 100%;
+    width: 100% !important;
+  }
+
+  /* Workspace section: push section-inner below the absolute button */
+  .root :global(#workspace .section-inner) {
+    padding-top: 52px;
+  }
+
+  /* Workspace heading — reset to standard size, allow wrapping */
+  .root :global(#workspace .section-head h2.set-workspace-heading) {
+    white-space: normal;
+    font-size: clamp(26px, 8vw, 48px);
+    word-break: break-word;
+  }
+
+  /* Hero set name — slightly larger on mobile */
+  .root :global(.set-hero-title-overlay) {
+    font-size: clamp(26px, 9vw, 48px);
+  }
+
+  .root :global(.set-hero-title-overlay.long) {
+    font-size: clamp(22px, 7.5vw, 40px);
+  }
+
+  .root :global(.set-hero-title-overlay.xlong) {
+    font-size: clamp(18px, 6.5vw, 34px);
   }
 }

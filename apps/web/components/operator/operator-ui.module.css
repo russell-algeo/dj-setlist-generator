@@ -1,5 +1,4 @@
 .page {
-  --operator-frame-gap: 16px;
   min-height: 100vh;
   background: var(--dark-bg);
   color: var(--dark-text);
@@ -7,19 +6,15 @@
 }
 
 .shell {
-  width: min(1320px, calc(100vw - (var(--operator-frame-gap) * 2)));
+  max-width: var(--page-max-width);
   margin: 0 auto;
-  padding: calc(48px + var(--operator-frame-gap)) 0 72px;
-}
-
-.shell[data-width="wide"] {
-  width: min(1480px, calc(100vw - (var(--operator-frame-gap) * 2)));
+  padding: calc(var(--topbar-height) + var(--page-below-topbar)) var(--page-gutter) 72px;
 }
 
 .contentFrame {
   border: 1px solid var(--dark-border);
   background: #101010;
-  padding: 22px clamp(16px, 2vw, 28px) 28px;
+  padding: 22px var(--page-gutter) 28px;
 }
 
 .backRow {
@@ -567,10 +562,8 @@
 }
 
 @media (max-width: 900px) {
-  .shell,
-  .shell[data-width="wide"] {
-    width: min(calc(100vw - (var(--operator-frame-gap) * 2)), 960px);
-    padding-top: calc(48px + var(--operator-frame-gap));
+  .shell {
+    padding-top: calc(var(--topbar-height) + var(--page-below-topbar));
   }
 
   .header {

@@ -63,6 +63,29 @@
   pointer-events: none;
 }
 
+@media (max-width: 480px) {
+  .tooltip {
+    white-space: normal;
+    max-width: 200px;
+    right: auto;
+    left: 0;
+  }
+  .panel {
+    position: fixed;
+    top: auto;
+    bottom: 12px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-width: none;
+  }
+  .modes {
+    grid-template-columns: 1fr;
+    width: 100%;
+    max-width: none;
+  }
+}
+
 .panel {
   position: absolute;
   top: calc(100% + 8px);
