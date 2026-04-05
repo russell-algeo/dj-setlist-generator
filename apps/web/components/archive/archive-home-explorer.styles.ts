@@ -1955,9 +1955,9 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       .hero-side {
         display: none;
       }
-      /* Change 2: submit artist button — clear heading */
-      #artists .section-inner {
-        padding-top: 52px;
+      /* Change 2: artist atlas heading wraps around submit button */
+      #artists .section-head h2 {
+        padding-right: 150px;
       }
       /* Change 3: evidence track cards — wide horizontal scroll */
       .evidence-grid,

@@ -2304,14 +2304,15 @@
     flex-wrap: wrap;
   }
 
-  /* Set Atlas section: push section-inner below the absolute buttons */
-  .root :global(#set-atlas-section .section-inner) {
-    padding-top: 52px;
+  /* Set Atlas: stack two buttons vertically on mobile, h2 wraps around them */
+  .root :global(.set-atlas-actions) {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
   }
 
-  /* Set Atlas: right-pad heading so it wraps before reaching the two-button stack */
-  .root :global(#set-atlas-section .section-head) {
-    padding-right: 220px;
+  .root :global(#set-atlas-section .section-head h2) {
+    padding-right: 165px;
   }
 
   /* Set Explorer "Add Sets" button floats at heading level —

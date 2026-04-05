@@ -1773,11 +1773,6 @@
     width: 100% !important;
   }
 
-  /* Workspace section: push section-inner below the absolute button */
-  .root :global(#workspace .section-inner) {
-    padding-top: 52px;
-  }
-
   /* Workspace heading — reset to standard size, allow wrapping */
   .root :global(#workspace .section-head h2.set-workspace-heading) {
     white-space: normal;

@@ -1445,7 +1445,7 @@ export function ArchiveArtistExplorer({
         </section>
 
         <section className="section" id="set-atlas-section" style={{ position: "relative" }}>
-          <div style={{ alignItems: "center", display: "flex", gap: 8, position: "absolute", right: 24, top: 18, zIndex: 2 }}>
+          <div className="set-atlas-actions" style={{ alignItems: "center", display: "flex", gap: 8, position: "absolute", right: 24, top: 18, zIndex: 2 }}>
             <SpotifyExportButton
               counts={spotifyExportCounts}
               entityType="artist"
