@@ -2299,7 +2299,7 @@ export function ArchiveSetExplorer({
                     -15
                   </button>
                   <button className="dock-nav-btn" onClick={previousTrack} title="Previous track" type="button">
-                    ⏮
+                    {"\u23EE\uFE0E"}
                   </button>
                   <button
                     className={joinClasses("dock-play-btn", isPlaying && "is-playing")}
@@ -2310,7 +2310,7 @@ export function ArchiveSetExplorer({
                     {isPlaying ? "❚❚" : "▶"}
                   </button>
                   <button className="dock-nav-btn" onClick={nextTrack} title="Next track" type="button">
-                    ⏭
+                    {"\u23ED\uFE0E"}
                   </button>
                   <button className="dock-mini-btn" onClick={() => jumpTo(currentTime + 15, false, true)} title="Forward 15 seconds" type="button">
                     +15

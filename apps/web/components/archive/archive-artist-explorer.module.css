@@ -2191,6 +2191,11 @@
   }
 }
 
+/* Desktop default for set-atlas-actions (align-items moved out of inline style) */
+.root :global(.set-atlas-actions) {
+  align-items: center;
+}
+
 @media (width <= 480px) {
   /* Change 7: recurring tracks — horizontal scroll with wide cards */
   .root :global(.recurring-grid) {
