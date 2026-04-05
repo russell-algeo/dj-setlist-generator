@@ -58,27 +58,27 @@ type HeroCard = {
 
 type SetSourceModel =
   | {
-      embedId: string;
-      frameClass: string;
-      kind: "youtube";
-      sourceUrl: string;
-    }
+    embedId: string;
+    frameClass: string;
+    kind: "youtube";
+    sourceUrl: string;
+  }
   | {
-      embedSrc: string;
-      frameClass: string;
-      kind: "soundcloud";
-      sourceUrl: string;
-    }
+    embedSrc: string;
+    frameClass: string;
+    kind: "soundcloud";
+    sourceUrl: string;
+  }
   | {
-      frameClass: string;
-      kind: "fallback";
-      sourceUrl: string;
-    }
+    frameClass: string;
+    kind: "fallback";
+    sourceUrl: string;
+  }
   | {
-      frameClass: string;
-      kind: "missing";
-      sourceUrl: null;
-    };
+    frameClass: string;
+    kind: "missing";
+    sourceUrl: null;
+  };
 
 type TimelineTooltipState = {
   badge: string;
@@ -634,8 +634,8 @@ type SoundCloudWidgetFactory = ((element: HTMLIFrameElement) => SoundCloudWidget
 
 type SoundCloudWidgetEvent =
   | {
-      currentPosition?: number;
-    }
+    currentPosition?: number;
+  }
   | number
   | null
   | undefined;
@@ -1735,10 +1735,10 @@ export function ArchiveSetExplorer({
                           setTimelineTooltip((current) =>
                             current
                               ? {
-                                  ...current,
-                                  x: event.clientX,
-                                  y: event.clientY,
-                                }
+                                ...current,
+                                x: event.clientX,
+                                y: event.clientY,
+                              }
                               : current,
                           )
                         }
@@ -1783,139 +1783,139 @@ export function ArchiveSetExplorer({
                 </button>
               </div>
               {!journeyOpen ? null : (
-                  <div className="journey-panel" id="journeyPanel">
-                    <div className="journey-controls">
-                      {(["bpm", "energy", "dance"] as JourneyMetric[]).map((metric) => (
-                        <button
-                          className={joinClasses("btn", activeMetrics.includes(metric) && "active")}
-                          data-metric={metric}
-                          key={metric}
-                          onClick={() =>
-                            setActiveMetrics((current) =>
-                              current.includes(metric)
-                                ? current.filter((entry) => entry !== metric)
-                                : [...current, metric],
-                            )
-                          }
-                          type="button"
-                        >
-                          {metric === "bpm" ? "BPM" : metric === "energy" ? "Energy" : "Dance"}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="journey-chart-wrap" id="journeyWrap">
-                      {journeyView.leftAxis ? (
-                        <div className="journey-yaxis-left">
-                          {journeyView.leftAxis.ticks.map((tick) => (
-                            <span className="journey-axis-tick" key={`left-${tick.label}-${tick.top}`} style={{ top: tick.top }}>
-                              {tick.label}
-                            </span>
-                          ))}
-                          {journeyView.leftAxis.metrics.length > 0 ? (
-                            <span className="journey-axis-metrics">
-                              {journeyView.leftAxis.metrics.map((metric) => (
-                                <span className="journey-axis-metric" key={metric} style={{ color: JOURNEY_COLORS[metric] }}>
-                                  {JOURNEY_CODES[metric]}
-                                </span>
-                              ))}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      <svg id="journeySvg" preserveAspectRatio="none" viewBox="0 0 1000 260">
-                        {journeyView.layers.map((layer) => (
-                          <g key={layer.metric}>
-                            <path d={layer.d} fill="none" stroke={layer.color} strokeWidth="2" />
-                            {layer.points.map((point) => {
-                              const isPointActive = activeIdx === point.idx;
-                              return (
-                                <circle
-                                  className={joinClasses("journey-point", isPointActive && "active")}
-                                  cx={point.cx}
-                                  cy={point.cy}
-                                  data-track-idx={String(point.idx)}
-                                  fill={layer.color}
-                                  key={`${layer.metric}-${point.idx}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    const track = model.tracks.find((entry) => entry.idx === point.idx);
-                                    if (track) {
-                                      jumpTo(track.start, false, true);
-                                    }
-                                  }}
-                                  onMouseEnter={(event) =>
-                                    setJourneyTooltip({
-                                      title: point.title,
-                                      value:
-                                        point.metric === "bpm"
-                                          ? `BPM ${point.value.toFixed(1)}`
-                                          : `${point.metric === "energy" ? "Energy" : "Dance"} ${point.value.toFixed(2)}`,
-                                      x: event.clientX,
-                                      y: event.clientY,
-                                    })
-                                  }
-                                  onMouseLeave={() => setJourneyTooltip(null)}
-                                  onMouseMove={(event) =>
-                                    setJourneyTooltip((current) =>
-                                      current
-                                        ? {
-                                            ...current,
-                                            x: event.clientX,
-                                            y: event.clientY,
-                                          }
-                                        : current,
-                                    )
-                                  }
-                                  r="4"
-                                />
-                              );
-                            })}
-                          </g>
-                        ))}
-                      </svg>
-
-                      {journeyView.rightAxis ? (
-                        <div className="journey-yaxis-right">
-                          {journeyView.rightAxis.ticks.map((tick) => (
-                            <span className="journey-axis-tick" key={`right-${tick.label}-${tick.top}`} style={{ top: tick.top }}>
-                              {tick.label}
-                            </span>
-                          ))}
-                          {journeyView.rightAxis.metrics.length > 0 ? (
-                            <span className="journey-axis-metrics">
-                              {journeyView.rightAxis.metrics.map((metric) => (
-                                <span className="journey-axis-metric" key={metric} style={{ color: JOURNEY_COLORS[metric] }}>
-                                  {JOURNEY_CODES[metric]}
-                                </span>
-                              ))}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      {!journeyView.empty ? null : (
-                        <div className="journey-empty">No track metrics available for this set.</div>
-                      )}
-                    </div>
-
-                    <div className="journey-legend">
-                      <span className="journey-key">
-                        <span className="journey-dot" style={{ background: JOURNEY_COLORS.bpm }} />
-                        BPM
-                      </span>
-                      <span className="journey-key">
-                        <span className="journey-dot" style={{ background: JOURNEY_COLORS.energy }} />
-                        Energy
-                      </span>
-                      <span className="journey-key">
-                        <span className="journey-dot" style={{ background: JOURNEY_COLORS.dance }} />
-                        Dance
-                      </span>
-                    </div>
+                <div className="journey-panel" id="journeyPanel">
+                  <div className="journey-controls">
+                    {(["bpm", "energy", "dance"] as JourneyMetric[]).map((metric) => (
+                      <button
+                        className={joinClasses("btn", activeMetrics.includes(metric) && "active")}
+                        data-metric={metric}
+                        key={metric}
+                        onClick={() =>
+                          setActiveMetrics((current) =>
+                            current.includes(metric)
+                              ? current.filter((entry) => entry !== metric)
+                              : [...current, metric],
+                          )
+                        }
+                        type="button"
+                      >
+                        {metric === "bpm" ? "BPM" : metric === "energy" ? "Energy" : "Dance"}
+                      </button>
+                    ))}
                   </div>
-                )}
+
+                  <div className="journey-chart-wrap" id="journeyWrap">
+                    {journeyView.leftAxis ? (
+                      <div className="journey-yaxis-left">
+                        {journeyView.leftAxis.ticks.map((tick) => (
+                          <span className="journey-axis-tick" key={`left-${tick.label}-${tick.top}`} style={{ top: tick.top }}>
+                            {tick.label}
+                          </span>
+                        ))}
+                        {journeyView.leftAxis.metrics.length > 0 ? (
+                          <span className="journey-axis-metrics">
+                            {journeyView.leftAxis.metrics.map((metric) => (
+                              <span className="journey-axis-metric" key={metric} style={{ color: JOURNEY_COLORS[metric] }}>
+                                {JOURNEY_CODES[metric]}
+                              </span>
+                            ))}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <svg id="journeySvg" preserveAspectRatio="none" viewBox="0 0 1000 260">
+                      {journeyView.layers.map((layer) => (
+                        <g key={layer.metric}>
+                          <path d={layer.d} fill="none" stroke={layer.color} strokeWidth="2" />
+                          {layer.points.map((point) => {
+                            const isPointActive = activeIdx === point.idx;
+                            return (
+                              <circle
+                                className={joinClasses("journey-point", isPointActive && "active")}
+                                cx={point.cx}
+                                cy={point.cy}
+                                data-track-idx={String(point.idx)}
+                                fill={layer.color}
+                                key={`${layer.metric}-${point.idx}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  const track = model.tracks.find((entry) => entry.idx === point.idx);
+                                  if (track) {
+                                    jumpTo(track.start, false, true);
+                                  }
+                                }}
+                                onMouseEnter={(event) =>
+                                  setJourneyTooltip({
+                                    title: point.title,
+                                    value:
+                                      point.metric === "bpm"
+                                        ? `BPM ${point.value.toFixed(1)}`
+                                        : `${point.metric === "energy" ? "Energy" : "Dance"} ${point.value.toFixed(2)}`,
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                  })
+                                }
+                                onMouseLeave={() => setJourneyTooltip(null)}
+                                onMouseMove={(event) =>
+                                  setJourneyTooltip((current) =>
+                                    current
+                                      ? {
+                                        ...current,
+                                        x: event.clientX,
+                                        y: event.clientY,
+                                      }
+                                      : current,
+                                  )
+                                }
+                                r="4"
+                              />
+                            );
+                          })}
+                        </g>
+                      ))}
+                    </svg>
+
+                    {journeyView.rightAxis ? (
+                      <div className="journey-yaxis-right">
+                        {journeyView.rightAxis.ticks.map((tick) => (
+                          <span className="journey-axis-tick" key={`right-${tick.label}-${tick.top}`} style={{ top: tick.top }}>
+                            {tick.label}
+                          </span>
+                        ))}
+                        {journeyView.rightAxis.metrics.length > 0 ? (
+                          <span className="journey-axis-metrics">
+                            {journeyView.rightAxis.metrics.map((metric) => (
+                              <span className="journey-axis-metric" key={metric} style={{ color: JOURNEY_COLORS[metric] }}>
+                                {JOURNEY_CODES[metric]}
+                              </span>
+                            ))}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {!journeyView.empty ? null : (
+                      <div className="journey-empty">No track metrics available for this set.</div>
+                    )}
+                  </div>
+
+                  <div className="journey-legend">
+                    <span className="journey-key">
+                      <span className="journey-dot" style={{ background: JOURNEY_COLORS.bpm }} />
+                      BPM
+                    </span>
+                    <span className="journey-key">
+                      <span className="journey-dot" style={{ background: JOURNEY_COLORS.energy }} />
+                      Energy
+                    </span>
+                    <span className="journey-key">
+                      <span className="journey-dot" style={{ background: JOURNEY_COLORS.dance }} />
+                      Dance
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="timeline-track-atlas" id="tracks">
                 <h2 className="panel-title">Track Atlas</h2>
@@ -2002,67 +2002,67 @@ export function ArchiveSetExplorer({
                                 <span className="track-art--empty">♪</span>
                               )}
                             </div>
-                            <div className="track-time-col">
-                              <button
-                                className={joinClasses(
-                                  "btn",
-                                  "track-tool-btn",
-                                  "js-track-play",
-                                  isActive && isPlaying && "active",
-                                )}
-                                data-time={track.start.toFixed(3)}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  if (ytEmbedBlocked && model.source.kind === "youtube") {
-                                    jumpTo(track.start, true, false);
-                                    const sourceLink = buildSourceLinkAt(model.source, track.start);
-                                    if (sourceLink) {
-                                      window.open(sourceLink, "_blank", "noopener");
+                              <div className="track-time-col">
+                                <button
+                                  className={joinClasses(
+                                    "btn",
+                                    "track-tool-btn",
+                                    "js-track-play",
+                                    isActive && isPlaying && "active",
+                                  )}
+                                  data-time={track.start.toFixed(3)}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (ytEmbedBlocked && model.source.kind === "youtube") {
+                                      jumpTo(track.start, true, false);
+                                      const sourceLink = buildSourceLinkAt(model.source, track.start);
+                                      if (sourceLink) {
+                                        window.open(sourceLink, "_blank", "noopener");
+                                      }
+                                      return;
                                     }
-                                    return;
-                                  }
 
-                                  if (activeIdx === track.idx) {
-                                    togglePlay();
-                                    return;
-                                  }
+                                    if (activeIdx === track.idx) {
+                                      togglePlay();
+                                      return;
+                                    }
 
-                                  jumpTo(track.start, true, true);
-                                }}
-                                title={
-                                  ytEmbedBlocked && model.source.kind === "youtube"
-                                    ? "Open source on YouTube at this timestamp"
-                                    : "Play / pause at this track"
-                                }
-                                type="button"
-                              >
-                                {ytEmbedBlocked && model.source.kind === "youtube"
-                                  ? "YT"
-                                  : isActive && isPlaying
-                                    ? "❚❚"
-                                    : "▶"}
-                              </button>
-                              <a
-                                className="track-time-link js-track-time"
-                                href={`#track-${track.idx}`}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  jumpTo(track.start, true, true);
-                                }}
-                                title="Jump to this timestamp"
-                              >
-                                {track.startFmt}
-                              </a>
-                            </div>
-                            <div className="track-main">
-                              <div className="track-title-row">
-                                <span className="track-artist">{track.artist}</span>
-                                <span className="track-sep">—</span>
-                                <span className="track-title">{track.title}</span>
+                                    jumpTo(track.start, true, true);
+                                  }}
+                                  title={
+                                    ytEmbedBlocked && model.source.kind === "youtube"
+                                      ? "Open source on YouTube at this timestamp"
+                                      : "Play / pause at this track"
+                                  }
+                                  type="button"
+                                >
+                                  {ytEmbedBlocked && model.source.kind === "youtube"
+                                    ? "YT"
+                                    : isActive && isPlaying
+                                      ? "❚❚"
+                                      : "▶"}
+                                </button>
+                                <a
+                                  className="track-time-link js-track-time"
+                                  href={`#track-${track.idx}`}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    jumpTo(track.start, true, true);
+                                  }}
+                                  title="Jump to this timestamp"
+                                >
+                                  {track.startFmt}
+                                </a>
                               </div>
-                              <div className="track-meta">
-                                <span className={joinClasses("pill", "confidence-pill", confidenceClass)}>{track.conf}</span>
+                              <div className="track-main">
+                                <div className="track-title-row">
+                                  <span className="track-artist">{track.artist}</span>
+                                  <span className="track-sep">—</span>
+                                  <span className="track-title">{track.title}</span>
+                                </div>
+                                <div className="track-meta">
+                                  <span className={joinClasses("pill", "confidence-pill", confidenceClass)}>{track.conf}</span>
                               </div>
                             </div>
                             <div className="track-actions">
@@ -2267,21 +2267,21 @@ export function ArchiveSetExplorer({
       {showDock ? (
         <div className="dock" id="playerDock">
           <div className="dock-grid">
-            <div className="dock-now">
-              <div className="dock-art-frame">
-                {activeTrack?.albumArt ? (
-                  <img
-                    alt=""
-                    className={joinClasses("dock-art", "visible")}
-                    id="dockArt"
-                    loading="lazy"
-                    src={activeTrack.albumArt}
-                  />
-                ) : null}
-                <div className={joinClasses("dock-art-fallback", activeTrack?.albumArt && "hidden")} id="dockArtFallback">
-                  ♫
-                </div>
+            <div className="dock-art-frame">
+              {activeTrack?.albumArt ? (
+                <img
+                  alt=""
+                  className={joinClasses("dock-art", "visible")}
+                  id="dockArt"
+                  loading="lazy"
+                  src={activeTrack.albumArt}
+                />
+              ) : null}
+              <div className={joinClasses("dock-art-fallback", activeTrack?.albumArt && "hidden")} id="dockArtFallback">
+                ♫
               </div>
+            </div>
+            <div className="dock-now">
               <div>
                 <div className="dock-track" id="dockTrack">
                   {activeTrack?.title ?? "No active track"}

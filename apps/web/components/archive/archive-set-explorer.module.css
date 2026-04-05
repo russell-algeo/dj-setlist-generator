@@ -1265,25 +1265,22 @@
 .root :global(.dock-grid) {
   display: grid;
   gap: 6px;
-  grid-template-columns: var(--dock-now-width) minmax(0, 1fr) var(--dock-actions-width);
+  grid-template-columns: 68px calc(var(--dock-now-width) - 74px) minmax(0, 1fr) var(--dock-actions-width);
   align-items: center;
   position: relative;
 }
 
 .root :global(.dock-now) {
-  display: grid;
-  grid-template-columns: 68px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  width: var(--dock-now-width);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 2px;
   min-width: 0;
+  align-self: start;
 }
 
 .root :global(.dock-now > div:last-child) {
   min-width: 0;
-  margin-top: -24px;
-  max-width: calc(var(--dock-now-width) - 108px);
-  width: 100%;
 }
 
 .root :global(.dock-art-frame) {
@@ -1597,26 +1594,40 @@
   }
 
   .root :global(.dock-grid) {
-    grid-template-columns: 1fr;
-  }
-
-  .root :global(.dock-now) {
-    grid-template-columns: 58px minmax(0, 1fr);
-    width: 100%;
-  }
-
-  .root :global(.dock-now > div:last-child) {
-    margin-top: 0;
-    max-width: none;
+    grid-template-columns: 54px 1fr var(--dock-actions-width);
+    grid-template-rows: auto auto;
+    align-items: start;
   }
 
   .root :global(.dock-art-frame) {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    align-self: stretch;
     width: 54px;
-    height: 54px;
+    height: auto;
+  }
+
+  .root :global(.dock-now) {
+    grid-column: 2;
+    grid-row: 1;
+    display: block;
+    width: 100%;
+    max-width: none;
+  }
+
+  .root :global(.dock-now > div:last-child) {
+    max-width: none;
   }
 
   .root :global(.dock-actions) {
-    align-self: flex-end;
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .root :global(.dock-center) {
+    grid-column: 2 / -1;
+    grid-row: 2;
   }
 
   .root :global(.dock-range) {
@@ -1667,11 +1678,24 @@
     flex-wrap: wrap;
   }
 
-  /* Track layout: art | time-col | actions in row 1; title full-width in row 2 */
+  /* Track layout on iPhone:
+     - art stays top-left
+     - play + timestamp stay top row
+     - actions are pinned top-right, outside grid flow
+     - confidence badge sits under play/timestamp
+     - artist/title start far left underneath the art */
   .root :global(.track-grid) {
-    grid-template-columns: 48px minmax(0, 1fr) auto;
-    gap: 4px 8px;
+    --track-mobile-art-size: 48px;
+    --track-mobile-gap-x: 10px;
+    --track-mobile-actions-w: 124px;
+
+    display: grid;
+    grid-template-columns: var(--track-mobile-art-size) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: var(--track-mobile-gap-x);
+    row-gap: 6px;
     align-items: start;
+    position: relative;
   }
 
   .root :global(.track-index) {
@@ -1681,64 +1705,176 @@
   .root :global(.track-art) {
     grid-column: 1;
     grid-row: 1;
-    width: 48px;
-    height: 48px;
+    width: var(--track-mobile-art-size);
+    height: var(--track-mobile-art-size);
     border-radius: 6px;
+    align-self: start;
   }
 
   .root :global(.track-time-col) {
     grid-column: 2;
     grid-row: 1;
+    align-self: start;
+    min-width: 0;
+    padding-right: calc(var(--track-mobile-actions-w) + 8px);
   }
 
   .root :global(.track-actions) {
-    grid-column: 3;
-    grid-row: 1;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: var(--track-mobile-actions-w);
+    display: flex;
     flex-direction: column;
+    align-items: flex-end;
     gap: 3px;
-    overflow-x: visible;
+    overflow: visible;
     justify-content: flex-start;
   }
 
   .root :global(.track-main) {
-    grid-column: 1 / -1;
-    grid-row: 2;
+      grid-column: 1 / -1;
+      grid-row: 2;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+  .root :global(.track-meta) {
+    order: 1;
+    position: absolute;
+    left: calc(var(--track-mobile-art-size) + var(--track-mobile-gap-x));
+    top: calc(-1 * (var(--track-mobile-art-size) - 22px));
+    margin: 0;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-self: flex-start;
+  }
+
+  .root :global(.track-title-row) {
+    order: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: baseline;
+    min-width: 0;
+  }
+
+  /* Make confidence badges feel lighter / less dominant on iPhone */
+  .root :global(.pill.confidence-pill) {
+    min-height: 16px;
+    padding: 0 5px;
+    font-size: 8px;
+    letter-spacing: 0.02em;
+    border-width: 1px;
+  }
+
+  /* Dock: let the art + util buttons overlap into the lower control/timeline area
+     instead of being constrained to row 1 */
+  .root :global(.dock-grid) {
+    --dock-mobile-art-size: 48px;
+    --dock-mobile-side-slot: 56px;
+    --dock-mobile-time-line: 12px;
+    --dock-mobile-time-gap: 3px;
+    --dock-mobile-progress-h: 10px;
+    --dock-mobile-overlay-gap: 8px;
+    --dock-mobile-timestamp-top-offset: calc(
+      var(--dock-mobile-time-line) +
+      var(--dock-mobile-time-gap) +
+      var(--dock-mobile-progress-h)
+    );
+    --dock-mobile-overlay-bottom: calc(
+      var(--dock-mobile-timestamp-top-offset) +
+      var(--dock-mobile-overlay-gap)
+    );
+
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    gap: 0;
+    align-items: start;
+    position: relative;
+    min-height: calc(
+      var(--dock-mobile-art-size) + var(--dock-mobile-overlay-bottom)
+    );
   }
 
   .root :global(.dock-art-frame) {
-    width: 36px;
-    height: 36px;
-  }
-
-  /* Dock: [art+info | ↑TOP ↓TRACK] above [full-width controls+timeline] */
-  .root :global(.dock-grid) {
-    grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
-    gap: 4px 6px;
-    align-items: center;
+    position: absolute;
+    left: 0;
+    bottom: var(--dock-mobile-overlay-bottom);
+    width: var(--dock-mobile-art-size);
+    height: var(--dock-mobile-art-size);
+    z-index: 2;
   }
 
   .root :global(.dock-now) {
     grid-column: 1;
     grid-row: 1;
-    grid-template-columns: 36px minmax(0, 1fr);
+    display: block;
     width: 100%;
-    gap: 6px;
-  }
-
-  .root :global(.dock-actions) {
-    grid-column: 2;
-    grid-row: 1;
-    flex-direction: row;
-    width: auto;
-    min-width: auto;
-    align-self: center;
-    gap: 4px;
+    min-width: 0;
+    padding: 0 var(--dock-mobile-side-slot) 4px calc(var(--dock-mobile-art-size) + 8px);
   }
 
   .root :global(.dock-center) {
-    grid-column: 1 / -1;
+    grid-column: 1;
     grid-row: 2;
+    position: relative;
+    min-height: 0;
+    gap: 8px;
+  }
+
+  .root :global(.dock-actions) {
+    position: absolute;
+    right: 0;
+    top: 2px;
+    height: calc(100% - var(--dock-mobile-overlay-bottom) - 4px);
+    z-index: 2;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: stretch;
+
+    width: auto;
+    min-width: auto;
+    gap: 0;
+  }
+
+  /* Controls still float above the timeline */
+  .root :global(.dock-main-row) {
+    height: 0;
+    min-height: 0;
+    overflow: visible;
+    position: relative;
+  }
+
+  .root :global(.dock-primary-controls) {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    transform: translateX(-50%);
+    z-index: 3;
+  }
+
+  /* Reserve space for the floating controls above the time/progress row */
+  .root :global(.dock-range) {
+    padding-top: 8px;
+  }
+
+  /* Smaller ↑TOP / ↓TRACK buttons */
+  .root :global(.dock-util-btn) {
+    min-height: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 8px;
+    gap: 2px;
+  }
+
+  .root :global(.dock-util-icon) {
+    font-size: 8px;
   }
 
   .root :global(.dock-play-btn) {
