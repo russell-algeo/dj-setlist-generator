@@ -480,20 +480,24 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       opacity: 1;
     }
 
-    .artist-card:hover {
-      transform: translateY(12px);
+    /* Touch: hover-latched shows border/shadow indicator, no slide transform */
+    .artist-card.hover-latched {
       border-color: #fff;
       opacity: 1;
       z-index: 400 !important;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
     }
 
-    .artist-card.hover-latched {
-      transform: translateY(12px);
-      border-color: #fff;
-      opacity: 1;
-      z-index: 400 !important;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    /* Desktop with true hover: :hover and hover-latched both get the full slide */
+    @media (hover: hover) and (pointer: fine) {
+      .artist-card:hover,
+      .artist-card.hover-latched {
+        transform: translateY(12px);
+        border-color: #fff;
+        opacity: 1;
+        z-index: 400 !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      }
     }
 
     .artist-card.focus {
@@ -539,14 +543,16 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       backdrop-filter: blur(1.4px);
     }
 
-    .artist-card:hover .artist-detail {
+    .artist-card.hover-latched .artist-detail {
       border-color: #d0d0d0;
       background: rgba(46, 46, 46, 0.86);
     }
 
-    .artist-card.hover-latched .artist-detail {
-      border-color: #d0d0d0;
-      background: rgba(46, 46, 46, 0.86);
+    @media (hover: hover) and (pointer: fine) {
+      .artist-card:hover .artist-detail {
+        border-color: #d0d0d0;
+        background: rgba(46, 46, 46, 0.86);
+      }
     }
 
     .artist-card.selected .artist-detail {

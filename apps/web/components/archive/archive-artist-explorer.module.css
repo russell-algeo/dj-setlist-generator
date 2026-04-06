@@ -936,12 +936,22 @@
   opacity: 1 !important;
 }
 
-.root :global(.atlas-set-card:hover),
+/* Touch: hover-latched shows border/shadow indicator, no slide transform */
 .root :global(.atlas-set-card.hover-latched) {
   border-color: #fff;
-  transform: translateY(12px);
   z-index: 400 !important;
   box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+}
+
+/* Desktop with true hover: :hover and hover-latched both get the full slide */
+@media (hover: hover) and (pointer: fine) {
+  .root :global(.atlas-set-card:hover),
+  .root :global(.atlas-set-card.hover-latched) {
+    border-color: #fff;
+    transform: translateY(12px);
+    z-index: 400 !important;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  }
 }
 
 .root :global(.atlas-set-card.focus) {
@@ -962,12 +972,6 @@
   }
 }
 
-/* On touch/coarse devices, hover-latched uses z-index only — no downward slide */
-@media (hover: none), (pointer: coarse) {
-  .root :global(.atlas-set-card.hover-latched) {
-    transform: none;
-  }
-}
 
 .root :global(.atlas-set-card img),
 .root :global(.set-card-fallback) {
@@ -999,10 +1003,16 @@
   backdrop-filter: blur(1.4px);
 }
 
-.root :global(.artist-card:hover .artist-detail),
 .root :global(.artist-card.hover-latched .artist-detail) {
   border-color: #d0d0d0;
   background: rgb(46 46 46 / 86%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .root :global(.artist-card:hover .artist-detail) {
+    border-color: #d0d0d0;
+    background: rgb(46 46 46 / 86%);
+  }
 }
 
 .root :global(.artist-card.focus .artist-detail),
