@@ -1260,7 +1260,7 @@ export function ArchiveArtistExplorer({
       const cardStep = cardHeight - cardOverlap;
       // Advance hover 18% of a card-height early so the incoming card is fully
       // visible at the top of the stack before it scrolls out of view.
-      const buffer = cardHeight * 0.18;
+      const buffer = cardHeight * 0.25;
       const index = Math.floor((rail.scrollTop + buffer) / cardStep);
       const cards = rail.querySelectorAll<HTMLElement>("[data-atlas-set-id]");
       return cards[index]?.dataset.atlasSetId ?? cards[0]?.dataset.atlasSetId ?? null;

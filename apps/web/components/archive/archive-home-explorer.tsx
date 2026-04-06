@@ -906,7 +906,7 @@ export function ArchiveHomeExplorer({
       const cardStep = cardHeight - cardOverlap;
       // Advance hover 18% of a card-height early so the incoming card is fully
       // visible at the top of the stack before it scrolls out of view.
-      const buffer = cardHeight * 0.18;
+      const buffer = cardHeight * 0.25;
       const index = Math.floor((grid.scrollTop + buffer) / cardStep);
       const cards = grid.querySelectorAll<HTMLElement>("[data-artist]");
       return cards[index]?.dataset.artist ?? cards[0]?.dataset.artist ?? null;
