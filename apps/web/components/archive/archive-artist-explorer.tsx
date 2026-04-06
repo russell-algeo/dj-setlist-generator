@@ -610,7 +610,7 @@ export function ArchiveArtistExplorer({
   );
   const [atlasPanePointerInside, setAtlasPanePointerInside] = useState(false);
   const [atlasHoverLatchedSetId, setAtlasHoverLatchedSetId] = useState<string | null>(null);
-  const [touchRaisedSetId, setTouchRaisedSetId] = useState<string | null>(null);
+  const touchSetStackEngagedRef = useRef(false);
   const pendingSetExplorerJumpRef = useRef(false);
   const pendingAtlasRailResetRef = useRef(false);
   const latestAtlasSelectedSetIdsRef = useRef(atlasSelectedSetIds);
@@ -1227,27 +1227,66 @@ export function ArchiveArtistExplorer({
     };
   }, [atlasDockedSelectedSetIds, atlasPanePointerInside]);
 
-  // Lower touch-raised set card when user taps outside the atlas set grid
+  // Touch-only: scroll-driven hover + deferred reorder for set atlas stack
   useEffect(() => {
-    if (!touchRaisedSetId) {
+    if (typeof window === "undefined" || isHoverCapablePointer()) {
       return;
     }
 
-    const handleOutsideClick = (e: Event) => {
-      const rail = atlasRailRef.current;
-      if (rail?.contains(e.target as Node)) {
+    const rail = atlasRailRef.current;
+    if (!rail) {
+      return;
+    }
+
+    const exitStack = () => {
+      if (!touchSetStackEngagedRef.current) {
         return;
       }
-      setTouchRaisedSetId(null);
-      setAtlasHoverLatchedSetId(null);
+      touchSetStackEngagedRef.current = false;
       setAtlasPanePointerInside(false);
+      setAtlasHoverLatchedSetId(null);
       setAtlasDockedSelectedSetIds(latestAtlasSelectedSetIdsRef.current);
       pendingAtlasRailResetRef.current = true;
     };
 
+    const computeTopCard = () => {
+      const style = getComputedStyle(rail);
+      const cardHeight = parseFloat(style.getPropertyValue("--artist-card-height")) || 160;
+      const cardOverlap = parseFloat(style.getPropertyValue("--artist-card-overlap")) || 84;
+      const cardStep = cardHeight - cardOverlap;
+      const index = Math.round(rail.scrollTop / cardStep);
+      const cards = rail.querySelectorAll<HTMLElement>("[data-atlas-set-id]");
+      return cards[index]?.dataset.atlasSetId ?? cards[0]?.dataset.atlasSetId ?? null;
+    };
+
+    const handleRailScroll = () => {
+      touchSetStackEngagedRef.current = true;
+      setAtlasPanePointerInside(true);
+      setAtlasHoverLatchedSetId(computeTopCard());
+    };
+
+    const handleOutsideClick = (e: Event) => {
+      if (rail.contains(e.target as Node)) {
+        return;
+      }
+      exitStack();
+    };
+
+    const handlePageScroll = () => exitStack();
+
+    // Set initial hover to the first card
+    setAtlasHoverLatchedSetId(computeTopCard());
+
+    rail.addEventListener("scroll", handleRailScroll, { passive: true });
     document.addEventListener("click", handleOutsideClick);
-    return () => document.removeEventListener("click", handleOutsideClick);
-  }, [touchRaisedSetId]);
+    window.addEventListener("scroll", handlePageScroll, { passive: true });
+
+    return () => {
+      rail.removeEventListener("scroll", handleRailScroll);
+      document.removeEventListener("click", handleOutsideClick);
+      window.removeEventListener("scroll", handlePageScroll);
+    };
+  }, []);
 
   useEffect(() => {
     setSetPage((current) => Math.min(current, maxSetPage));
@@ -1567,27 +1606,9 @@ export function ArchiveArtistExplorer({
                             return;
                           }
 
-                          if (!isHoverCapablePointer()) {
-                            // Touch two-tap: first tap raises, second tap selects
-                            if (touchRaisedSetId === setItem.id) {
-                              setTouchRaisedSetId(null);
-                              setAtlasHoverLatchedSetId(null);
-                              const nextSelectedIds = [setItem.id];
-                              latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
-                              setAtlasDockedSelectedSetIds(nextSelectedIds);
-                              setAtlasScope("set");
-                              setAtlasPage(0);
-                              setAtlasEvidencePage(0);
-                              setAtlasActiveName(null);
-                              setAtlasSelectedSetIds(nextSelectedIds);
-                            } else {
-                              setTouchRaisedSetId(setItem.id);
-                              setAtlasHoverLatchedSetId(setItem.id);
-                            }
-                            return;
-                          }
-
-                          const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+                          const additive = !isHoverCapablePointer()
+                            ? false
+                            : event.shiftKey || event.metaKey || event.ctrlKey;
                           const nextSelectedIds = additive
                             ? toggleSelectedSetIds(atlasSelectedSetIds, setItem.id)
                             : [setItem.id];
@@ -1595,7 +1616,10 @@ export function ArchiveArtistExplorer({
                           if (!atlasPanePointerInside) {
                             setAtlasDockedSelectedSetIds(nextSelectedIds);
                           }
-                          setAtlasHoverLatchedSetId(setItem.id);
+                          // On touch, don't override the scroll-driven hover state
+                          if (isHoverCapablePointer()) {
+                            setAtlasHoverLatchedSetId(setItem.id);
+                          }
                           setAtlasScope("set");
                           setAtlasPage(0);
                           setAtlasEvidencePage(0);
@@ -1644,10 +1668,10 @@ export function ArchiveArtistExplorer({
                                   if (!atlasPanePointerInside) {
                                     setAtlasDockedSelectedSetIds(nextSelectedIds);
                                   }
-                                  // On touch, keep card raised so user can see it was added
-                                  setAtlasHoverLatchedSetId(
-                                    isHoverCapablePointer() ? setItem.id : touchRaisedSetId === setItem.id ? setItem.id : null,
-                                  );
+                                  // On touch, don't override the scroll-driven hover state
+                                  if (isHoverCapablePointer()) {
+                                    setAtlasHoverLatchedSetId(setItem.id);
+                                  }
                                   setAtlasScope("set");
                                   setAtlasPage(0);
                                   setAtlasEvidencePage(0);

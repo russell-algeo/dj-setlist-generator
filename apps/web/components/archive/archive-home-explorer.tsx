@@ -595,7 +595,6 @@ export function ArchiveHomeExplorer({
   const heroSideTrackRef = useRef<HTMLDivElement | null>(null);
   const networkSectionRef = useRef<HTMLElement | null>(null);
   const networkWrapRef = useRef<HTMLDivElement | null>(null);
-  const artistSectionRef = useRef<HTMLElement | null>(null);
   const networkTouchRef = useRef<NetworkTouchGesture | null>(null);
   const [selectedArtistSlugs, setSelectedArtistSlugs] = useState<string[]>(
     initial.initialAtlas.selectedArtistSlugs,
@@ -614,8 +613,8 @@ export function ArchiveHomeExplorer({
     initial.initialAtlas.selectedArtistSlugs,
   );
   const [hoverLatchedArtistSlug, setHoverLatchedArtistSlug] = useState<string | null>(null);
-  const [touchRaisedArtistSlug, setTouchRaisedArtistSlug] = useState<string | null>(null);
   const [artistPanePointerInside, setArtistPanePointerInside] = useState(false);
+  const touchArtistStackEngagedRef = useRef(false);
   const latestSelectedArtistSlugsRef = useRef(selectedArtistSlugs);
   const pendingArtistGridResetRef = useRef(false);
 
@@ -874,49 +873,65 @@ export function ArchiveHomeExplorer({
     return () => media.removeListener(sync);
   }, []);
 
-  // Lower touch-raised artist card when user taps outside the artist stack
+  // Touch-only: scroll-driven hover + deferred reorder for artist stack
   useEffect(() => {
-    if (!touchRaisedArtistSlug) {
+    if (typeof window === "undefined" || isHoverCapablePointer()) {
       return;
     }
 
-    const handleOutsideClick = (e: Event) => {
-      const grid = artistGridRef.current;
-      if (grid?.contains(e.target as Node)) {
+    const grid = artistGridRef.current;
+    if (!grid) {
+      return;
+    }
+
+    const exitStack = () => {
+      if (!touchArtistStackEngagedRef.current) {
         return;
       }
-      setTouchRaisedArtistSlug(null);
-      setHoverLatchedArtistSlug(null);
+      touchArtistStackEngagedRef.current = false;
       setArtistPanePointerInside(false);
+      setHoverLatchedArtistSlug(null);
       setDockedSelectedArtistSlugs(latestSelectedArtistSlugsRef.current);
       pendingArtistGridResetRef.current = true;
     };
 
+    const computeTopCard = () => {
+      const style = getComputedStyle(grid);
+      const cardHeight = parseFloat(style.getPropertyValue("--artist-card-height")) || 160;
+      const cardOverlap = parseFloat(style.getPropertyValue("--artist-card-overlap")) || 114;
+      const cardStep = cardHeight - cardOverlap;
+      const index = Math.round(grid.scrollTop / cardStep);
+      const cards = grid.querySelectorAll<HTMLElement>("[data-artist]");
+      return cards[index]?.dataset.artist ?? cards[0]?.dataset.artist ?? null;
+    };
+
+    const handleGridScroll = () => {
+      touchArtistStackEngagedRef.current = true;
+      setArtistPanePointerInside(true);
+      setHoverLatchedArtistSlug(computeTopCard());
+    };
+
+    const handleOutsideClick = (e: Event) => {
+      if (grid.contains(e.target as Node)) {
+        return;
+      }
+      exitStack();
+    };
+
+    const handlePageScroll = () => exitStack();
+
+    // Set initial hover to the first card
+    setHoverLatchedArtistSlug(computeTopCard());
+
+    grid.addEventListener("scroll", handleGridScroll, { passive: true });
     document.addEventListener("click", handleOutsideClick);
-    return () => document.removeEventListener("click", handleOutsideClick);
-  }, [touchRaisedArtistSlug]);
+    window.addEventListener("scroll", handlePageScroll, { passive: true });
 
-  // Lower touch-raised artist card when the artists section scrolls out of view
-  useEffect(() => {
-    const section = artistSectionRef.current;
-    if (!section || typeof IntersectionObserver === "undefined") {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((e) => e.isIntersecting)) {
-          setTouchRaisedArtistSlug(null);
-          setHoverLatchedArtistSlug(null);
-          setDockedSelectedArtistSlugs(latestSelectedArtistSlugsRef.current);
-          pendingArtistGridResetRef.current = true;
-        }
-      },
-      { threshold: 0.05 },
-    );
-
-    observer.observe(section);
-    return () => observer.disconnect();
+    return () => {
+      grid.removeEventListener("scroll", handleGridScroll);
+      document.removeEventListener("click", handleOutsideClick);
+      window.removeEventListener("scroll", handlePageScroll);
+    };
   }, []);
 
   useEffect(() => {
@@ -1398,23 +1413,18 @@ export function ArchiveHomeExplorer({
 
   const handleArtistFocus = (artistSlug: string, event: MouseEvent<HTMLElement>) => {
     if (!isHoverCapablePointer()) {
-      // Touch two-tap: first tap raises, second tap selects
-      if (touchRaisedArtistSlug === artistSlug) {
-        setTouchRaisedArtistSlug(null);
-        setHoverLatchedArtistSlug(null);
-        setFocusArtistSlug(artistSlug);
-        setSelectedArtistSlugs((current) => {
-          const next = [artistSlug];
-          latestSelectedArtistSlugsRef.current = next;
+      // Touch: tap selects without changing scroll-driven hover state
+      setFocusArtistSlug(artistSlug);
+      setSelectedArtistSlugs((current) => {
+        const next = [artistSlug];
+        latestSelectedArtistSlugsRef.current = next;
+        if (!artistPanePointerInside) {
           setDockedSelectedArtistSlugs(next);
-          return next;
-        });
-        setTaxonomyPage(0);
-        setTaxonomyActiveName(null);
-      } else {
-        setTouchRaisedArtistSlug(artistSlug);
-        setHoverLatchedArtistSlug(artistSlug);
-      }
+        }
+        return next;
+      });
+      setTaxonomyPage(0);
+      setTaxonomyActiveName(null);
       return;
     }
     const additive = event.shiftKey || event.metaKey || event.ctrlKey;
@@ -1837,7 +1847,7 @@ export function ArchiveHomeExplorer({
           </div>
         </section>
 
-        <section className="section reveal" id="artists" ref={artistSectionRef} style={{ position: "relative" }}>
+        <section className="section reveal" id="artists" style={{ position: "relative" }}>
           <div style={{ position: "absolute", top: 18, right: 24, zIndex: 500 }}>
             <InlineSubmitButton mode="scan-artist" />
           </div>
@@ -2326,6 +2336,7 @@ export function ArchiveHomeExplorer({
                       setPairPayload(null);
                       setPairPage(0);
                       setPairActiveName(null);
+                      setNetworkZoom({ scale: 1, panX: 0, panY: 0 });
                     }}
                     type="button"
                   >
