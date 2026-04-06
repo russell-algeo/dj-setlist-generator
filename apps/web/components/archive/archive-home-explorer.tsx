@@ -1619,7 +1619,7 @@ export function ArchiveHomeExplorer({
         </section>
 
         <section className="section reveal" id="artists" style={{ position: "relative" }}>
-          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 500 }}>
             <InlineSubmitButton mode="scan-artist" />
           </div>
           <div className="section-inner">
@@ -2436,7 +2436,7 @@ export function ArchiveHomeExplorer({
         </section>
 
         <section className="section reveal" id="sets" style={{ position: "relative" }}>
-          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 500 }}>
             <InlineSubmitButton label="+ submit sets" mode="scan-artist" />
           </div>
           <div className="section-inner">

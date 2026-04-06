@@ -1445,7 +1445,7 @@ export function ArchiveArtistExplorer({
         </section>
 
         <section className="section" id="set-atlas-section" style={{ position: "relative" }}>
-          <div className="set-atlas-actions" style={{ display: "flex", gap: 8, position: "absolute", right: 24, top: 18, zIndex: 2 }}>
+          <div className="set-atlas-actions" style={{ display: "flex", gap: 8, position: "absolute", right: 24, top: 18, zIndex: 500 }}>
             <SpotifyExportButton
               counts={spotifyExportCounts}
               entityType="artist"
@@ -1987,7 +1987,7 @@ export function ArchiveArtistExplorer({
         </section>
 
         <section className="section" id="sets-section" style={{ position: "relative" }}>
-          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 2 }}>
+          <div style={{ position: "absolute", top: 18, right: 24, zIndex: 500 }}>
             <InlineSubmitButton mode="add-sets" artistName={artist.name} />
           </div>
           <div className="section-inner">
