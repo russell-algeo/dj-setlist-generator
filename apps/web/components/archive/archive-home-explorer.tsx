@@ -1423,12 +1423,14 @@ export function ArchiveHomeExplorer({
         touchArtistDidScrollRef.current = false;
         return;
       }
-      // On touch, hover is driven by scroll position only.
-      // Only the currently hover-latched (top) card can be tapped to select.
+      // First tap → hover this card; second tap on hovered card → select
       if (hoverLatchedArtistSlug !== artistSlug) {
+        touchArtistStackEngagedRef.current = true;
+        setArtistPanePointerInside(true);
+        setHoverLatchedArtistSlug(artistSlug);
         return;
       }
-      // Tap on already-hovered (top) card: select
+      // Tap on already-hovered card: select
       setFocusArtistSlug(artistSlug);
       setSelectedArtistSlugs((current) => {
         const next = [artistSlug];

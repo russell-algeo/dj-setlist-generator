@@ -1866,7 +1866,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       .artist-stack,
       .atlas-panel { height: auto; }
       .atlas-panel { overflow: visible; }
-      .artist-grid { max-height: 298px; }
+      .artist-grid { max-height: none; }
       .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .set-grid { column-count: 2; }
     }
@@ -1942,7 +1942,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
         max-width: 100%;
       }
       .artist-grid {
-        max-height: 306px;
+        max-height: none;
       }
       .hero-title-overlay {
         font-size: clamp(42px, 18vw, 80px);

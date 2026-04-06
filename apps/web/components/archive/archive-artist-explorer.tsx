@@ -1625,11 +1625,14 @@ export function ArchiveArtistExplorer({
                               touchSetDidScrollRef.current = false;
                               return;
                             }
-                            // On touch, hover is driven by scroll position only.
-                            // Only the currently hover-latched (top) card can be tapped to select.
+                            // First tap → hover this card; second tap on hovered card → select
                             if (atlasHoverLatchedSetId !== setItem.id) {
+                              touchSetStackEngagedRef.current = true;
+                              setAtlasPanePointerInside(true);
+                              setAtlasHoverLatchedSetId(setItem.id);
                               return;
                             }
+                            // Fall through to select the already-hovered card
                           }
 
                           const additive = !isHoverCapablePointer()
