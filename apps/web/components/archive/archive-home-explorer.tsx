@@ -904,7 +904,10 @@ export function ArchiveHomeExplorer({
       const cardHeight = parseFloat(style.getPropertyValue("--artist-card-height")) || 160;
       const cardOverlap = parseFloat(style.getPropertyValue("--artist-card-overlap")) || 114;
       const cardStep = cardHeight - cardOverlap;
-      const index = Math.floor(grid.scrollTop / cardStep);
+      // Advance hover 18% of a card-height early so the incoming card is fully
+      // visible at the top of the stack before it scrolls out of view.
+      const buffer = cardHeight * 0.18;
+      const index = Math.floor((grid.scrollTop + buffer) / cardStep);
       const cards = grid.querySelectorAll<HTMLElement>("[data-artist]");
       return cards[index]?.dataset.artist ?? cards[0]?.dataset.artist ?? null;
     };
