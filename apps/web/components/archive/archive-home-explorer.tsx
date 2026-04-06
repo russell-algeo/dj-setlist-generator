@@ -617,6 +617,7 @@ export function ArchiveHomeExplorer({
   const touchArtistStackEngagedRef = useRef(false);
   const touchArtistScrollStartYRef = useRef(0);
   const touchArtistDidScrollRef = useRef(false);
+  const touchArtistLastScrollTimeRef = useRef(0);
   const latestSelectedArtistSlugsRef = useRef(selectedArtistSlugs);
   const pendingArtistGridResetRef = useRef(false);
 
@@ -910,6 +911,7 @@ export function ArchiveHomeExplorer({
     const handleGridScroll = () => {
       touchArtistStackEngagedRef.current = true;
       touchArtistDidScrollRef.current = true;
+      touchArtistLastScrollTimeRef.current = Date.now();
       setArtistPanePointerInside(true);
       setHoverLatchedArtistSlug(computeTopCard());
     };
@@ -1416,8 +1418,8 @@ export function ArchiveHomeExplorer({
 
   const handleArtistFocus = (artistSlug: string, event: MouseEvent<HTMLElement>) => {
     if (!isHoverCapablePointer()) {
-      // Suppress taps that are part of a scroll gesture
-      if (touchArtistDidScrollRef.current) {
+      // Suppress taps that are part of a scroll gesture (flag OR within 400ms of last scroll)
+      if (touchArtistDidScrollRef.current || Date.now() - touchArtistLastScrollTimeRef.current < 400) {
         touchArtistDidScrollRef.current = false;
         return;
       }

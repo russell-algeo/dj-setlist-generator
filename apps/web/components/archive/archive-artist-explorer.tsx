@@ -613,6 +613,7 @@ export function ArchiveArtistExplorer({
   const touchSetStackEngagedRef = useRef(false);
   const touchSetScrollStartYRef = useRef(0);
   const touchSetDidScrollRef = useRef(false);
+  const touchSetLastScrollTimeRef = useRef(0);
   const pendingSetExplorerJumpRef = useRef(false);
   const pendingAtlasRailResetRef = useRef(false);
   const latestAtlasSelectedSetIdsRef = useRef(atlasSelectedSetIds);
@@ -1264,6 +1265,7 @@ export function ArchiveArtistExplorer({
     const handleRailScroll = () => {
       touchSetStackEngagedRef.current = true;
       touchSetDidScrollRef.current = true;
+      touchSetLastScrollTimeRef.current = Date.now();
       setAtlasPanePointerInside(true);
       setAtlasHoverLatchedSetId(computeTopCard());
     };
@@ -1617,8 +1619,8 @@ export function ArchiveArtistExplorer({
                           if ((event.target as HTMLElement).closest("a,button")) {
                             return;
                           }
-                          // Suppress taps that are part of a scroll gesture
-                          if (!isHoverCapablePointer() && touchSetDidScrollRef.current) {
+                          // Suppress taps that are part of a scroll gesture (flag OR within 400ms of last scroll)
+                          if (!isHoverCapablePointer() && (touchSetDidScrollRef.current || Date.now() - touchSetLastScrollTimeRef.current < 400)) {
                             touchSetDidScrollRef.current = false;
                             return;
                           }
