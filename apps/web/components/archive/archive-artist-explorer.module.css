@@ -904,7 +904,7 @@
 
 .root :global(.atlas-set-grid) {
   --artist-card-overlap: 84px;
-  --artist-cards-visible: 8;
+  --artist-cards-visible: 4;
 }
 
 .root :global(.artist-card) {

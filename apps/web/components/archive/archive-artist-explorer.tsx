@@ -1619,21 +1619,17 @@ export function ArchiveArtistExplorer({
                           if ((event.target as HTMLElement).closest("a,button")) {
                             return;
                           }
-                          // Suppress taps that are part of a scroll gesture (flag OR within 400ms of last scroll)
-                          if (!isHoverCapablePointer() && (touchSetDidScrollRef.current || Date.now() - touchSetLastScrollTimeRef.current < 400)) {
-                            touchSetDidScrollRef.current = false;
-                            return;
-                          }
-
                           if (!isHoverCapablePointer()) {
-                            // First tap on a non-hovered card: hover only, no select
-                            if (atlasHoverLatchedSetId !== setItem.id) {
-                              touchSetStackEngagedRef.current = true;
-                              setAtlasPanePointerInside(true);
-                              setAtlasHoverLatchedSetId(setItem.id);
+                            // Suppress taps that fired during or just after a scroll gesture
+                            if (touchSetDidScrollRef.current || Date.now() - touchSetLastScrollTimeRef.current < 400) {
+                              touchSetDidScrollRef.current = false;
                               return;
                             }
-                            // Second tap on already-hovered card: fall through to select
+                            // On touch, hover is driven by scroll position only.
+                            // Only the currently hover-latched (top) card can be tapped to select.
+                            if (atlasHoverLatchedSetId !== setItem.id) {
+                              return;
+                            }
                           }
 
                           const additive = !isHoverCapablePointer()

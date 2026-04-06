@@ -1418,19 +1418,17 @@ export function ArchiveHomeExplorer({
 
   const handleArtistFocus = (artistSlug: string, event: MouseEvent<HTMLElement>) => {
     if (!isHoverCapablePointer()) {
-      // Suppress taps that are part of a scroll gesture (flag OR within 400ms of last scroll)
+      // Suppress taps that fired during or just after a scroll gesture
       if (touchArtistDidScrollRef.current || Date.now() - touchArtistLastScrollTimeRef.current < 400) {
         touchArtistDidScrollRef.current = false;
         return;
       }
-      // First tap on a non-hovered card: hover only, no select
+      // On touch, hover is driven by scroll position only.
+      // Only the currently hover-latched (top) card can be tapped to select.
       if (hoverLatchedArtistSlug !== artistSlug) {
-        touchArtistStackEngagedRef.current = true;
-        setArtistPanePointerInside(true);
-        setHoverLatchedArtistSlug(artistSlug);
         return;
       }
-      // Second tap on already-hovered card: select
+      // Tap on already-hovered (top) card: select
       setFocusArtistSlug(artistSlug);
       setSelectedArtistSlugs((current) => {
         const next = [artistSlug];
