@@ -238,3 +238,20 @@
   inset: 0;
   z-index: 199;
 }
+
+@media (max-width: 480px) {
+  .panel {
+    padding: 16px;
+    overflow-y: auto;
+    max-height: calc(100dvh - 52px);
+  }
+
+  .modes {
+    grid-template-columns: 1fr;
+  }
+
+  .cancelBtn {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}

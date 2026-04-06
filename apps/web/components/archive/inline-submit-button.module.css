@@ -78,9 +78,16 @@
     right: 10px;
     width: auto;
     max-width: none;
+    z-index: 500;
+    overflow-y: auto;
+    max-height: calc(100dvh - 80px);
   }
   .modes {
     grid-template-columns: 1fr;
+    width: 100%;
+    max-width: none;
+  }
+  .modesOne {
     width: 100%;
     max-width: none;
   }

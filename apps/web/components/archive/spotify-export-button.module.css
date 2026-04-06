@@ -212,8 +212,13 @@
   }
 
   .panel {
-    left: 0;
-    right: auto;
-    min-width: min(100%, 320px);
+    position: fixed;
+    top: auto;
+    bottom: 12px;
+    left: 10px;
+    right: 10px;
+    min-width: unset;
+    max-width: unset;
+    z-index: 1000;
   }
 }

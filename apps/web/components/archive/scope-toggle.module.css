@@ -56,6 +56,11 @@
 }
 
 @media (max-width: 480px) {
+  .toggle {
+    align-self: flex-start;
+    width: fit-content;
+  }
+
   .tooltip {
     white-space: normal;
     max-width: 200px;
