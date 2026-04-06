@@ -55,6 +55,16 @@ type NetworkPointerState = {
   x: number;
   y: number;
 };
+type NetworkTouchGesture = {
+  touches: Array<{ id: number; x: number; y: number }>;
+  startScale: number;
+  startPanX: number;
+  startPanY: number;
+  startDist: number;
+  zoomOriginSvgX: number;
+  zoomOriginSvgY: number;
+};
+type NetworkZoom = { scale: number; panX: number; panY: number };
 
 const CONF_FILTER_LEVELS: ConfidenceFilter[] = ["all", "HIGH", "MEDIUM", "LOW"];
 const THRESHOLD_LEVELS = [1, 2, 3, 5, 8, 12] as const;
@@ -98,6 +108,9 @@ const fmt = (value: number) => value.toLocaleString("en-US");
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+
+const isHoverCapablePointer = () =>
+  typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
 const buildNetworkEdgeVisual = (normalizedScore: number) => {
   const normalized = clamp(normalizedScore / 100, 0, 1);
@@ -582,6 +595,8 @@ export function ArchiveHomeExplorer({
   const heroSideTrackRef = useRef<HTMLDivElement | null>(null);
   const networkSectionRef = useRef<HTMLElement | null>(null);
   const networkWrapRef = useRef<HTMLDivElement | null>(null);
+  const artistSectionRef = useRef<HTMLElement | null>(null);
+  const networkTouchRef = useRef<NetworkTouchGesture | null>(null);
   const [selectedArtistSlugs, setSelectedArtistSlugs] = useState<string[]>(
     initial.initialAtlas.selectedArtistSlugs,
   );
@@ -599,6 +614,7 @@ export function ArchiveHomeExplorer({
     initial.initialAtlas.selectedArtistSlugs,
   );
   const [hoverLatchedArtistSlug, setHoverLatchedArtistSlug] = useState<string | null>(null);
+  const [touchRaisedArtistSlug, setTouchRaisedArtistSlug] = useState<string | null>(null);
   const [artistPanePointerInside, setArtistPanePointerInside] = useState(false);
   const latestSelectedArtistSlugsRef = useRef(selectedArtistSlugs);
   const pendingArtistGridResetRef = useRef(false);
@@ -625,6 +641,8 @@ export function ArchiveHomeExplorer({
     x: 0,
     y: 0,
   });
+  const [networkZoom, setNetworkZoom] = useState<NetworkZoom>({ scale: 1, panX: 0, panY: 0 });
+  const networkZoomRef = useRef<NetworkZoom>({ scale: 1, panX: 0, panY: 0 });
 
   const [pairPayload, setPairPayload] = useState<ArchiveHomePairSelectionPayload | null>(null);
   const [pairLens, setPairLens] = useState<PairLens>("genres");
@@ -700,6 +718,10 @@ export function ArchiveHomeExplorer({
   useEffect(() => {
     latestSelectedArtistSlugsRef.current = selectedArtistSlugs;
   }, [selectedArtistSlugs]);
+
+  useEffect(() => {
+    networkZoomRef.current = networkZoom;
+  }, [networkZoom]);
 
   useEffect(() => {
     if (artistPanePointerInside || !pendingArtistGridResetRef.current) {
@@ -850,6 +872,51 @@ export function ArchiveHomeExplorer({
 
     media.addListener(sync);
     return () => media.removeListener(sync);
+  }, []);
+
+  // Lower touch-raised artist card when user taps outside the artist stack
+  useEffect(() => {
+    if (!touchRaisedArtistSlug) {
+      return;
+    }
+
+    const handleOutsideClick = (e: Event) => {
+      const grid = artistGridRef.current;
+      if (grid?.contains(e.target as Node)) {
+        return;
+      }
+      setTouchRaisedArtistSlug(null);
+      setHoverLatchedArtistSlug(null);
+      setArtistPanePointerInside(false);
+      setDockedSelectedArtistSlugs(latestSelectedArtistSlugsRef.current);
+      pendingArtistGridResetRef.current = true;
+    };
+
+    document.addEventListener("click", handleOutsideClick);
+    return () => document.removeEventListener("click", handleOutsideClick);
+  }, [touchRaisedArtistSlug]);
+
+  // Lower touch-raised artist card when the artists section scrolls out of view
+  useEffect(() => {
+    const section = artistSectionRef.current;
+    if (!section || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) {
+          setTouchRaisedArtistSlug(null);
+          setHoverLatchedArtistSlug(null);
+          setDockedSelectedArtistSlugs(latestSelectedArtistSlugsRef.current);
+          pendingArtistGridResetRef.current = true;
+        }
+      },
+      { threshold: 0.05 },
+    );
+
+    observer.observe(section);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -1330,6 +1397,26 @@ export function ArchiveHomeExplorer({
       : pairRows.slice(safePairPage * PAGE.pairRows, safePairPage * PAGE.pairRows + PAGE.pairRows);
 
   const handleArtistFocus = (artistSlug: string, event: MouseEvent<HTMLElement>) => {
+    if (!isHoverCapablePointer()) {
+      // Touch two-tap: first tap raises, second tap selects
+      if (touchRaisedArtistSlug === artistSlug) {
+        setTouchRaisedArtistSlug(null);
+        setHoverLatchedArtistSlug(null);
+        setFocusArtistSlug(artistSlug);
+        setSelectedArtistSlugs((current) => {
+          const next = [artistSlug];
+          latestSelectedArtistSlugsRef.current = next;
+          setDockedSelectedArtistSlugs(next);
+          return next;
+        });
+        setTaxonomyPage(0);
+        setTaxonomyActiveName(null);
+      } else {
+        setTouchRaisedArtistSlug(artistSlug);
+        setHoverLatchedArtistSlug(artistSlug);
+      }
+      return;
+    }
     const additive = event.shiftKey || event.metaKey || event.ctrlKey;
     setHoverLatchedArtistSlug(artistSlug);
     setFocusArtistSlug(artistSlug);
@@ -1390,6 +1477,138 @@ export function ArchiveHomeExplorer({
 
     return { height, positions, width };
   }, [networkLayoutVersion, networkPayload]);
+
+  // Network map pinch-to-zoom + drag-to-pan (touch only, placed after networkPositions)
+  useEffect(() => {
+    const wrap = networkWrapRef.current;
+    if (!wrap) {
+      return;
+    }
+
+    const getTouchPos = (t: Touch) => ({ id: t.identifier, x: t.clientX, y: t.clientY });
+    const touchDist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.hypot(b.x - a.x, b.y - a.y);
+
+    const onTouchStart = (e: TouchEvent) => {
+      const touches = Array.from(e.touches).map(getTouchPos);
+      const current = networkZoomRef.current;
+
+      if (touches.length >= 2) {
+        const t0 = touches[0]!;
+        const t1 = touches[1]!;
+        const d = touchDist(t0, t1);
+        const mx = (t0.x + t1.x) / 2;
+        const my = (t0.y + t1.y) / 2;
+        const rect = wrap.getBoundingClientRect();
+        const svgW = networkPositions.width / current.scale;
+        const svgH = networkPositions.height / current.scale;
+        const originX = current.panX + ((mx - rect.left) / rect.width) * svgW;
+        const originY = current.panY + ((my - rect.top) / rect.height) * svgH;
+        networkTouchRef.current = {
+          touches,
+          startScale: current.scale,
+          startPanX: current.panX,
+          startPanY: current.panY,
+          startDist: d,
+          zoomOriginSvgX: originX,
+          zoomOriginSvgY: originY,
+        };
+      } else if (touches.length === 1) {
+        networkTouchRef.current = {
+          touches,
+          startScale: current.scale,
+          startPanX: current.panX,
+          startPanY: current.panY,
+          startDist: 0,
+          zoomOriginSvgX: 0,
+          zoomOriginSvgY: 0,
+        };
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!networkTouchRef.current) {
+        return;
+      }
+      e.preventDefault();
+
+      const { startScale, startPanX, startPanY, startDist, zoomOriginSvgX, zoomOriginSvgY } =
+        networkTouchRef.current;
+      const activeTouches = Array.from(e.touches).map(getTouchPos);
+
+      if (activeTouches.length >= 2) {
+        const t0 = activeTouches[0]!;
+        const t1 = activeTouches[1]!;
+        const d = touchDist(t0, t1);
+        const newScale = clamp(startScale * (d / startDist), 1, 8);
+        const mx = (t0.x + t1.x) / 2;
+        const my = (t0.y + t1.y) / 2;
+        const rect = wrap.getBoundingClientRect();
+        const svgW = networkPositions.width / newScale;
+        const svgH = networkPositions.height / newScale;
+        const newPanX = clamp(
+          zoomOriginSvgX - ((mx - rect.left) / rect.width) * svgW,
+          0,
+          networkPositions.width - svgW,
+        );
+        const newPanY = clamp(
+          zoomOriginSvgY - ((my - rect.top) / rect.height) * svgH,
+          0,
+          networkPositions.height - svgH,
+        );
+        setNetworkZoom({ scale: newScale, panX: newPanX, panY: newPanY });
+      } else if (activeTouches.length === 1) {
+        const t0 = activeTouches[0]!;
+        const init = networkTouchRef.current.touches[0];
+        if (!init) {
+          return;
+        }
+        const rect = wrap.getBoundingClientRect();
+        const svgW = networkPositions.width / startScale;
+        const svgH = networkPositions.height / startScale;
+        const newPanX = clamp(
+          startPanX - ((t0.x - init.x) / rect.width) * svgW,
+          0,
+          networkPositions.width - svgW,
+        );
+        const newPanY = clamp(
+          startPanY - ((t0.y - init.y) / rect.height) * svgH,
+          0,
+          networkPositions.height - svgH,
+        );
+        setNetworkZoom((prev) => ({ ...prev, panX: newPanX, panY: newPanY }));
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) {
+        networkTouchRef.current = null;
+      } else if (e.touches.length === 1 && networkTouchRef.current) {
+        // Transition from pinch to single-finger pan — re-anchor reference point
+        const current = networkZoomRef.current;
+        const t = e.touches[0]!;
+        networkTouchRef.current = {
+          touches: [{ id: t.identifier, x: t.clientX, y: t.clientY }],
+          startScale: current.scale,
+          startPanX: current.panX,
+          startPanY: current.panY,
+          startDist: 0,
+          zoomOriginSvgX: 0,
+          zoomOriginSvgY: 0,
+        };
+      }
+    };
+
+    wrap.addEventListener("touchstart", onTouchStart, { passive: true });
+    wrap.addEventListener("touchmove", onTouchMove, { passive: false });
+    wrap.addEventListener("touchend", onTouchEnd, { passive: true });
+
+    return () => {
+      wrap.removeEventListener("touchstart", onTouchStart);
+      wrap.removeEventListener("touchmove", onTouchMove);
+      wrap.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [networkPositions]);
 
   const networkArtists = useMemo(
     () =>
@@ -1618,7 +1837,7 @@ export function ArchiveHomeExplorer({
           </div>
         </section>
 
-        <section className="section reveal" id="artists" style={{ position: "relative" }}>
+        <section className="section reveal" id="artists" ref={artistSectionRef} style={{ position: "relative" }}>
           <div style={{ position: "absolute", top: 18, right: 24, zIndex: 500 }}>
             <InlineSubmitButton mode="scan-artist" />
           </div>
@@ -1648,10 +1867,16 @@ export function ArchiveHomeExplorer({
                   id="artistGrid"
                   ref={artistGridRef}
                   onPointerEnter={(event) => {
+                    if (!isHoverCapablePointer()) {
+                      return;
+                    }
                     setArtistPanePointerInside(true);
                     event.currentTarget.scrollTo({ top: 0, behavior: "auto" });
                   }}
                   onPointerLeave={() => {
+                    if (!isHoverCapablePointer()) {
+                      return;
+                    }
                     setArtistPanePointerInside(false);
                     setHoverLatchedArtistSlug(null);
                     setDockedSelectedArtistSlugs(latestSelectedArtistSlugsRef.current);
@@ -2139,7 +2364,7 @@ export function ArchiveHomeExplorer({
                         currentTarget: event.currentTarget,
                       });
                     }}
-                    viewBox={`0 0 ${networkPositions.width} ${networkPositions.height}`}
+                    viewBox={`${networkZoom.panX} ${networkZoom.panY} ${networkPositions.width / networkZoom.scale} ${networkPositions.height / networkZoom.scale}`}
                   >
                     <rect fill="#0f0f0f" height={networkPositions.height} width={networkPositions.width} x="0" y="0" />
                     {filteredNetworkEdges.map((edge) => {

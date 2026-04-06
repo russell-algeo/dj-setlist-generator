@@ -1902,9 +1902,11 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
         padding-right: 10px;
         overflow-x: hidden;
       }
-      /* Change 6: network graph — reduce dead space */
+      /* Change 6: network graph — reduce dead space; enable touch gestures */
       .network-wrap {
         min-height: 380px;
+        touch-action: none;
+        user-select: none;
       }
       .network-svg {
         height: 380px;

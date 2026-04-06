@@ -610,6 +610,7 @@ export function ArchiveArtistExplorer({
   );
   const [atlasPanePointerInside, setAtlasPanePointerInside] = useState(false);
   const [atlasHoverLatchedSetId, setAtlasHoverLatchedSetId] = useState<string | null>(null);
+  const [touchRaisedSetId, setTouchRaisedSetId] = useState<string | null>(null);
   const pendingSetExplorerJumpRef = useRef(false);
   const pendingAtlasRailResetRef = useRef(false);
   const latestAtlasSelectedSetIdsRef = useRef(atlasSelectedSetIds);
@@ -1226,6 +1227,28 @@ export function ArchiveArtistExplorer({
     };
   }, [atlasDockedSelectedSetIds, atlasPanePointerInside]);
 
+  // Lower touch-raised set card when user taps outside the atlas set grid
+  useEffect(() => {
+    if (!touchRaisedSetId) {
+      return;
+    }
+
+    const handleOutsideClick = (e: Event) => {
+      const rail = atlasRailRef.current;
+      if (rail?.contains(e.target as Node)) {
+        return;
+      }
+      setTouchRaisedSetId(null);
+      setAtlasHoverLatchedSetId(null);
+      setAtlasPanePointerInside(false);
+      setAtlasDockedSelectedSetIds(latestAtlasSelectedSetIdsRef.current);
+      pendingAtlasRailResetRef.current = true;
+    };
+
+    document.addEventListener("click", handleOutsideClick);
+    return () => document.removeEventListener("click", handleOutsideClick);
+  }, [touchRaisedSetId]);
+
   useEffect(() => {
     setSetPage((current) => Math.min(current, maxSetPage));
   }, [maxSetPage]);
@@ -1515,9 +1538,10 @@ export function ArchiveArtistExplorer({
                     setAtlasHoverLatchedSetId(null);
                   }}
                   onPointerLeave={() => {
-                    if (isHoverCapablePointer()) {
-                      setAtlasPanePointerInside(false);
+                    if (!isHoverCapablePointer()) {
+                      return;
                     }
+                    setAtlasPanePointerInside(false);
                     setAtlasHoverLatchedSetId(null);
                     setAtlasDockedSelectedSetIds(latestAtlasSelectedSetIdsRef.current);
                     pendingAtlasRailResetRef.current = true;
@@ -1543,8 +1567,27 @@ export function ArchiveArtistExplorer({
                             return;
                           }
 
+                          if (!isHoverCapablePointer()) {
+                            // Touch two-tap: first tap raises, second tap selects
+                            if (touchRaisedSetId === setItem.id) {
+                              setTouchRaisedSetId(null);
+                              setAtlasHoverLatchedSetId(null);
+                              const nextSelectedIds = [setItem.id];
+                              latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
+                              setAtlasDockedSelectedSetIds(nextSelectedIds);
+                              setAtlasScope("set");
+                              setAtlasPage(0);
+                              setAtlasEvidencePage(0);
+                              setAtlasActiveName(null);
+                              setAtlasSelectedSetIds(nextSelectedIds);
+                            } else {
+                              setTouchRaisedSetId(setItem.id);
+                              setAtlasHoverLatchedSetId(setItem.id);
+                            }
+                            return;
+                          }
+
                           const additive = event.shiftKey || event.metaKey || event.ctrlKey;
-                          const hoverCapable = isHoverCapablePointer();
                           const nextSelectedIds = additive
                             ? toggleSelectedSetIds(atlasSelectedSetIds, setItem.id)
                             : [setItem.id];
@@ -1552,7 +1595,7 @@ export function ArchiveArtistExplorer({
                           if (!atlasPanePointerInside) {
                             setAtlasDockedSelectedSetIds(nextSelectedIds);
                           }
-                          setAtlasHoverLatchedSetId(hoverCapable ? setItem.id : null);
+                          setAtlasHoverLatchedSetId(setItem.id);
                           setAtlasScope("set");
                           setAtlasPage(0);
                           setAtlasEvidencePage(0);
@@ -1593,7 +1636,6 @@ export function ArchiveArtistExplorer({
                                 onClick={(event) => {
                                   event.preventDefault();
                                   event.stopPropagation();
-                                  const hoverCapable = isHoverCapablePointer();
                                   const nextSelectedIds = toggleSelectedSetIds(
                                     atlasSelectedSetIds,
                                     setItem.id,
@@ -1602,7 +1644,10 @@ export function ArchiveArtistExplorer({
                                   if (!atlasPanePointerInside) {
                                     setAtlasDockedSelectedSetIds(nextSelectedIds);
                                   }
-                                  setAtlasHoverLatchedSetId(hoverCapable ? setItem.id : null);
+                                  // On touch, keep card raised so user can see it was added
+                                  setAtlasHoverLatchedSetId(
+                                    isHoverCapablePointer() ? setItem.id : touchRaisedSetId === setItem.id ? setItem.id : null,
+                                  );
                                   setAtlasScope("set");
                                   setAtlasPage(0);
                                   setAtlasEvidencePage(0);
