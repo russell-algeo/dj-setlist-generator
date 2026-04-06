@@ -904,7 +904,7 @@
 
 .root :global(.atlas-set-grid) {
   --artist-card-overlap: 84px;
-  --artist-cards-visible: 7;
+  --artist-cards-visible: 11;
 }
 
 .root :global(.artist-card) {
@@ -959,6 +959,13 @@
   .root :global(.artist-grid.selected-dock .artist-card.selected) {
     transform: none;
     box-shadow: inset 0 0 0 1px var(--lime);
+  }
+}
+
+/* On touch/coarse devices, hover-latched uses z-index only — no downward slide */
+@media (hover: none), (pointer: coarse) {
+  .root :global(.atlas-set-card.hover-latched) {
+    transform: none;
   }
 }
 

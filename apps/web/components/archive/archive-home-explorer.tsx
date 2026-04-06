@@ -615,6 +615,8 @@ export function ArchiveHomeExplorer({
   const [hoverLatchedArtistSlug, setHoverLatchedArtistSlug] = useState<string | null>(null);
   const [artistPanePointerInside, setArtistPanePointerInside] = useState(false);
   const touchArtistStackEngagedRef = useRef(false);
+  const touchArtistScrollStartYRef = useRef(0);
+  const touchArtistDidScrollRef = useRef(false);
   const latestSelectedArtistSlugsRef = useRef(selectedArtistSlugs);
   const pendingArtistGridResetRef = useRef(false);
 
@@ -900,7 +902,7 @@ export function ArchiveHomeExplorer({
       const cardHeight = parseFloat(style.getPropertyValue("--artist-card-height")) || 160;
       const cardOverlap = parseFloat(style.getPropertyValue("--artist-card-overlap")) || 114;
       const cardStep = cardHeight - cardOverlap;
-      const index = Math.round(grid.scrollTop / cardStep);
+      const index = Math.floor(grid.scrollTop / cardStep);
       const cards = grid.querySelectorAll<HTMLElement>("[data-artist]");
       return cards[index]?.dataset.artist ?? cards[0]?.dataset.artist ?? null;
     };
@@ -1413,6 +1415,10 @@ export function ArchiveHomeExplorer({
 
   const handleArtistFocus = (artistSlug: string, event: MouseEvent<HTMLElement>) => {
     if (!isHoverCapablePointer()) {
+      // Suppress taps that are part of a scroll gesture
+      if (touchArtistDidScrollRef.current) {
+        return;
+      }
       // Touch: tap selects without changing scroll-driven hover state
       setFocusArtistSlug(artistSlug);
       setSelectedArtistSlugs((current) => {
@@ -1876,6 +1882,15 @@ export function ArchiveHomeExplorer({
                   )}
                   id="artistGrid"
                   ref={artistGridRef}
+                  onTouchStart={(e) => {
+                    touchArtistScrollStartYRef.current = e.touches[0]?.clientY ?? 0;
+                    touchArtistDidScrollRef.current = false;
+                  }}
+                  onTouchMove={(e) => {
+                    if (Math.abs((e.touches[0]?.clientY ?? 0) - touchArtistScrollStartYRef.current) > 8) {
+                      touchArtistDidScrollRef.current = true;
+                    }
+                  }}
                   onPointerEnter={(event) => {
                     if (!isHoverCapablePointer()) {
                       return;

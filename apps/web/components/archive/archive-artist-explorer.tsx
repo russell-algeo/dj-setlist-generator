@@ -611,6 +611,8 @@ export function ArchiveArtistExplorer({
   const [atlasPanePointerInside, setAtlasPanePointerInside] = useState(false);
   const [atlasHoverLatchedSetId, setAtlasHoverLatchedSetId] = useState<string | null>(null);
   const touchSetStackEngagedRef = useRef(false);
+  const touchSetScrollStartYRef = useRef(0);
+  const touchSetDidScrollRef = useRef(false);
   const pendingSetExplorerJumpRef = useRef(false);
   const pendingAtlasRailResetRef = useRef(false);
   const latestAtlasSelectedSetIdsRef = useRef(atlasSelectedSetIds);
@@ -1254,7 +1256,7 @@ export function ArchiveArtistExplorer({
       const cardHeight = parseFloat(style.getPropertyValue("--artist-card-height")) || 160;
       const cardOverlap = parseFloat(style.getPropertyValue("--artist-card-overlap")) || 84;
       const cardStep = cardHeight - cardOverlap;
-      const index = Math.round(rail.scrollTop / cardStep);
+      const index = Math.floor(rail.scrollTop / cardStep);
       const cards = rail.querySelectorAll<HTMLElement>("[data-atlas-set-id]");
       return cards[index]?.dataset.atlasSetId ?? cards[0]?.dataset.atlasSetId ?? null;
     };
@@ -1552,6 +1554,15 @@ export function ArchiveArtistExplorer({
                     "atlas-set-grid",
                     dockSelectedAtlasCards && "selected-dock",
                   )}
+                  onTouchStart={(e) => {
+                    touchSetScrollStartYRef.current = e.touches[0]?.clientY ?? 0;
+                    touchSetDidScrollRef.current = false;
+                  }}
+                  onTouchMove={(e) => {
+                    if (Math.abs((e.touches[0]?.clientY ?? 0) - touchSetScrollStartYRef.current) > 8) {
+                      touchSetDidScrollRef.current = true;
+                    }
+                  }}
                   onPointerEnter={(event) => {
                     if (!isHoverCapablePointer()) {
                       return;
@@ -1603,6 +1614,10 @@ export function ArchiveArtistExplorer({
                         key={setItem.id}
                         onClick={(event) => {
                           if ((event.target as HTMLElement).closest("a,button")) {
+                            return;
+                          }
+                          // Suppress taps that are part of a scroll gesture
+                          if (!isHoverCapablePointer() && touchSetDidScrollRef.current) {
                             return;
                           }
 
