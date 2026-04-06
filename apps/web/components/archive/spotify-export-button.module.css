@@ -210,15 +210,4 @@
   .wrap {
     align-items: stretch;
   }
-
-  .panel {
-    position: fixed;
-    top: auto;
-    bottom: 12px;
-    left: 10px;
-    right: 10px;
-    min-width: unset;
-    max-width: unset;
-    z-index: 1000;
-  }
 }

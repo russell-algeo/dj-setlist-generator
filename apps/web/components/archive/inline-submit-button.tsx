@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 
@@ -56,7 +56,9 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
   const [curatedName, setCuratedName] = useState("");
   const [urls, setUrls] = useState("");
   const [state, setState] = useState<SubmitState>({ status: "idle" });
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const curatedUrlsRef = useRef<HTMLTextAreaElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   const isAuthenticated = Boolean(session?.user);
 
@@ -82,14 +84,39 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
     });
   };
 
+  const handleTriggerClick = () => {
+    if (!isAuthenticated) return;
+    if (!open && triggerRef.current && window.innerWidth <= 480) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const top = rect.bottom + 6;
+      const right = Math.max(window.innerWidth - rect.right, 8);
+      setPanelStyle({
+        position: "fixed",
+        top,
+        right,
+        left: "auto",
+        bottom: "auto",
+        zIndex: 9999,
+        maxHeight: `calc(100dvh - ${top + 16}px)`,
+        overflowY: "auto",
+        minWidth: Math.min(320, rect.right - 8),
+        maxWidth: rect.right - 8,
+      });
+    } else {
+      setPanelStyle({});
+    }
+    setOpen((v) => !v);
+  };
+
   const triggerLabel = label ?? LABEL[mode];
 
   return (
     <div className={styles.wrap}>
       <div style={{ position: "relative", display: "inline-block" }}>
         <button
+          ref={triggerRef}
           className={`${styles.trigger} ${!isAuthenticated ? styles.disabled : ""}`}
-          onClick={() => { if (isAuthenticated) setOpen((v) => !v); }}
+          onClick={handleTriggerClick}
           onMouseEnter={() => !isAuthenticated && setTooltipVisible(true)}
           onMouseLeave={() => setTooltipVisible(false)}
           type="button"
@@ -101,7 +128,7 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
         )}
 
       {open && (
-        <div className={styles.panel}>
+        <div className={styles.panel} style={panelStyle}>
           <div className={styles.panelTitle}>{TITLE[mode]}</div>
 
           {/* Artist Discovery + Curated Artist */}

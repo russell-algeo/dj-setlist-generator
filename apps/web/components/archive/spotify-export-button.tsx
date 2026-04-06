@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import {
   SPOTIFY_EXPORT_FILTERS,
@@ -42,8 +42,10 @@ export function SpotifyExportButton({
   slug,
 }: SpotifyExportButtonProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const { isAuthenticated, isLoading, spotifyConfigured, spotifyConnected } = useSpotifyExportStatus();
   const [open, setOpen] = useState(false);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const [selectedFilter, setSelectedFilter] =
     useState<SpotifyExportConfidenceFilter>("all");
   const [submitting, setSubmitting] = useState(false);
@@ -168,6 +170,26 @@ export function SpotifyExportButton({
       return;
     }
 
+    if (!open && triggerRef.current && window.innerWidth <= 720) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const top = rect.bottom + 6;
+      const right = Math.max(window.innerWidth - rect.right, 8);
+      setPanelStyle({
+        position: "fixed",
+        top,
+        right,
+        left: "auto",
+        bottom: "auto",
+        zIndex: 9999,
+        maxHeight: `calc(100dvh - ${top + 16}px)`,
+        overflowY: "auto",
+        minWidth: Math.min(296, rect.right - 8),
+        maxWidth: rect.right - 8,
+      });
+    } else {
+      setPanelStyle({});
+    }
+
     setError(null);
     setOpen((current) => !current);
   };
@@ -175,6 +197,7 @@ export function SpotifyExportButton({
   return (
     <div className={styles.wrap} ref={containerRef}>
       <button
+        ref={triggerRef}
         className={joinClasses(
           styles.trigger,
           isDisabled && styles.triggerDisabled,
@@ -197,7 +220,7 @@ export function SpotifyExportButton({
       ) : null}
 
       {open ? (
-        <div className={styles.panel}>
+        <div className={styles.panel} style={panelStyle}>
           <h3 className={styles.panelTitle}>Create Spotify Playlist</h3>
           <p className={styles.panelSubtitle}>Private playlist in your connected Spotify account</p>
 
