@@ -63,24 +63,6 @@
   pointer-events: none;
 }
 
-@media (max-width: 480px) {
-  .tooltip {
-    white-space: normal;
-    max-width: 200px;
-    right: auto;
-    left: 0;
-  }
-  .modes {
-    grid-template-columns: 1fr;
-    width: 100%;
-    max-width: none;
-  }
-  .modesOne {
-    width: 100%;
-    max-width: none;
-  }
-}
-
 .panel {
   position: absolute;
   top: calc(100% + 8px);
@@ -256,4 +238,33 @@
   color: #d7a3a3;
   font-size: 10px;
   margin-top: 6px;
+}
+
+/* Mobile overrides — must be at end of file so they win over base rules */
+@media (max-width: 480px) {
+  .tooltip {
+    white-space: normal;
+    max-width: 200px;
+    right: auto;
+    left: 0;
+  }
+
+  /* Explicit width so child width:100% resolves correctly, and panel
+     stays within the section border box it lives in */
+  .panel {
+    width: calc(100vw - 58px);
+    min-width: unset;
+    max-width: none;
+  }
+
+  .modes {
+    grid-template-columns: 1fr;
+    width: 100%;
+    max-width: none;
+  }
+
+  .modesOne {
+    width: 100%;
+    max-width: none;
+  }
 }
