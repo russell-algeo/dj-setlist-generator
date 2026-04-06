@@ -898,13 +898,13 @@
   max-height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step));
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 2px 10px 80px 2px;
+  padding: 2px 10px calc((var(--artist-cards-visible) - 1) * var(--artist-card-step)) 2px;
   scroll-snap-type: y proximity;
 }
 
 .root :global(.atlas-set-grid) {
   --artist-card-overlap: 84px;
-  --artist-cards-visible: 11;
+  --artist-cards-visible: 3;
 }
 
 .root :global(.artist-card) {
@@ -2243,11 +2243,9 @@
     min-width: 0;
   }
 
-  /* Item 1: set atlas pane — cap height to match artist atlas, enable scroll */
+  /* Item 1: set atlas pane — let grid intrinsic height determine size on mobile */
   .root :global(.atlas-set-pane) {
     min-width: 0;
-    max-height: 280px;
-    overflow-y: auto;
   }
 
   /* Atlas panel grid items — prevent overflow down the nesting chain */

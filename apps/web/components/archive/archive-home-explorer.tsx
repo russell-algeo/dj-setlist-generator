@@ -909,6 +909,7 @@ export function ArchiveHomeExplorer({
 
     const handleGridScroll = () => {
       touchArtistStackEngagedRef.current = true;
+      touchArtistDidScrollRef.current = true;
       setArtistPanePointerInside(true);
       setHoverLatchedArtistSlug(computeTopCard());
     };
@@ -1417,9 +1418,17 @@ export function ArchiveHomeExplorer({
     if (!isHoverCapablePointer()) {
       // Suppress taps that are part of a scroll gesture
       if (touchArtistDidScrollRef.current) {
+        touchArtistDidScrollRef.current = false;
         return;
       }
-      // Touch: tap selects without changing scroll-driven hover state
+      // First tap on a non-hovered card: hover only, no select
+      if (hoverLatchedArtistSlug !== artistSlug) {
+        touchArtistStackEngagedRef.current = true;
+        setArtistPanePointerInside(true);
+        setHoverLatchedArtistSlug(artistSlug);
+        return;
+      }
+      // Second tap on already-hovered card: select
       setFocusArtistSlug(artistSlug);
       setSelectedArtistSlugs((current) => {
         const next = [artistSlug];

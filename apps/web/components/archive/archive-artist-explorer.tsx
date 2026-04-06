@@ -1263,6 +1263,7 @@ export function ArchiveArtistExplorer({
 
     const handleRailScroll = () => {
       touchSetStackEngagedRef.current = true;
+      touchSetDidScrollRef.current = true;
       setAtlasPanePointerInside(true);
       setAtlasHoverLatchedSetId(computeTopCard());
     };
@@ -1618,7 +1619,19 @@ export function ArchiveArtistExplorer({
                           }
                           // Suppress taps that are part of a scroll gesture
                           if (!isHoverCapablePointer() && touchSetDidScrollRef.current) {
+                            touchSetDidScrollRef.current = false;
                             return;
+                          }
+
+                          if (!isHoverCapablePointer()) {
+                            // First tap on a non-hovered card: hover only, no select
+                            if (atlasHoverLatchedSetId !== setItem.id) {
+                              touchSetStackEngagedRef.current = true;
+                              setAtlasPanePointerInside(true);
+                              setAtlasHoverLatchedSetId(setItem.id);
+                              return;
+                            }
+                            // Second tap on already-hovered card: fall through to select
                           }
 
                           const additive = !isHoverCapablePointer()

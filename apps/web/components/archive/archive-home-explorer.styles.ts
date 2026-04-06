@@ -447,7 +447,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       max-height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step));
       overflow: auto;
       overscroll-behavior: contain;
-      padding: 2px 10px 80px 2px;
+      padding: 2px 10px calc((var(--artist-cards-visible) - 1) * var(--artist-card-step)) 2px;
       scroll-snap-type: y proximity;
     }
 
