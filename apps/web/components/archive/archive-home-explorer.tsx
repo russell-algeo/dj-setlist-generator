@@ -911,17 +911,7 @@ export function ArchiveHomeExplorer({
       touchArtistStackEngagedRef.current = true;
       touchArtistDidScrollRef.current = true;
       setArtistPanePointerInside(true);
-      const topSlug = computeTopCard();
-      setHoverLatchedArtistSlug(topSlug);
-      // While scrolling, keep only the top card selected so accidental
-      // taps at scroll-start don't leave a stale selection raised.
-      if (topSlug) {
-        setSelectedArtistSlugs(() => {
-          const next = [topSlug];
-          latestSelectedArtistSlugsRef.current = next;
-          return next;
-        });
-      }
+      setHoverLatchedArtistSlug(computeTopCard());
     };
 
     const handleOutsideClick = (e: Event) => {

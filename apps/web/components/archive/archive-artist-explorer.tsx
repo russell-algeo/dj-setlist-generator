@@ -1265,15 +1265,7 @@ export function ArchiveArtistExplorer({
       touchSetStackEngagedRef.current = true;
       touchSetDidScrollRef.current = true;
       setAtlasPanePointerInside(true);
-      const topCardId = computeTopCard();
-      setAtlasHoverLatchedSetId(topCardId);
-      // While scrolling, keep only the top card selected so accidental
-      // taps at scroll-start don't leave a stale selection raised.
-      if (topCardId) {
-        const next = [topCardId];
-        latestAtlasSelectedSetIdsRef.current = next;
-        setAtlasSelectedSetIds(next);
-      }
+      setAtlasHoverLatchedSetId(computeTopCard());
     };
 
     const handleOutsideClick = (e: Event) => {
