@@ -438,7 +438,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       --artist-card-height: 160px;
       --artist-card-overlap: 114px;
       --artist-card-step: calc(var(--artist-card-height) - var(--artist-card-overlap));
-      --artist-cards-visible: 10;
+      --artist-cards-visible: 5;
       display: flex;
       flex-direction: column;
       flex: 0 0 auto;
