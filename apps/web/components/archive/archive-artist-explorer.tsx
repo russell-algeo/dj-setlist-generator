@@ -614,6 +614,7 @@ export function ArchiveArtistExplorer({
   const touchSetScrollStartYRef = useRef(0);
   const touchSetDidScrollRef = useRef(false);
   const touchSetLastScrollTimeRef = useRef(0);
+  const pendingTapSetIdRef = useRef<string | null>(null);
   const pendingSetExplorerJumpRef = useRef(false);
   const pendingAtlasRailResetRef = useRef(false);
   const latestAtlasSelectedSetIdsRef = useRef(atlasSelectedSetIds);
@@ -1266,8 +1267,22 @@ export function ArchiveArtistExplorer({
       touchSetStackEngagedRef.current = true;
       touchSetDidScrollRef.current = true;
       touchSetLastScrollTimeRef.current = Date.now();
+      pendingTapSetIdRef.current = null;
       setAtlasPanePointerInside(true);
       setAtlasHoverLatchedSetId(computeTopCard());
+    };
+
+    // Native touchmove clears pendingTap the instant the finger moves,
+    // before any click event fires — this is the reliable scroll-vs-tap gate.
+    let touchMoveStartY = 0;
+    const handleRailTouchStart = (e: TouchEvent) => {
+      touchMoveStartY = e.touches[0]?.clientY ?? 0;
+    };
+    const handleRailTouchMove = (e: TouchEvent) => {
+      if (Math.abs((e.touches[0]?.clientY ?? 0) - touchMoveStartY) > 8) {
+        pendingTapSetIdRef.current = null;
+        touchSetDidScrollRef.current = true;
+      }
     };
 
     const handleOutsideClick = (e: Event) => {
@@ -1283,11 +1298,15 @@ export function ArchiveArtistExplorer({
     setAtlasHoverLatchedSetId(computeTopCard());
 
     rail.addEventListener("scroll", handleRailScroll, { passive: true });
+    rail.addEventListener("touchstart", handleRailTouchStart, { passive: true });
+    rail.addEventListener("touchmove", handleRailTouchMove, { passive: true });
     document.addEventListener("click", handleOutsideClick);
     window.addEventListener("scroll", handlePageScroll, { passive: true });
 
     return () => {
       rail.removeEventListener("scroll", handleRailScroll);
+      rail.removeEventListener("touchstart", handleRailTouchStart);
+      rail.removeEventListener("touchmove", handleRailTouchMove);
       document.removeEventListener("click", handleOutsideClick);
       window.removeEventListener("scroll", handlePageScroll);
     };
@@ -1561,11 +1580,6 @@ export function ArchiveArtistExplorer({
                     touchSetScrollStartYRef.current = e.touches[0]?.clientY ?? 0;
                     touchSetDidScrollRef.current = false;
                   }}
-                  onTouchMove={(e) => {
-                    if (Math.abs((e.touches[0]?.clientY ?? 0) - touchSetScrollStartYRef.current) > 8) {
-                      touchSetDidScrollRef.current = true;
-                    }
-                  }}
                   onPointerEnter={(event) => {
                     if (!isHoverCapablePointer()) {
                       return;
@@ -1615,16 +1629,21 @@ export function ArchiveArtistExplorer({
                         )}
                         data-atlas-set-id={setItem.id}
                         key={setItem.id}
+                        onTouchStart={() => {
+                          if (!isHoverCapablePointer()) {
+                            pendingTapSetIdRef.current = setItem.id;
+                          }
+                        }}
                         onClick={(event) => {
                           if ((event.target as HTMLElement).closest("a,button")) {
                             return;
                           }
                           if (!isHoverCapablePointer()) {
-                            // Suppress taps that fired during or just after a scroll gesture
-                            if (touchSetDidScrollRef.current || Date.now() - touchSetLastScrollTimeRef.current < 400) {
-                              touchSetDidScrollRef.current = false;
+                            // Only process the tap if it wasn't cancelled by finger movement
+                            if (pendingTapSetIdRef.current !== setItem.id) {
                               return;
                             }
+                            pendingTapSetIdRef.current = null;
                             // First tap → hover this card; second tap on hovered card → select
                             if (atlasHoverLatchedSetId !== setItem.id) {
                               touchSetStackEngagedRef.current = true;

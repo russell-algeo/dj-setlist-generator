@@ -618,6 +618,7 @@ export function ArchiveHomeExplorer({
   const touchArtistScrollStartYRef = useRef(0);
   const touchArtistDidScrollRef = useRef(false);
   const touchArtistLastScrollTimeRef = useRef(0);
+  const pendingTapArtistSlugRef = useRef<string | null>(null);
   const latestSelectedArtistSlugsRef = useRef(selectedArtistSlugs);
   const pendingArtistGridResetRef = useRef(false);
 
@@ -912,8 +913,20 @@ export function ArchiveHomeExplorer({
       touchArtistStackEngagedRef.current = true;
       touchArtistDidScrollRef.current = true;
       touchArtistLastScrollTimeRef.current = Date.now();
+      pendingTapArtistSlugRef.current = null;
       setArtistPanePointerInside(true);
       setHoverLatchedArtistSlug(computeTopCard());
+    };
+
+    let gridTouchMoveStartY = 0;
+    const handleGridTouchStart = (e: TouchEvent) => {
+      gridTouchMoveStartY = e.touches[0]?.clientY ?? 0;
+    };
+    const handleGridTouchMove = (e: TouchEvent) => {
+      if (Math.abs((e.touches[0]?.clientY ?? 0) - gridTouchMoveStartY) > 8) {
+        pendingTapArtistSlugRef.current = null;
+        touchArtistDidScrollRef.current = true;
+      }
     };
 
     const handleOutsideClick = (e: Event) => {
@@ -929,11 +942,15 @@ export function ArchiveHomeExplorer({
     setHoverLatchedArtistSlug(computeTopCard());
 
     grid.addEventListener("scroll", handleGridScroll, { passive: true });
+    grid.addEventListener("touchstart", handleGridTouchStart, { passive: true });
+    grid.addEventListener("touchmove", handleGridTouchMove, { passive: true });
     document.addEventListener("click", handleOutsideClick);
     window.addEventListener("scroll", handlePageScroll, { passive: true });
 
     return () => {
       grid.removeEventListener("scroll", handleGridScroll);
+      grid.removeEventListener("touchstart", handleGridTouchStart);
+      grid.removeEventListener("touchmove", handleGridTouchMove);
       document.removeEventListener("click", handleOutsideClick);
       window.removeEventListener("scroll", handlePageScroll);
     };
@@ -1418,11 +1435,11 @@ export function ArchiveHomeExplorer({
 
   const handleArtistFocus = (artistSlug: string, event: MouseEvent<HTMLElement>) => {
     if (!isHoverCapablePointer()) {
-      // Suppress taps that fired during or just after a scroll gesture
-      if (touchArtistDidScrollRef.current || Date.now() - touchArtistLastScrollTimeRef.current < 400) {
-        touchArtistDidScrollRef.current = false;
+      // Only process tap if finger movement didn't cancel it
+      if (pendingTapArtistSlugRef.current !== artistSlug) {
         return;
       }
+      pendingTapArtistSlugRef.current = null;
       // First tap → hover this card; second tap on hovered card → select
       if (hoverLatchedArtistSlug !== artistSlug) {
         touchArtistStackEngagedRef.current = true;
@@ -1897,11 +1914,6 @@ export function ArchiveHomeExplorer({
                     touchArtistScrollStartYRef.current = e.touches[0]?.clientY ?? 0;
                     touchArtistDidScrollRef.current = false;
                   }}
-                  onTouchMove={(e) => {
-                    if (Math.abs((e.touches[0]?.clientY ?? 0) - touchArtistScrollStartYRef.current) > 8) {
-                      touchArtistDidScrollRef.current = true;
-                    }
-                  }}
                   onPointerEnter={(event) => {
                     if (!isHoverCapablePointer()) {
                       return;
@@ -1940,6 +1952,11 @@ export function ArchiveHomeExplorer({
                           data-action="focus-artist"
                           data-artist={artistCard.slug}
                           key={artistCard.id}
+                          onTouchStart={() => {
+                            if (!isHoverCapablePointer()) {
+                              pendingTapArtistSlugRef.current = artistCard.slug;
+                            }
+                          }}
                           onClick={(event) => handleArtistFocus(artistCard.slug, event)}
                           style={{ zIndex: orderedArtists.length - index }}
                         >
