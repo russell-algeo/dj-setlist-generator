@@ -921,11 +921,12 @@ export function ArchiveHomeExplorer({
     let gridTouchMoveStartY = 0;
     const handleGridTouchStart = (e: TouchEvent) => {
       gridTouchMoveStartY = e.touches[0]?.clientY ?? 0;
+      const card = (e.target as HTMLElement).closest<HTMLElement>("[data-artist]");
+      pendingTapArtistSlugRef.current = card?.dataset.artist ?? null;
     };
     const handleGridTouchMove = (e: TouchEvent) => {
-      if (Math.abs((e.touches[0]?.clientY ?? 0) - gridTouchMoveStartY) > 8) {
+      if (Math.abs((e.touches[0]?.clientY ?? 0) - gridTouchMoveStartY) > 6) {
         pendingTapArtistSlugRef.current = null;
-        touchArtistDidScrollRef.current = true;
       }
     };
 
@@ -1952,11 +1953,6 @@ export function ArchiveHomeExplorer({
                           data-action="focus-artist"
                           data-artist={artistCard.slug}
                           key={artistCard.id}
-                          onTouchStart={() => {
-                            if (!isHoverCapablePointer()) {
-                              pendingTapArtistSlugRef.current = artistCard.slug;
-                            }
-                          }}
                           onClick={(event) => handleArtistFocus(artistCard.slug, event)}
                           style={{ zIndex: orderedArtists.length - index }}
                         >

@@ -1272,16 +1272,17 @@ export function ArchiveArtistExplorer({
       setAtlasHoverLatchedSetId(computeTopCard());
     };
 
-    // Native touchmove clears pendingTap the instant the finger moves,
-    // before any click event fires — this is the reliable scroll-vs-tap gate.
+    // Both listeners are native so they share the same event phase — pendingTap
+    // is set and clearable before React's root delegation ever runs.
     let touchMoveStartY = 0;
     const handleRailTouchStart = (e: TouchEvent) => {
       touchMoveStartY = e.touches[0]?.clientY ?? 0;
+      const card = (e.target as HTMLElement).closest<HTMLElement>("[data-atlas-set-id]");
+      pendingTapSetIdRef.current = card?.dataset.atlasSetId ?? null;
     };
     const handleRailTouchMove = (e: TouchEvent) => {
-      if (Math.abs((e.touches[0]?.clientY ?? 0) - touchMoveStartY) > 8) {
+      if (Math.abs((e.touches[0]?.clientY ?? 0) - touchMoveStartY) > 6) {
         pendingTapSetIdRef.current = null;
-        touchSetDidScrollRef.current = true;
       }
     };
 
@@ -1629,11 +1630,6 @@ export function ArchiveArtistExplorer({
                         )}
                         data-atlas-set-id={setItem.id}
                         key={setItem.id}
-                        onTouchStart={() => {
-                          if (!isHoverCapablePointer()) {
-                            pendingTapSetIdRef.current = setItem.id;
-                          }
-                        }}
                         onClick={(event) => {
                           if ((event.target as HTMLElement).closest("a,button")) {
                             return;
