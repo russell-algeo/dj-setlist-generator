@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 import { AuthDropdown } from "@/components/archive/auth-dropdown";
 import { ScopeToggle } from "@/components/archive/scope-toggle";
@@ -31,7 +32,7 @@ export function ArchiveHeader({
   return (
     <header className={styles.header}>
       <div className={styles.inner}>
-        <a className={styles.brand} href="/">[SET SIGNAL ARCHIVE]</a>
+        <Link className={styles.brand} href="/">[SET SIGNAL ARCHIVE]</Link>
         <nav className={styles.nav}>
           {navLinks.map((link) => (
             <a
