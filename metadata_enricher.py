@@ -270,7 +270,7 @@ class MetadataEnricher:
 
         # Spotify
         if self.spotify_enabled:
-            spotify_data = self._search_spotify_rich(track.title, track.artist)
+            spotify_data = self._search_spotify_rich(track.title, track.artist, isrc=getattr(track, 'isrc', None))
             if spotify_data:
                 enriched['spotify_url'] = spotify_data['url']
                 enriched['spotify_album_art'] = spotify_data.get('album_art_url')
@@ -556,8 +556,13 @@ class MetadataEnricher:
         else:
             print("    [ReccoBeats] No audio features returned")
 
-    def _search_spotify_rich(self, title: str, artist: str) -> Optional[dict]:
+    def _search_spotify_rich(self, title: str, artist: str, *, isrc: Optional[str] = None) -> Optional[dict]:
         """Search Spotify and return rich metadata dict with album art, preview URL, and artist ID.
+
+        Lookup order:
+        1. ISRC (exact recording match, bypasses artist/title name discrepancies)
+        2. Artist + title text search with artist ratio filter
+        3. Title-only fallback (handles Shazam vs Spotify artist name differences)
 
         Returns:
             Dict with track URL, album art, preview, and primary artist identity fields.
@@ -566,37 +571,69 @@ class MetadataEnricher:
             return None
 
         try:
+            # 1. ISRC lookup — exact match, immune to artist name discrepancies
+            if isrc:
+                isrc_results = self.spotify.search(q=f'isrc:{isrc}', type='track', limit=1)
+                isrc_items = (isrc_results or {}).get('tracks', {}).get('items', [])
+                if isrc_items:
+                    print(f"[Spotify] ✓ ISRC match ({isrc}): '{isrc_items[0]['artists'][0]['name']} - {isrc_items[0]['name']}'")
+                    best = isrc_items[0]
+                    album_images = best.get('album', {}).get('images', [])
+                    primary_artist = (best.get('artists') or [{}])[0]
+                    return {
+                        'url': best['external_urls']['spotify'],
+                        'album_art_url': pick_spotify_image(album_images, preferred_height=300),
+                        'preview_url': best.get('preview_url'),
+                        'artist_id': primary_artist.get('id'),
+                        'artist_name': primary_artist.get('name'),
+                        'artist_url': (primary_artist.get('external_urls') or {}).get('spotify'),
+                    }
+
+            # 2. Artist + title text search
             query = f"{artist} - {title}"
             results = self.spotify.search(q=query, type='track', limit=5)
 
-            if not results or not results['tracks']['items']:
-                print(f"[Spotify] No results found for query: {query}")
-                return None
-
-            # Score all results by number of matching words
             expected_artist_words = set(w for w in artist.lower().split() if len(w) > 2)
             expected_title_words = set(w for w in title.lower().split() if len(w) > 2)
 
-            scored_results = []
-            for item in results['tracks']['items']:
-                observed_artist = item['artists'][0]['name']
-                observed_title = item['name']
+            def score_candidates(items):
+                scored = []
+                for item in items:
+                    observed_artist_words = set(w for w in item['artists'][0]['name'].lower().split() if len(w) > 2)
+                    observed_title_words = set(w for w in item['name'].lower().split() if len(w) > 2)
+                    artist_matches = len(expected_artist_words & observed_artist_words)
+                    title_matches = len(expected_title_words & observed_title_words)
+                    if artist_matches > 0 and title_matches > 0:
+                        # Require >=60% of expected artist words to match, preventing false positives
+                        # from artists that share only a common first name (e.g. "James T. Cotton"
+                        # matching "James McMurtry" via "James")
+                        if artist_matches / len(expected_artist_words) < 0.6:
+                            continue
+                        scored.append((artist_matches + title_matches, item))
+                scored.sort(key=lambda x: x[0], reverse=True)
+                return scored
 
-                observed_artist_words = set(w for w in observed_artist.lower().split() if len(w) > 2)
-                observed_title_words = set(w for w in observed_title.lower().split() if len(w) > 2)
-
-                artist_matches = len(expected_artist_words & observed_artist_words)
-                title_matches = len(expected_title_words & observed_title_words)
-
-                if artist_matches > 0 and title_matches > 0:
-                    total_matches = artist_matches + title_matches
-                    scored_results.append((total_matches, item))
+            scored_results = score_candidates(results['tracks']['items']) if results else []
 
             if not scored_results:
-                print(f"[Spotify] ✗ No artist+title match for query: '{query}', skipping")
+                # 3. Title-only fallback. Handles cases where Shazam and Spotify use different
+                # artist names for the same act (e.g. "James T. Cotton" vs "JTC").
+                # Requires >=2 expected title words and 100% title word match to limit false positives.
+                if len(expected_title_words) >= 2:
+                    fallback = self.spotify.search(q=title, type='track', limit=5)
+                    for item in (fallback['tracks']['items'] if fallback else []):
+                        observed_title_words = set(w for w in item['name'].lower().split() if len(w) > 2)
+                        title_matches = len(expected_title_words & observed_title_words)
+                        if title_matches == len(expected_title_words):
+                            scored_results.append((title_matches, item))
+                    scored_results.sort(key=lambda x: x[0], reverse=True)
+                    if scored_results:
+                        print(f"[Spotify] ✓ Title-only fallback matched: '{scored_results[0][1]['artists'][0]['name']} - {scored_results[0][1]['name']}'")
+
+            if not scored_results:
+                print(f"[Spotify] ✗ No match for: '{query}', skipping")
                 return None
 
-            scored_results.sort(key=lambda x: x[0], reverse=True)
             best = scored_results[0][1]
 
             album_images = best.get('album', {}).get('images', [])

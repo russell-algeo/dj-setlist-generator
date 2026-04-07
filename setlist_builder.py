@@ -39,6 +39,7 @@ class Track:
     confidence: str
     detection_count: int
     shazam_track_id: Optional[str]
+    isrc: Optional[str]
     cluster_density: float
     cluster_span: int
     segment_indices: List[int]
@@ -158,11 +159,18 @@ class SetlistBuilder:
         count = len(recognitions)
         density = count / span
 
+        isrc = next(
+            (r.raw_data['track']['isrc'] for r in recognitions
+             if r.raw_data and r.raw_data.get('track', {}).get('isrc')),
+            None
+        )
+
         return {
             'track_id': track_id,
             'artist': artist,
             'title': title,
             'shazam_track_id': shazam_track_id,
+            'isrc': isrc,
             'recognitions': recognitions,
             'segment_indices': segment_indices,
             'start_segment': start_seg,
@@ -338,6 +346,7 @@ class SetlistBuilder:
             confidence="",
             detection_count=cluster['detection_count'],
             shazam_track_id=cluster['shazam_track_id'],
+            isrc=cluster.get('isrc'),
             cluster_density=cluster['density'],
             cluster_span=cluster['span'],
             segment_indices=cluster['segment_indices']
@@ -450,6 +459,7 @@ class SetlistBuilder:
                 confidence="UNCERTAIN",
                 detection_count=0,
                 shazam_track_id=None,
+                isrc=None,
                 cluster_density=0.0,
                 cluster_span=len(gap),
                 segment_indices=gap
