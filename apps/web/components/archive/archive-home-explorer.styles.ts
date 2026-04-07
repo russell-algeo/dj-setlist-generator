@@ -427,7 +427,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       display: flex;
       flex-direction: column;
       gap: 10px;
-      min-height: 0;
+      min-height: 682px;
       height: 100%;
       max-height: none;
       overflow: hidden;
@@ -1869,7 +1869,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       .section-head p { justify-self: start; max-width: 100%; }
       .atlas-layout { grid-template-columns: 1fr; align-items: start; height: auto; }
       .artist-stack,
-      .atlas-panel { height: auto; }
+      .atlas-panel { height: auto; min-height: 0; }
       .atlas-panel { overflow: visible; }
       .artist-grid { flex: 0 0 auto; height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step)); max-height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step)); }
       .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
