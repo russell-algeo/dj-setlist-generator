@@ -416,7 +416,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       display: grid;
       grid-template-columns: minmax(240px, 0.55fr) minmax(620px, 1.45fr);
       gap: 12px;
-      align-items: start;
+      align-items: stretch;
       height: auto;
     }
 
@@ -428,9 +428,8 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       flex-direction: column;
       gap: 10px;
       min-height: 0;
-      height: auto;
+      height: 100%;
       max-height: none;
-      align-self: start;
       overflow: hidden;
     }
 
@@ -441,10 +440,10 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       --artist-cards-visible: 5;
       display: flex;
       flex-direction: column;
-      flex: 0 0 auto;
+      flex: 1 1 0;
       min-height: 0;
-      height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step));
-      max-height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step));
+      height: auto;
+      max-height: none;
       overflow: auto;
       overscroll-behavior: contain;
       padding: 2px 10px calc((var(--artist-cards-visible) - 1) * var(--artist-card-step)) 2px;
@@ -1872,7 +1871,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       .artist-stack,
       .atlas-panel { height: auto; }
       .atlas-panel { overflow: visible; }
-      .artist-grid { max-height: none; }
+      .artist-grid { flex: 0 0 auto; height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step)); max-height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step)); }
       .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .set-grid { column-count: 2; }
     }
