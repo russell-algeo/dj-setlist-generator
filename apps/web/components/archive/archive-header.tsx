@@ -31,7 +31,7 @@ export function ArchiveHeader({
   return (
     <header className={styles.header}>
       <div className={styles.inner}>
-        <div className={styles.brand}>[SET SIGNAL ARCHIVE]</div>
+        <a className={styles.brand} href="/">[SET SIGNAL ARCHIVE]</a>
         <nav className={styles.nav}>
           {navLinks.map((link) => (
             <a
