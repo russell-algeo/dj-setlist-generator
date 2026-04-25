@@ -10,6 +10,7 @@ import {
   ilike,
   inArray,
   isNotNull,
+  isNull,
   like,
   or,
   sql,
@@ -76,7 +77,11 @@ export const listArtists = async (search?: string, userId?: string) => {
       .innerJoin(sets, eq(sets.id, setArtists.setId))
       .innerJoin(
         setRuns,
-        and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)),
+        and(
+          eq(setRuns.sourceUrl, sets.sourceUrl),
+          eq(setRuns.requestedBy, userId),
+          isNull(setRuns.archiveRemovedAt),
+        ),
       )
       .where(searchFilter)
       .groupBy(artists.id)
@@ -166,7 +171,7 @@ export const listSets = async ({
         db
           .select({ sourceUrl: setRuns.sourceUrl })
           .from(setRuns)
-          .where(eq(setRuns.requestedBy, userId)),
+          .where(and(eq(setRuns.requestedBy, userId), isNull(setRuns.archiveRemovedAt))),
       )
     : undefined;
 

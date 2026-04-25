@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { ArchiveArtistPage } from "@/components/archive/archive-pages";
+import { getArchiveArtistManagementBySlug } from "@/lib/archive/deletions";
 import { buildArchiveMetadata } from "@/lib/archive/metadata";
 import { getSessionActor } from "@/lib/auth/session";
 
@@ -26,13 +27,13 @@ export async function generateMetadata({ params }: ArtistDetailPageProps): Promi
 export default async function ArtistDetailPage({ params, searchParams }: ArtistDetailPageProps) {
   const [{ slug }, queryParams] = await Promise.all([params, searchParams]);
   const scope = queryParams.scope === "mine" ? "mine" : "global";
+  const actor = await getSessionActor();
 
   const { getArchiveArtistSummaryBySlug, getArchiveArtistSummaryBySlugForUser } =
     await loadArchiveData();
 
   let artist;
   if (scope === "mine") {
-    const actor = await getSessionActor();
     if (actor) {
       artist = await getArchiveArtistSummaryBySlugForUser(slug, actor.userId);
     } else {
@@ -43,9 +44,11 @@ export default async function ArtistDetailPage({ params, searchParams }: ArtistD
   }
 
   if (!artist) notFound();
+  const management = await getArchiveArtistManagementBySlug(slug, actor);
   return (
     <ArchiveArtistPage
       artist={artist}
+      management={management}
       query={queryParams.q?.trim() ?? ""}
       scope={scope}
     />

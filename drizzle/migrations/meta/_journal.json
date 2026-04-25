@@ -85,6 +85,20 @@
       "when": 1775242826000,
       "tag": "0012_fix_archive_home_set_library_youtube_thumbnail",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1775250000000,
+      "tag": "0013_archive_deletions",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777128124000,
+      "tag": "0014_archive_delete_worker_grants",
+      "breakpoints": true
     }
   ]
 }

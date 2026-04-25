@@ -589,24 +589,42 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       min-width: 0;
     }
 
-    .artist-card .card-actions {
-      display: flex;
-      justify-content: flex-start;
-      gap: 4px;
-      flex: 0 0 auto;
-      flex-wrap: nowrap;
-    }
+	    .artist-card .card-actions {
+	      align-items: center;
+	      display: flex;
+	      justify-content: flex-start;
+	      gap: 4px;
+	      flex: 0 0 auto;
+	      flex-wrap: nowrap;
+	    }
 
-    .artist-card .card-actions .chip-btn {
-      display: inline-flex;
-      align-items: center;
+	    .artist-card .atlas-card-actions {
+	      flex: 1 1 auto;
+	      width: 100%;
+	    }
+
+	    .card-actions-main {
+	      align-items: center;
+	      display: inline-flex;
+	      gap: 4px;
+	    }
+
+	    .card-actions-main {
+	      flex: 1 1 auto;
+	      flex-wrap: wrap;
+	      min-width: 0;
+	    }
+
+	    .artist-card .card-actions .chip-btn {
+	      display: inline-flex;
+	      align-items: center;
       justify-content: center;
       white-space: nowrap;
       font-size: 9px;
       min-height: 22px;
       padding: 0 8px;
-      line-height: 1;
-    }
+	      line-height: 1;
+	    }
 
     .artist-card .card-actions .chip-btn.active {
       border-color: var(--line);
@@ -1870,6 +1888,13 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       .atlas-layout { grid-template-columns: 1fr; align-items: start; height: auto; }
       .artist-stack,
       .atlas-panel { height: auto; min-height: 0; }
+      .artist-stack,
+      .artist-grid,
+      .atlas-panel {
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+      }
       .atlas-panel { overflow: visible; }
       .artist-grid { flex: 0 0 auto; height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step)); max-height: calc(var(--artist-card-height) + (var(--artist-cards-visible) - 1) * var(--artist-card-step)); }
       .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }

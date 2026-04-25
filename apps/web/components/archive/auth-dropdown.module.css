@@ -50,6 +50,12 @@
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.42);
 }
 
+.signInMenu {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
 .userRow {
   display: flex;
   align-items: center;
@@ -141,6 +147,13 @@
 .container .menuAction:hover {
   color: var(--dark-brand-lime);
   border-color: var(--dark-brand-lime);
+}
+
+.providerAction {
+  composes: menuAction;
+  width: 100%;
+  min-height: 34px;
+  text-align: center;
 }
 
 .menuActionGreen {

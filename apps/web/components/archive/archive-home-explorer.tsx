@@ -1964,25 +1964,24 @@ export function ArchiveHomeExplorer({
                           ) : null}
                           <div className="artist-detail">
                             <div className="artist-meta-row">
-                              <div className="card-actions">
-                                <button
-                                  className={joinClasses("chip-btn", selected && "active")}
-                                  data-action="toggle-compare-artist"
-                                  onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    toggleCompareArtist(artistCard.slug);
-                                  }}
-                                  type="button"
-                                >
-                                  {compareLabel}
-                                </button>
-                                <a
-                                  className="chip-btn"
-                                  href={buildArtistHref({ slug: artistCard.slug })}
-                                >
-                                  Artist Page
-                                </a>
+                              <div className="card-actions atlas-card-actions">
+                                <span className="card-actions-main">
+                                  <button
+                                    className={joinClasses("chip-btn", selected && "active")}
+                                    data-action="toggle-compare-artist"
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      toggleCompareArtist(artistCard.slug);
+                                    }}
+                                    type="button"
+                                  >
+                                    {compareLabel}
+                                  </button>
+                                  <a className="chip-btn" href={buildArtistHref({ slug: artistCard.slug })}>
+                                    Artist Page
+                                  </a>
+                                </span>
                               </div>
                             </div>
                             <h3>{artistCard.name}</h3>
@@ -2782,6 +2781,7 @@ export function ArchiveHomeExplorer({
                     const tracklist = setTracklists[setItem.slug] ?? [];
                     const tracklistError = tracklistErrors[setItem.slug];
                     const tracklistLoading = loadingTracklists[setItem.slug] ?? false;
+
                     return (
                       <ArchiveSetCard
                         actions={

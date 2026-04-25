@@ -20,8 +20,9 @@ export async function GET(request: NextRequest) {
       : "default";
   const safePage = Number.isFinite(page) ? page : 1;
 
+  const actor = await getSessionActor();
+
   if (scope === "mine") {
-    const actor = await getSessionActor();
     if (actor) {
       const payload = await getWorkspaceSetLibraryPayload({
         artistFilter,
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
     page: safePage,
     query,
     sort: resolvedSort,
+    viewerUserId: actor?.userId,
   });
 
   return NextResponse.json(payload);

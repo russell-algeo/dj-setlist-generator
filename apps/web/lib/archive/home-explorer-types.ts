@@ -11,6 +11,7 @@ export type ArchiveHomeArtistCard = {
   name: string;
   setCount: number;
   slug: string;
+  submittedByViewer?: boolean;
   totalAppearances: number;
   uniqueTracks: number;
 };
@@ -22,6 +23,7 @@ export type ArchiveHomeHeroSet = {
   id: string;
   recognitionRate: number | null;
   slug: string;
+  submittedByViewer?: boolean;
   thumbnailUrl: string | null;
   title: string;
   totalTracks: number;
@@ -160,6 +162,7 @@ export type ArchiveHomeSetLibraryItem = {
   slug: string;
   sourcePlatform: string | null;
   sourceUrl: string | null;
+  submittedByViewer?: boolean;
   thumbnailUrl: string | null;
   title: string;
   totalTracks: number;

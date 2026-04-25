@@ -1,34 +1,18 @@
-import { randomUUID } from "node:crypto";
-
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { requireSessionActor } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 
 export async function GET(request: Request) {
-  await requireSessionActor("/api/spotify/start");
-
-  if (!env.spotifyClientId || !env.spotifyRedirectUri) {
+  if (!env.spotifyClientId || !env.spotifyClientSecret) {
     return NextResponse.json({ error: "Spotify OAuth is not configured yet" }, { status: 503 });
   }
 
-  const state = randomUUID();
-  const cookieStore = await cookies();
-  cookieStore.set("spotify_oauth_state", state, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: request.url.startsWith("https://"),
-    path: "/",
-    maxAge: 60 * 10,
-  });
+  const requestUrl = new URL(request.url);
+  const callbackUrl =
+    requestUrl.searchParams.get("callbackUrl") ??
+    new URL("/dashboard/settings?spotify=connected", request.url).toString();
+  const signInUrl = new URL("/api/auth/signin/spotify", request.url);
+  signInUrl.searchParams.set("callbackUrl", callbackUrl);
 
-  const url = new URL("https://accounts.spotify.com/authorize");
-  url.searchParams.set("client_id", env.spotifyClientId);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("redirect_uri", env.spotifyRedirectUri);
-  url.searchParams.set("scope", "playlist-modify-private playlist-modify-public");
-  url.searchParams.set("state", state);
-
-  return NextResponse.redirect(url, { status: 302 });
+  return NextResponse.redirect(signInUrl, { status: 302 });
 }

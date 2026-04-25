@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { SpotifySignInButton } from "@/components/google-sign-in-button";
 import { ViewingAsBanner } from "@/components/viewing-as-banner";
 import { getSpotifyConnectionForUser, requireSessionActor } from "@/lib/auth/session";
 import { resolveViewAsActor } from "@/lib/admin/users";
@@ -73,9 +74,11 @@ export default async function DashboardSettingsPage({ searchParams }: DashboardS
 
           <div className="inline-actions" style={{ marginTop: 18 }}>
             {!viewAsActor && (
-              <Link className="pill-link" href="/api/spotify/start">
-                {spotifyConnection && !spotifyConnection.revokedAt ? "Reconnect Spotify" : "Connect Spotify"}
-              </Link>
+              <SpotifySignInButton
+                callbackUrl="/dashboard/settings?spotify=connected"
+                className="pill-link"
+                label={spotifyConnection && !spotifyConnection.revokedAt ? "Reconnect Spotify" : "Connect Spotify"}
+              />
             )}
             {!viewAsActor && spotifyConnection && !spotifyConnection.revokedAt ? (
               <form action="/api/spotify/disconnect" method="post">

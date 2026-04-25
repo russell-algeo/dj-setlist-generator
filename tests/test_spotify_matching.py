@@ -1,197 +1,169 @@
-"""Tests for Spotify track matching logic in metadata_enricher.py."""
+"""Tests for Spotify track matching logic."""
+
 import unittest
 
-
-def _artist_title_score(expected_artist_words, expected_title_words, candidates):
-    """Score candidates using artist+title word overlap with artist ratio enforcement."""
-    scored_results = []
-    for item in candidates:
-        observed_artist_words = set(w for w in item['artist'].lower().split() if len(w) > 2)
-        observed_title_words = set(w for w in item['title'].lower().split() if len(w) > 2)
-
-        artist_matches = len(expected_artist_words & observed_artist_words)
-        title_matches = len(expected_title_words & observed_title_words)
-
-        if artist_matches > 0 and title_matches > 0:
-            artist_ratio = artist_matches / len(expected_artist_words)
-            if artist_ratio < 0.6:
-                continue
-            scored_results.append((artist_matches + title_matches, item))
-
-    scored_results.sort(key=lambda x: x[0], reverse=True)
-    return scored_results
+from spotify_matching import (
+    score_artist_title_candidates,
+    score_title_only_candidates,
+    select_spotify_candidate,
+)
 
 
-def _title_only_score(expected_title_words, candidates):
-    """Score candidates using title word overlap only (fallback when artist name differs).
-    Requires 100% of expected title words to appear in the observed title."""
-    if len(expected_title_words) < 2:
-        return []
-    scored_results = []
-    for item in candidates:
-        observed_title_words = set(w for w in item['title'].lower().split() if len(w) > 2)
-        title_matches = len(expected_title_words & observed_title_words)
-        if title_matches == len(expected_title_words):
-            scored_results.append((title_matches, item))
-    scored_results.sort(key=lambda x: x[0], reverse=True)
-    return scored_results
-
-
-def search_spotify_fixed(expected_artist: str, expected_title: str,
-                         primary_candidates: list, fallback_candidates: list = None) -> list:
-    """
-    Full fixed search logic:
-    1. Try artist+title search with artist ratio filter.
-    2. If no results, fall back to title-only search (handles Shazam vs Spotify artist name
-       discrepancies, e.g. "James T. Cotton" on Shazam vs "JTC" on Spotify).
-    """
-    expected_artist_words = set(w for w in expected_artist.lower().split() if len(w) > 2)
-    expected_title_words = set(w for w in expected_title.lower().split() if len(w) > 2)
-
-    scored = _artist_title_score(expected_artist_words, expected_title_words, primary_candidates)
-    if scored:
-        return scored
-
-    if fallback_candidates is not None:
-        return _title_only_score(expected_title_words, fallback_candidates)
-    return []
-
-
-class TestSpotifyMatchingBug(unittest.TestCase):
-    """
-    Covers the bug where "Valley Road (We Are 1)" by James T. Cotton (Shazam name)
-    was matched to "Valley Road" by James McMurtry, because:
-    1. The correct track is on Spotify under artist "JTC", not "James T. Cotton"
-    2. The artist-title query never found it
-    3. McMurtry passed a too-lenient artist filter (only needs 1 shared word: "James")
-    """
-
-    # Primary search results (artist-title query): correct JTC track never appears
+class TestSpotifyMatching(unittest.TestCase):
     PRIMARY = [
-        {'artist': 'James McMurtry', 'title': 'Valley Road'},
-        {'artist': 'James Brown', 'title': 'Road of No Return'},
+        {"artist": "James McMurtry", "title": "Valley Road", "artist_genres": ["alt country"]},
+        {"artist": "James Brown", "title": "Road of No Return", "artist_genres": ["funk"]},
     ]
 
-    # Fallback search results (title-only query): JTC track is #1
     FALLBACK = [
-        {'artist': 'JTC', 'title': 'Valley Road (We Are 1)'},
-        {'artist': 'JTC', 'title': 'Valley Road (We Are 1) - DJ Qu Remix'},
-        {'artist': 'Bruce Hornsby', 'title': 'The Valley Road'},
+        {"artist": "JTC", "title": "Valley Road (We Are 1)", "artist_genres": ["acid house"]},
+        {"artist": "JTC", "title": "Valley Road (We Are 1) - DJ Qu Remix", "artist_genres": ["acid house"]},
+        {"artist": "Bruce Hornsby", "title": "The Valley Road", "artist_genres": ["soft rock"]},
     ]
 
-    # --- BUG: original behavior ---
+    JTC_DISCOGS = {
+        "title": "JTC - Valley Road (We Are 1)",
+        "genres": ["Electronic"],
+        "styles": ["Deep House", "Tech House", "Techno"],
+    }
 
-    def test_bug_mcmurtry_passes_lenient_filter(self):
-        """BUG: Original code accepts McMurtry because 'james' is the only artist match needed."""
-        expected_artist_words = set(w for w in 'James T. Cotton'.lower().split() if len(w) > 2)
-        expected_title_words = set(w for w in 'Valley Road (We Are 1)'.lower().split() if len(w) > 2)
-
-        scored = []
-        for item in self.PRIMARY:
-            obs_artist = set(w for w in item['artist'].lower().split() if len(w) > 2)
-            obs_title = set(w for w in item['title'].lower().split() if len(w) > 2)
-            am = len(expected_artist_words & obs_artist)
-            tm = len(expected_title_words & obs_title)
-            if am > 0 and tm > 0:
-                scored.append((am + tm, item))
-        scored.sort(key=lambda x: x[0], reverse=True)
-
-        self.assertTrue(len(scored) > 0)
-        self.assertEqual(scored[0][1]['artist'], 'James McMurtry',
-                         "BUG confirmed: McMurtry wins with only 'james' as artist match")
-
-    # --- FIX part 1: artist ratio filter prevents McMurtry ---
-
-    def test_fix_ratio_rejects_mcmurtry(self):
-        """Artist ratio filter (>=0.6) rejects McMurtry: 1 of 2 expected words = 50%."""
-        results = search_spotify_fixed(
-            'James T. Cotton', 'Valley Road (We Are 1)',
-            primary_candidates=self.PRIMARY,
+    def test_artist_ratio_rejects_mcmurtry_primary_match(self):
+        results = score_artist_title_candidates(
+            "James T. Cotton",
+            "Valley Road (We Are 1)",
+            self.PRIMARY,
         )
-        self.assertEqual(len(results), 0,
-                         "After ratio fix, no match should be returned from primary search")
 
-    # --- FIX part 2: title-only fallback finds JTC ---
+        self.assertEqual(results, [])
 
-    def test_fix_fallback_finds_jtc(self):
-        """Title-only fallback finds 'JTC - Valley Road (We Are 1)' when primary search fails."""
-        results = search_spotify_fixed(
-            'James T. Cotton', 'Valley Road (We Are 1)',
-            primary_candidates=self.PRIMARY,
-            fallback_candidates=self.FALLBACK,
+    def test_title_only_fallback_finds_jtc_with_discogs_and_genres(self):
+        match = select_spotify_candidate(
+            "James T. Cotton",
+            "Valley Road (We Are 1)",
+            self.PRIMARY,
+            self.FALLBACK,
+            discogs_data=self.JTC_DISCOGS,
         )
-        self.assertTrue(len(results) > 0, "Fallback should find JTC track")
-        self.assertEqual(results[0][1]['artist'], 'JTC')
-        self.assertEqual(results[0][1]['title'], 'Valley Road (We Are 1)')
 
-    def test_fix_fallback_rejects_partial_title_match(self):
-        """Fallback requires 100% title word match: 'The Valley Road' (2/4 words) is rejected."""
-        fallback_only = [{'artist': 'Bruce Hornsby', 'title': 'The Valley Road'}]
-        results = search_spotify_fixed(
-            'James T. Cotton', 'Valley Road (We Are 1)',
-            primary_candidates=[],
-            fallback_candidates=fallback_only,
-        )
-        self.assertEqual(len(results), 0)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.item["artist"], "JTC")
+        self.assertEqual(match.item["title"], "Valley Road (We Are 1)")
 
-    def test_fix_fallback_accepts_remix_with_extra_words(self):
-        """Fallback accepts a Spotify title with extra words (remix suffix) as long as all expected words are present."""
-        fallback_with_remix = [{'artist': 'JTC', 'title': 'Valley Road (We Are 1) - DJ Qu Remix - Mixed'}]
-        results = search_spotify_fixed(
-            'James T. Cotton', 'Valley Road (We Are 1)',
-            primary_candidates=[],
-            fallback_candidates=fallback_with_remix,
+    def test_title_only_fallback_accepts_expected_artist_initials_without_discogs(self):
+        match = select_spotify_candidate(
+            "James T. Cotton",
+            "Valley Road (We Are 1)",
+            [],
+            [{"artist": "JTC", "title": "Valley Road (We Are 1)"}],
         )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.item["artist"], "JTC")
+
+    def test_title_only_fallback_rejects_partial_title_match(self):
+        results = score_title_only_candidates(
+            "James T. Cotton",
+            "Valley Road (We Are 1)",
+            [{"artist": "Bruce Hornsby", "title": "The Valley Road"}],
+            discogs_data=self.JTC_DISCOGS,
+        )
+
+        self.assertEqual(results, [])
+
+    def test_title_only_fallback_accepts_version_suffix_with_corroboration(self):
+        results = score_title_only_candidates(
+            "James T. Cotton",
+            "Valley Road (We Are 1)",
+            [{"artist": "JTC", "title": "Valley Road (We Are 1) - DJ Qu Remix - Mixed"}],
+            discogs_data=self.JTC_DISCOGS,
+        )
+
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0][1]['artist'], 'JTC')
+        self.assertEqual(results[0].item["artist"], "JTC")
 
-    def test_fix_fallback_not_triggered_when_primary_succeeds(self):
-        """Fallback is not used when primary search already found a valid match."""
+    def test_title_only_fallback_is_not_used_when_primary_succeeds(self):
         primary_with_correct = [
-            {'artist': 'James T. Cotton', 'title': 'Valley Road (We Are 1)'},
-            {'artist': 'James McMurtry', 'title': 'Valley Road'},
+            {"artist": "James T. Cotton", "title": "Valley Road (We Are 1)"},
+            {"artist": "James McMurtry", "title": "Valley Road"},
         ]
-        results = search_spotify_fixed(
-            'James T. Cotton', 'Valley Road (We Are 1)',
-            primary_candidates=primary_with_correct,
-            fallback_candidates=self.FALLBACK,
+        match = select_spotify_candidate(
+            "James T. Cotton",
+            "Valley Road (We Are 1)",
+            primary_with_correct,
+            self.FALLBACK,
+            discogs_data=self.JTC_DISCOGS,
         )
-        self.assertEqual(results[0][1]['artist'], 'James T. Cotton')
 
-    def test_fix_fallback_skipped_for_short_titles(self):
-        """Fallback requires at least 2 expected title words to avoid false positives on single-word titles."""
-        results = search_spotify_fixed(
-            'Unknown Artist', 'Glue',
-            primary_candidates=[],
-            fallback_candidates=[{'artist': 'Bicep', 'title': 'Glue'}],
+        self.assertIsNotNone(match)
+        self.assertEqual(match.item["artist"], "James T. Cotton")
+
+    def test_title_only_fallback_skips_short_titles(self):
+        match = select_spotify_candidate(
+            "Unknown Artist",
+            "Glue",
+            [],
+            [{"artist": "Bicep", "title": "Glue", "artist_genres": ["house"]}],
+            discogs_data={"title": "Bicep - Glue", "styles": ["House"], "genres": ["Electronic"]},
         )
-        self.assertEqual(len(results), 0,
-                         "Single-word title fallback should be skipped")
 
-    # --- Regression: normal matches still work ---
+        self.assertIsNone(match)
 
     def test_normal_artist_title_match_unaffected(self):
-        """Standard matching still works for well-known artist names."""
-        candidates = [{'artist': 'Bicep', 'title': 'Glue'}]
-        results = search_spotify_fixed('Bicep', 'Glue', primary_candidates=candidates)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0][1]['artist'], 'Bicep')
+        match = select_spotify_candidate(
+            "Bicep",
+            "Glue",
+            [{"artist": "Bicep", "title": "Glue"}],
+        )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.item["artist"], "Bicep")
 
     def test_two_word_artist_requires_both_words(self):
-        """Two-word artist: both words must match (ratio = 50% fails the 60% threshold)."""
         candidates = [
-            {'artist': 'James McMurtry', 'title': 'Levelland'},
-            {'artist': 'James Cotton', 'title': 'Levelland Blues'},
+            {"artist": "James McMurtry", "title": "Levelland"},
+            {"artist": "James Cotton", "title": "Levelland Blues"},
         ]
-        results = search_spotify_fixed('James Cotton', 'Levelland Blues', primary_candidates=candidates)
-        self.assertTrue(all(r[1]['artist'] == 'James Cotton' for r in results))
+        results = score_artist_title_candidates("James Cotton", "Levelland Blues", candidates)
+
+        self.assertTrue(all(result.item["artist"] == "James Cotton" for result in results))
 
     def test_three_word_artist_two_matches_accepted(self):
-        """For 3-word artist names, 2 of 3 matching (67%) passes the 60% threshold."""
-        candidates = [{'artist': 'The Chemical Brothers', 'title': 'Block Rockin Beats'}]
-        results = search_spotify_fixed('Chemical Brothers', 'Block Rockin Beats', primary_candidates=candidates)
+        candidates = [{"artist": "The Chemical Brothers", "title": "Block Rockin Beats"}]
+        results = score_artist_title_candidates("Chemical Brothers", "Block Rockin Beats", candidates)
+
         self.assertEqual(len(results), 1)
 
+    def test_korsakow_title_only_rejects_oh_land(self):
+        match = select_spotify_candidate(
+            "Korsakow",
+            "Sun Of A Gun",
+            [],
+            [{"artist": "Oh Land", "title": "Sun of a Gun", "artist_genres": ["dansk pop"]}],
+            discogs_data={
+                "title": "Korsakow / Jan Mattheus - Sun Of A Gun / Rændstrøm",
+                "genres": ["Electronic"],
+                "styles": ["House", "Deep House"],
+            },
+        )
 
-if __name__ == '__main__':
+        self.assertIsNone(match)
+
+    def test_genre_overlap_can_validate_title_only_when_artist_alias_is_unknown(self):
+        match = select_spotify_candidate(
+            "Unknown Shazam Alias",
+            "Deep Channel",
+            [],
+            [{"artist": "Studio Alias", "title": "Deep Channel", "artist_genres": ["deep house"]}],
+            discogs_data={
+                "title": "Obscure Name - Deep Channel",
+                "genres": ["Electronic"],
+                "styles": ["Deep House"],
+            },
+        )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.item["artist"], "Studio Alias")
+
+
+if __name__ == "__main__":
     unittest.main()

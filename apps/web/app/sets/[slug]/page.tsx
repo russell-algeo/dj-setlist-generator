@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { ArchiveSetPage } from "@/components/archive/archive-pages";
+import { getArchiveSetManagementBySlug } from "@/lib/archive/deletions";
 import { buildArchiveMetadata } from "@/lib/archive/metadata";
+import { getSessionActor } from "@/lib/auth/session";
 
 type SetDetailPageProps = {
   params: Promise<{ slug: string }>;
@@ -24,8 +26,14 @@ export async function generateMetadata({ params }: SetDetailPageProps): Promise<
 
 export default async function SetDetailPage({ params, searchParams }: SetDetailPageProps) {
   const [{ slug }, queryParams] = await Promise.all([params, searchParams]);
-  const { getArchiveSetDetailBySlug } = await loadArchiveData();
-  const detail = await getArchiveSetDetailBySlug(slug);
+  const [{ getArchiveSetDetailBySlug }, actor] = await Promise.all([
+    loadArchiveData(),
+    getSessionActor(),
+  ]);
+  const [detail, management] = await Promise.all([
+    getArchiveSetDetailBySlug(slug),
+    getArchiveSetManagementBySlug(slug, actor),
+  ]);
   if (!detail) notFound();
-  return <ArchiveSetPage detail={detail} query={queryParams.q?.trim() ?? ""} />;
+  return <ArchiveSetPage detail={detail} management={management} query={queryParams.q?.trim() ?? ""} />;
 }

@@ -55,12 +55,20 @@ export function ArchiveHeader({
         {hasControls && (
           <button
             aria-expanded={mobileMenuOpen}
-            aria-label="Toggle menu"
+            aria-label={mobileMenuOpen ? "Close controls" : "Open controls"}
             className={styles.mobileMenuTrigger}
             onClick={() => setMobileMenuOpen((v) => !v)}
             type="button"
           >
-            {mobileMenuOpen ? "✕" : "☰"}
+            {mobileMenuOpen ? (
+              <span aria-hidden="true" className={styles.mobileMenuCloseIcon} />
+            ) : (
+              <span aria-hidden="true" className={styles.mobileMenuIcon}>
+                <span />
+                <span />
+                <span />
+              </span>
+            )}
           </button>
         )}
       </div>

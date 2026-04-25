@@ -211,6 +211,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
           inArray(setRuns.sourceUrl, normalizedUrls),
           eq(setRuns.status, "completed"),
           isNotNull(setRuns.publishedSetId),
+          isNull(setRuns.archiveRemovedAt),
         ),
       );
     for (const row of existingCompleted) {

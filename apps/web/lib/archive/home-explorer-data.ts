@@ -1,7 +1,7 @@
 import "server-only";
 
 import { unstable_cache, unstable_noStore as noStore } from "next/cache";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 import type {
@@ -170,6 +170,11 @@ type HomeSetTracklistRow = {
   trackId: string | null;
   trackMetadata: unknown;
   trackSpotifyUrl: string | null;
+};
+
+type ViewerSubmittedScope = {
+  artistSlugs: Set<string>;
+  setIds: Set<string>;
 };
 
 const asJsonArray = <T>(value: unknown): T[] => {
@@ -458,6 +463,14 @@ const mapSetLibraryRow = (row: HomeSetLibraryRow): ArchiveHomeSetLibraryItem => 
   totalTracks: numberOrZero(row.totalTracks),
 });
 
+const withSubmittedByViewer = <T extends { id: string }>(
+  item: T,
+  submittedSetIds: ReadonlySet<string> | null,
+) => ({
+  ...item,
+  submittedByViewer: submittedSetIds?.has(item.id) ?? false,
+});
+
 const buildTracklistTrack = (slug: string, row: HomeSetTracklistRow): ArchiveHomeSetLibraryTrack => {
   const trackMetadata = asRecord(row.trackMetadata);
 
@@ -635,6 +648,7 @@ const getWorkspaceGlobalStats = async (userId: string) => {
       JOIN "ops"."set_runs" sr2
         ON sr2.source_url = s2.source_url
        AND sr2.requested_by = ${userId}
+       AND sr2.archive_removed_at IS NULL
     ) s
     LEFT JOIN "app"."set_artists" sa ON sa.set_id = s.id
     LEFT JOIN "app"."set_entries" se ON se.set_id = s.id
@@ -648,6 +662,7 @@ const getWorkspaceGlobalStats = async (userId: string) => {
       JOIN "ops"."set_runs" sr2
         ON sr2.source_url = s2.source_url
        AND sr2.requested_by = ${userId}
+       AND sr2.archive_removed_at IS NULL
     ) s
     JOIN "app"."set_entries" se ON se.set_id = s.id
     GROUP BY se.confidence
@@ -852,6 +867,7 @@ const getArchiveHomeAtlasPayloadUncached = async ({
       FROM "ops"."set_runs" sr
       JOIN "app"."sets" s ON s.source_url = sr.source_url
       WHERE sr.requested_by = ${userId}
+        AND sr.archive_removed_at IS NULL
     `);
     const workspaceSetSlugs = new Set(
       asRows<{ setSlug: string }>(slugResult.rows).map((r) => r.setSlug),
@@ -954,6 +970,7 @@ const getArchiveHomePairPayloadUncached = async ({
       FROM "ops"."set_runs" sr
       JOIN "app"."sets" s ON s.source_url = sr.source_url
       WHERE sr.requested_by = ${userId}
+        AND sr.archive_removed_at IS NULL
     `);
     const workspaceSetSlugs = new Set(
       asRows<{ setSlug: string }>(slugResult.rows).map((r) => r.setSlug),
@@ -1040,16 +1057,22 @@ const getArchiveHomeSetLibraryPayloadUncached = async ({
   page = 1,
   query = "",
   sort = "default",
+  viewerUserId,
 }: {
   artistFilter?: string;
   page?: number;
   query?: string;
   sort?: ArchiveHomeSetSort;
+  viewerUserId?: string;
 }): Promise<ArchiveHomeSetLibraryPagePayload> => {
   const db = getDb();
   const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const safeQuery = query.trim();
-  const [artistCards] = await Promise.all([getHomeArtistCards()]);
+  const [artistCards, viewerSetIds] = await Promise.all([
+    getHomeArtistCards(),
+    viewerUserId ? getUserSetIds(db, viewerUserId) : Promise.resolve(null),
+  ]);
+  const viewerSetIdSet = viewerSetIds ? new Set(viewerSetIds) : null;
 
   const artistClause =
     artistFilter !== "ALL"
@@ -1100,7 +1123,9 @@ const getArchiveHomeSetLibraryPayloadUncached = async ({
   return {
     artistFilter,
     artistOptions: ["ALL", ...artistCards.map((artistCard) => artistCard.name)],
-    items: asRows<HomeSetLibraryRow>(pageResult.rows).map(mapSetLibraryRow),
+    items: asRows<HomeSetLibraryRow>(pageResult.rows).map((row) =>
+      withSubmittedByViewer(mapSetLibraryRow(row), viewerSetIdSet),
+    ),
     page: safeResolvedPage,
     pageSize: PAGE_SIZE,
     query: safeQuery,
@@ -1115,12 +1140,25 @@ export const getArchiveHomeSetLibraryPayload = async ({
   page = 1,
   query = "",
   sort = "default",
+  viewerUserId,
 }: {
   artistFilter?: string;
   page?: number;
   query?: string;
   sort?: ArchiveHomeSetSort;
-} = {}) =>
+  viewerUserId?: string;
+} = {}) => {
+  if (viewerUserId) {
+    return getArchiveHomeSetLibraryPayloadUncached({
+      artistFilter,
+      page,
+      query,
+      sort,
+      viewerUserId,
+    });
+  }
+
+  return (
   unstable_cache(
     async () =>
       getArchiveHomeSetLibraryPayloadUncached({
@@ -1131,7 +1169,9 @@ export const getArchiveHomeSetLibraryPayload = async ({
       }),
     ["archive-home-set-library-v2", String(PAGE_SIZE), artistFilter, String(page), query, sort],
     { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
-  )();
+  )()
+  );
+};
 
 const getArchiveHomeSetTracklistPayloadUncached = async (
   slug: string,
@@ -1191,8 +1231,39 @@ const getUserSetIds = async (db: ReturnType<typeof getDb>, userId: string): Prom
   const rows = await db
     .selectDistinct({ id: sets.id })
     .from(sets)
-    .innerJoin(setRuns, and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)));
+    .innerJoin(
+      setRuns,
+      and(
+        eq(setRuns.sourceUrl, sets.sourceUrl),
+        eq(setRuns.requestedBy, userId),
+        isNull(setRuns.archiveRemovedAt),
+      ),
+    );
   return rows.map((r) => r.id);
+};
+
+const getViewerSubmittedScope = async (userId: string): Promise<ViewerSubmittedScope> => {
+  const db = getDb();
+  const result = await db.execute(sql<{ artistSlug: string | null; setId: string }>`
+    SELECT DISTINCT
+      s.id::text AS "setId",
+      a.slug AS "artistSlug"
+    FROM "app"."sets" s
+    INNER JOIN "ops"."set_runs" sr
+      ON sr.source_url = s.source_url
+     AND sr.requested_by = ${userId}
+     AND sr.archive_removed_at IS NULL
+    LEFT JOIN "app"."set_artists" sa
+      ON sa.set_id = s.id
+    LEFT JOIN "app"."artists" a
+      ON a.id = sa.artist_id
+  `);
+  const rows = asRows<{ artistSlug: string | null; setId: string }>(result.rows);
+
+  return {
+    artistSlugs: new Set(rows.map((row) => row.artistSlug).filter((slug): slug is string => Boolean(slug))),
+    setIds: new Set(rows.map((row) => row.setId)),
+  };
 };
 
 export const getWorkspaceArtistCards = async (userId: string): Promise<ArchiveHomeArtistCard[]> => {
@@ -1209,7 +1280,14 @@ export const getWorkspaceArtistCards = async (userId: string): Promise<ArchiveHo
       .from(artists)
       .innerJoin(setArtists, and(eq(setArtists.artistId, artists.id), eq(setArtists.role, "primary")))
       .innerJoin(sets, eq(sets.id, setArtists.setId))
-      .innerJoin(setRuns, and(eq(setRuns.sourceUrl, sets.sourceUrl), eq(setRuns.requestedBy, userId)))
+      .innerJoin(
+        setRuns,
+        and(
+          eq(setRuns.sourceUrl, sets.sourceUrl),
+          eq(setRuns.requestedBy, userId),
+          isNull(setRuns.archiveRemovedAt),
+        ),
+      )
       .groupBy(artists.id, artists.slug, artists.name, artists.imageUrl)
       .orderBy(asc(artists.name)),
     db.execute(sql<HomeArtistCoverImageRow>`
@@ -1219,6 +1297,7 @@ export const getWorkspaceArtistCards = async (userId: string): Promise<ArchiveHo
         JOIN "ops"."set_runs" sr
           ON sr.source_url = s.source_url
          AND sr.requested_by = ${userId}
+         AND sr.archive_removed_at IS NULL
       )
       SELECT DISTINCT ON (library.artist_slug)
         library.artist_slug AS "artistSlug",
@@ -1354,6 +1433,7 @@ const getWorkspaceHeroSetCandidates = async (userId: string): Promise<ArchiveHom
       JOIN "ops"."set_runs" sr
         ON sr.source_url = s.source_url
        AND sr.requested_by = ${userId}
+       AND sr.archive_removed_at IS NULL
     )
     SELECT
       library.set_id::text AS id,
@@ -1440,6 +1520,7 @@ export const getArchiveHomeExplorerInitial = async ({
   selectedArtistSlugs,
   sort = "default",
   userId,
+  viewerUserId,
 }: {
   artistFilter?: string;
   compareMode?: ArchiveHomeCompareMode;
@@ -1449,21 +1530,38 @@ export const getArchiveHomeExplorerInitial = async ({
   selectedArtistSlugs?: string[];
   sort?: ArchiveHomeSetSort;
   userId?: string;
+  viewerUserId?: string;
 } = {}): Promise<ArchiveHomeBootstrapPayload> => {
   noStore();
 
   const isWorkspace = scope === "mine" && Boolean(userId);
 
-  const [artistCards, globalStatsResult, initialNetwork, initialSetLibrary, heroSetCandidates] =
+  const [artistCardsRaw, globalStatsResult, initialNetwork, initialSetLibrary, heroSetCandidatesRaw, viewerScope] =
     await Promise.all([
       isWorkspace ? getWorkspaceArtistCards(userId!) : getHomeArtistCards(),
       isWorkspace ? getWorkspaceGlobalStats(userId!) : getHomeGlobalStats(),
       isWorkspace ? getWorkspaceNetworkPayload(userId!) : getArchiveHomeNetworkPayload(),
       isWorkspace
         ? getWorkspaceSetLibraryPayload({ artistFilter, page, query, sort, userId: userId! })
-        : getArchiveHomeSetLibraryPayload({ artistFilter, page, query, sort }),
+        : getArchiveHomeSetLibraryPayload({
+            artistFilter,
+            page,
+            query,
+            sort,
+            viewerUserId,
+          }),
       isWorkspace ? getWorkspaceHeroSetCandidates(userId!) : getHeroSetCandidates(),
+      viewerUserId ? getViewerSubmittedScope(viewerUserId) : Promise.resolve(null),
     ]);
+  const artistCards = viewerScope
+    ? artistCardsRaw.map((artistCard) => ({
+        ...artistCard,
+        submittedByViewer: viewerScope.artistSlugs.has(artistCard.slug),
+      }))
+    : artistCardsRaw;
+  const heroSetCandidates = viewerScope
+    ? heroSetCandidatesRaw.map((setItem) => withSubmittedByViewer(setItem, viewerScope.setIds))
+    : heroSetCandidatesRaw;
 
   const resolvedSelected =
     selectedArtistSlugs && selectedArtistSlugs.length > 0

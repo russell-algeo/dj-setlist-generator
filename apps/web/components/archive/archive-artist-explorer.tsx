@@ -14,6 +14,7 @@ import {
 } from "react";
 
 import { buildSetHref } from "@/components/archive/archive-hrefs";
+import { ArchiveDeleteControl, SubmittedByYouBadge } from "@/components/archive/archive-delete-control";
 import {
   ArchiveEvidenceTrackCard,
   type ArchiveEvidenceTrackCardSourceGroup,
@@ -44,6 +45,16 @@ type AtlasScope = "artist" | "set";
 type AtlasCompareMode = "intersection" | "union";
 type AtlasLens = "artists" | "genres" | "labels" | "tracks";
 type SetSort = "default" | "duration" | "rate" | "tracks";
+
+type ArtistManagement = {
+  artistWillBeRemoved: boolean;
+  canDeleteArtist: boolean;
+  deletableSetIds: string[];
+  deleteImpact: string | null;
+  setDeleteImpacts: Record<string, string>;
+  submittedByViewer: boolean;
+  submittedSetIds: string[];
+};
 
 type RecurringCardModel = ArchiveRecurringTrack & {
   searchBlob: string;
@@ -553,10 +564,12 @@ const buildAtlasOpenCardStyle = (
 export function ArchiveArtistExplorer({
   artist,
   initialQuery,
+  management,
   scope,
 }: {
   artist: ArchiveArtistSummary;
   initialQuery: string;
+  management: ArtistManagement;
   scope: "global" | "mine";
 }) {
   const heroMainRef = useRef<HTMLDivElement | null>(null);
@@ -1400,6 +1413,18 @@ export function ArchiveArtistExplorer({
                     <span className="stat-label">Recurring tracks</span>
                   </article>
                 </div>
+                {management.canDeleteArtist && management.deleteImpact ? (
+                  <div className="artist-management-row">
+                    <ArchiveDeleteControl
+                      entityType="artist"
+                      impact={management.deleteImpact}
+                      leadingNode={management.submittedByViewer ? <SubmittedByYouBadge /> : undefined}
+                      redirectHref={scope === "mine" ? "/?scope=mine" : "/"}
+                      slug={artist.slug}
+                      title={artist.name}
+                    />
+                  </div>
+                ) : null}
               </div>
 
               <aside className="artist-hero-side" ref={heroSideRef}>
@@ -1701,42 +1726,44 @@ export function ArchiveArtistExplorer({
                         )}
                         <div className="artist-detail">
                           <div className="artist-meta-row">
-                            <div className="card-actions">
-                              <button
-                                className={joinClasses("chip-btn", isSelected && "active")}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  const nextSelectedIds = toggleSelectedSetIds(
-                                    atlasSelectedSetIds,
-                                    setItem.id,
-                                  );
-                                  latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
-                                  if (!atlasPanePointerInside) {
-                                    setAtlasDockedSelectedSetIds(nextSelectedIds);
-                                  }
-                                  // On touch, don't override the scroll-driven hover state
-                                  if (isHoverCapablePointer()) {
-                                    setAtlasHoverLatchedSetId(setItem.id);
-                                  }
-                                  setAtlasScope("set");
-                                  setAtlasPage(0);
-                                  setAtlasEvidencePage(0);
-                                  setAtlasActiveName(null);
-                                  setAtlasSelectedSetIds(nextSelectedIds);
-                                }}
-                                type="button"
-                              >
-                                {isSelected ? "In Scope" : "Add to Scope"}
-                              </button>
-                              <a className="chip-btn" href={setItem.previewHref} rel="noopener" target="_blank">
-                                Set Page
-                              </a>
-                              {setItem.sourceUrl ? (
-                                <a className="chip-btn" href={setItem.sourceUrl} rel="noopener" target="_blank">
-                                  Source
+                            <div className="card-actions atlas-card-actions">
+                              <span className="card-actions-main">
+                                <button
+                                  className={joinClasses("chip-btn", isSelected && "active")}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    const nextSelectedIds = toggleSelectedSetIds(
+                                      atlasSelectedSetIds,
+                                      setItem.id,
+                                    );
+                                    latestAtlasSelectedSetIdsRef.current = nextSelectedIds;
+                                    if (!atlasPanePointerInside) {
+                                      setAtlasDockedSelectedSetIds(nextSelectedIds);
+                                    }
+                                    // On touch, don't override the scroll-driven hover state
+                                    if (isHoverCapablePointer()) {
+                                      setAtlasHoverLatchedSetId(setItem.id);
+                                    }
+                                    setAtlasScope("set");
+                                    setAtlasPage(0);
+                                    setAtlasEvidencePage(0);
+                                    setAtlasActiveName(null);
+                                    setAtlasSelectedSetIds(nextSelectedIds);
+                                  }}
+                                  type="button"
+                                >
+                                  {isSelected ? "In Scope" : "Add to Scope"}
+                                </button>
+                                <a className="chip-btn" href={setItem.previewHref} rel="noopener" target="_blank">
+                                  Set Page
                                 </a>
-                              ) : null}
+                                {setItem.sourceUrl ? (
+                                  <a className="chip-btn" href={setItem.sourceUrl} rel="noopener" target="_blank">
+                                    Source
+                                  </a>
+                                ) : null}
+                              </span>
                             </div>
                           </div>
                           <h3>{setItem.title}</h3>

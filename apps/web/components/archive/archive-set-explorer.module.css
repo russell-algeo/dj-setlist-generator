@@ -536,6 +536,14 @@
   display: block;
 }
 
+.root :global(.youtube-player-host),
+.root :global(.youtube-player-host iframe) {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
 .root :global(.source-player-frame.is-youtube) {
   margin: 6px auto 0;
   aspect-ratio: 16 / 9;
@@ -941,7 +949,6 @@
   background: #111;
   padding: 8px 10px;
   position: relative;
-  cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease;
 }
 
@@ -1002,12 +1009,10 @@
   color: #6e6e6e;
 }
 
-.root :global(.track-time-link) {
+.root :global(.track-time-label) {
   color: var(--lime);
   font-family: var(--font-mono), monospace;
   font-size: 11px;
-  text-decoration: underline;
-  text-decoration-color: #2a2a2a;
 }
 
 .root :global(.track-main) {

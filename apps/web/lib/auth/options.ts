@@ -2,7 +2,12 @@ import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { and, eq } from "drizzle-orm";
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import SpotifyProvider from "next-auth/providers/spotify";
 
+import {
+  SPOTIFY_AUTH_SCOPE,
+  syncSpotifyConnectionFromAccount,
+} from "@/lib/auth/spotify-connection";
 import { getDb } from "@/lib/db/client";
 import { authTables, userProfiles, users } from "@/lib/db/schema";
 import { env } from "@/lib/env";
@@ -10,16 +15,34 @@ import { env } from "@/lib/env";
 const db = getDb();
 
 const buildProviders = () => {
-  if (!env.authGoogleId || !env.authGoogleSecret) {
-    return [];
+  const providers: NextAuthOptions["providers"] = [];
+
+  if (env.authGoogleId && env.authGoogleSecret) {
+    providers.push(
+      GoogleProvider({
+        clientId: env.authGoogleId,
+        clientSecret: env.authGoogleSecret,
+        allowDangerousEmailAccountLinking: true,
+      }),
+    );
   }
 
-  return [
-    GoogleProvider({
-      clientId: env.authGoogleId,
-      clientSecret: env.authGoogleSecret,
-    }),
-  ];
+  if (env.spotifyClientId && env.spotifyClientSecret) {
+    providers.push(
+      SpotifyProvider({
+        clientId: env.spotifyClientId,
+        clientSecret: env.spotifyClientSecret,
+        authorization: {
+          params: {
+            scope: SPOTIFY_AUTH_SCOPE,
+          },
+        },
+        allowDangerousEmailAccountLinking: true,
+      }),
+    );
+  }
+
+  return providers;
 };
 
 export const bootstrapUserProfile = async (user: {
@@ -114,7 +137,7 @@ export const authOptions: NextAuthOptions = {
         })
         .where(eq(users.id, user.id));
     },
-    async signIn({ user }) {
+    async signIn({ account, user }) {
       if (!user.id || !user.email) {
         return;
       }
@@ -123,6 +146,17 @@ export const authOptions: NextAuthOptions = {
         id: user.id,
         email: user.email,
         name: user.name,
+      });
+
+      await syncSpotifyConnectionFromAccount({
+        account,
+        userId: user.id,
+      });
+    },
+    async linkAccount({ account, user }) {
+      await syncSpotifyConnectionFromAccount({
+        account,
+        userId: user.id,
       });
     },
   },

@@ -6,6 +6,15 @@ import { signIn, signOut, useSession } from "next-auth/react";
 
 import styles from "./auth-dropdown.module.css";
 
+type AuthProviderId = "spotify" | "google";
+
+const SIGN_IN_PROVIDER_ORDER: AuthProviderId[] = ["spotify", "google"];
+
+const SIGN_IN_PROVIDER_LABELS: Record<AuthProviderId, string> = {
+  google: "Sign in with Google",
+  spotify: "Sign in with Spotify",
+};
+
 function getInitials(name: string | null | undefined, email: string | null | undefined): string {
   if (name) {
     return name
@@ -18,11 +27,19 @@ function getInitials(name: string | null | undefined, email: string | null | und
   return email?.slice(0, 2).toUpperCase() ?? "?";
 }
 
+function getSpotifyConnectionCallbackUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("spotify", "connected");
+
+  return url.toString();
+}
+
 export function AuthDropdown() {
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
   const [spotifyConnected, setSpotifyConnected] = useState<boolean | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const sessionUserEmail = session?.user?.email;
 
   // Close on outside click
   useEffect(() => {
@@ -35,25 +52,59 @@ export function AuthDropdown() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Fetch Spotify status when dropdown opens
+  // Fetch a fresh Spotify status every time the signed-in dropdown opens.
   useEffect(() => {
-    if (open && session?.user && spotifyConnected === null) {
-      fetch("/api/user/status")
-        .then((r) => r.json())
-        .then((data: { spotifyConnected: boolean }) => setSpotifyConnected(data.spotifyConnected))
-        .catch(() => setSpotifyConnected(false));
+    if (!open || !sessionUserEmail) {
+      return;
     }
-  }, [open, session, spotifyConnected]);
+
+    const controller = new AbortController();
+    setSpotifyConnected(null);
+
+    fetch("/api/user/status", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((data: { spotifyConnected: boolean }) => setSpotifyConnected(data.spotifyConnected))
+      .catch((error: Error) => {
+        if (error.name !== "AbortError") {
+          setSpotifyConnected(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [open, sessionUserEmail]);
 
   if (!session?.user) {
     return (
-      <button
-        className={styles.trigger}
-        onClick={() => signIn("google", { callbackUrl: window.location.href })}
-        type="button"
-      >
-        Sign In
-      </button>
+      <div className={styles.container} ref={containerRef}>
+        <button
+          aria-expanded={open}
+          className={styles.trigger}
+          onClick={() => setOpen((value) => !value)}
+          type="button"
+        >
+          Sign in
+        </button>
+
+        {open ? (
+          <div className={styles.dropdown}>
+            <div className={styles.signInMenu}>
+              {SIGN_IN_PROVIDER_ORDER.map((provider) => (
+                <button
+                  className={styles.providerAction}
+                  key={provider}
+                  onClick={() => signIn(provider, { callbackUrl: window.location.href })}
+                  type="button"
+                >
+                  {SIGN_IN_PROVIDER_LABELS[provider]}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
     );
   }
 
@@ -92,12 +143,15 @@ export function AuthDropdown() {
             ) : spotifyConnected ? (
               <span className={styles.menuActionGreenActive}>● Connected</span>
             ) : (
-              <a
+              <button
                 className={styles.menuActionGreen}
-                href="/api/spotify/start"
+                onClick={() =>
+                  signIn("spotify", { callbackUrl: getSpotifyConnectionCallbackUrl() })
+                }
+                type="button"
               >
                 + Connect
-              </a>
+              </button>
             )}
           </div>
 

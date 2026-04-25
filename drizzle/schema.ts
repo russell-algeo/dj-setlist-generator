@@ -325,6 +325,32 @@ export const submissions = ops.table(
   }),
 );
 
+export const archiveDeletions = ops.table(
+  "archive_deletions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id"),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    action: text("action").notNull(),
+    actorRole: text("actor_role").notNull(),
+    requestedBy: text("requested_by").references(() => users.id, { onDelete: "set null" }),
+    requestedByEmail: text("requested_by_email"),
+    reason: text("reason"),
+    affectedSetIds: jsonb("affected_set_ids").default(sql`'[]'::jsonb`).notNull(),
+    affectedArtistSlugs: jsonb("affected_artist_slugs").default(sql`'[]'::jsonb`).notNull(),
+    rowCounts: jsonb("row_counts").default(sql`'{}'::jsonb`).notNull(),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    createdAtIdx: index("archive_deletions_created_at_idx").on(table.createdAt),
+    entityIdx: index("archive_deletions_entity_idx").on(table.entityType, table.slug),
+    requestedByIdx: index("archive_deletions_requested_by_idx").on(table.requestedBy),
+  }),
+);
+
 export const setRuns = ops.table(
   "set_runs",
   {
@@ -347,12 +373,20 @@ export const setRuns = ops.table(
     publishedSetId: uuid("published_set_id").references(() => sets.id, {
       onDelete: "set null",
     }),
+    archiveRemovedAt: timestamp("archive_removed_at", { withTimezone: true }),
+    archiveRemovalId: uuid("archive_removal_id").references(() => archiveDeletions.id, {
+      onDelete: "set null",
+    }),
     errorSummary: text("error_summary"),
     cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     ...timestamps(),
   },
   (table) => ({
+    archiveRemovedAtIdx: index("set_runs_archive_removed_at_idx").on(table.archiveRemovedAt),
+    publishedSetIdx: index("set_runs_published_set_id_idx").on(table.publishedSetId),
+    requestedByIdx: index("set_runs_requested_by_idx").on(table.requestedBy),
+    sourceUrlIdx: index("set_runs_source_url_idx").on(table.sourceUrl),
     submissionIdx: index("set_runs_submission_id_idx").on(table.submissionId),
     statusIdx: index("set_runs_status_idx").on(table.status),
   }),

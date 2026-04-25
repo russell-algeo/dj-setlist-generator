@@ -29,7 +29,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const scope = resolvedSearchParams.scope === "mine" ? "mine" : "global";
   const isPersonal = scope === "mine";
 
-  const actor = isPersonal ? await getSessionActor() : null;
+  const actor = await getSessionActor();
 
   // Unauthenticated workspace request — show sign-in prompt
   if (isPersonal && !actor) {
@@ -90,6 +90,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         ? resolvedSearchParams.sort
         : "default",
     userId: actor?.userId,
+    viewerUserId: actor?.userId,
   });
 
   return <ArchiveHomeExplorer initial={payload} />;

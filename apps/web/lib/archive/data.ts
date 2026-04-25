@@ -10,6 +10,7 @@ import {
   eq,
   inArray,
   isNotNull,
+  isNull,
   ne,
   or,
   sql,
@@ -457,6 +458,7 @@ const getArtistSummaryUncached = async (
           and(
             eq(setRuns.sourceUrl, sets.sourceUrl),
             eq(setRuns.requestedBy, userId),
+            isNull(setRuns.archiveRemovedAt),
           ),
         )
         .where(eq(setArtists.artistId, artistRecord.id))
@@ -473,6 +475,7 @@ const getArtistSummaryUncached = async (
     ? and(
         eq(setRuns.status, "failed"),
         eq(setRuns.requestedBy, userId),
+        isNull(setRuns.archiveRemovedAt),
         sql`lower(${submissions.artistName}) = lower(${artistRecord.name})`,
       )
     : and(

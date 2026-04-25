@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import { GoogleSignInButton } from "@/components/google-sign-in-button";
+import { GoogleSignInButton, SpotifySignInButton } from "@/components/google-sign-in-button";
 import { getSessionActor } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 
@@ -15,6 +15,8 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const actor = await getSessionActor();
   const params = await searchParams;
   const callbackUrl = params.callbackUrl ?? "/dashboard";
+  const googleConfigured = Boolean(env.authGoogleId && env.authGoogleSecret);
+  const spotifyConfigured = Boolean(env.spotifyClientId && env.spotifyClientSecret);
 
   if (actor) {
     redirect(callbackUrl);
@@ -23,7 +25,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   return (
     <AppShell
       title="Operator sign-in"
-      eyebrow="Auth.js + Google"
+      eyebrow="Auth.js"
       description="The public archive stays open. Sign-in is only required for submissions, Spotify connections, API token minting, and worker controls."
     >
       <section className="panel-grid panel-grid--two">
@@ -39,20 +41,28 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
           </div>
         </article>
         <article className="panel">
-          <h2>Google sign-in</h2>
-          {env.authGoogleId && env.authGoogleSecret ? (
-            <>
-              <p style={{ marginBottom: 18 }}>
-                Use the seeded Google account to bootstrap the first admin session once the OAuth app is configured.
-              </p>
+          <h2>Sign in</h2>
+          {spotifyConfigured ? (
+            <div style={{ marginBottom: 12 }}>
+              <SpotifySignInButton callbackUrl={callbackUrl} />
+            </div>
+          ) : null}
+          {googleConfigured ? (
+            <div style={{ marginBottom: 12 }}>
               <GoogleSignInButton callbackUrl={callbackUrl} />
-            </>
-          ) : (
+            </div>
+          ) : null}
+          {spotifyConfigured ? (
+            <p className="muted" style={{ marginTop: 6 }}>
+              Spotify sign-in also connects playlist export permissions.
+            </p>
+          ) : null}
+          {!googleConfigured && !spotifyConfigured ? (
             <div className="empty-state">
-              Google OAuth has not been configured yet. Once the Vercel URL exists, add the Google app credentials
+              OAuth has not been configured yet. Once the Vercel URL exists, add provider credentials
               and this sign-in flow will go live.
             </div>
-          )}
+          ) : null}
         </article>
       </section>
     </AppShell>

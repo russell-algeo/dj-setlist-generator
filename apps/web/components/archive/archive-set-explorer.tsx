@@ -3,6 +3,8 @@
 
 import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { ArchiveDeleteControl, SubmittedByYouBadge } from "@/components/archive/archive-delete-control";
+import { buildArtistHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
@@ -28,6 +30,13 @@ import styles from "./archive-set-explorer.module.css";
 
 type JourneyMetric = "bpm" | "energy" | "dance";
 type ConfidenceFilter = ArchiveConfidence | "all";
+
+type SetManagement = {
+  canDeleteSet: boolean;
+  deleteImpact: string | null;
+  setWillBeRemoved: boolean;
+  submittedByViewer: boolean;
+};
 
 type UiTrack = ArchiveSetTrack & {
   densityPct: number;
@@ -594,13 +603,15 @@ type PlayerWindow = Window &
     };
     YT?: {
       Player?: new (
-        element: HTMLIFrameElement,
+        element: HTMLElement,
         config: {
+          playerVars?: Record<string, number | string>;
           events: {
             onError?: () => void;
             onReady?: () => void;
             onStateChange?: (event: { data?: number }) => void;
           };
+          videoId?: string;
         },
       ) => YouTubePlayer;
       PlayerState?: {
@@ -652,9 +663,11 @@ type SoundCloudWidget = {
 export function ArchiveSetExplorer({
   detail,
   initialQuery,
+  management,
 }: {
   detail: ArchiveSetDetail;
   initialQuery: string;
+  management: SetManagement;
 }) {
   const model = useMemo(() => buildSetModel(detail), [detail]);
   const spotifyExportCounts = useMemo(() => buildSetSpotifyExportCounts(detail), [detail]);
@@ -679,7 +692,7 @@ export function ArchiveSetExplorer({
   const heroSideRef = useRef<HTMLDivElement | null>(null);
   const heroViewportRef = useRef<HTMLDivElement | null>(null);
   const heroTrackRef = useRef<HTMLDivElement | null>(null);
-  const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const youtubeFrameRef = useRef<HTMLDivElement | null>(null);
   const soundCloudFrameRef = useRef<HTMLIFrameElement | null>(null);
   const currentTimeRef = useRef(currentTime);
   const isPlayingRef = useRef(isPlaying);
@@ -1313,7 +1326,9 @@ export function ArchiveSetExplorer({
     setScEmbedBlocked(false);
     destroyPlayers();
 
-    if (model.source.kind === "youtube" && model.source.embedId && youtubeFrameRef.current) {
+    const youtubeEmbedId = model.source.kind === "youtube" ? model.source.embedId : null;
+
+    if (youtubeEmbedId && youtubeFrameRef.current) {
       loadScript("https://www.youtube.com/iframe_api")
         .then(() => {
           const playerWindow = window as PlayerWindow;
@@ -1323,6 +1338,13 @@ export function ArchiveSetExplorer({
             }
 
             ytPlayerRef.current = new playerWindow.YT.Player(youtubeFrameRef.current, {
+              playerVars: {
+                iv_load_policy: 3,
+                modestbranding: 1,
+                playsinline: 1,
+                rel: 0,
+              },
+              videoId: youtubeEmbedId,
               events: {
                 onError: () => {
                   if (!cancelled) {
@@ -1503,6 +1525,9 @@ export function ArchiveSetExplorer({
   const progressPercent =
     detail.duration > 0 ? clamp((currentTime / detail.duration) * 100, 0, 100) : 0;
   const currentTimeLabel = formatDuration(currentTime);
+  const deleteRedirectHref = detail.artists[0]?.slug
+    ? buildArtistHref({ slug: detail.artists[0].slug })
+    : "/";
   return (
     <div
       className={styles.root}
@@ -1601,6 +1626,16 @@ export function ArchiveSetExplorer({
             </div>
 
             <div className="cluster-row">
+              {management.canDeleteSet && management.deleteImpact ? (
+                <ArchiveDeleteControl
+                  entityType="set"
+                  impact={management.deleteImpact}
+                  leadingNode={management.submittedByViewer ? <SubmittedByYouBadge /> : undefined}
+                  redirectHref={deleteRedirectHref}
+                  slug={detail.slug}
+                  title={detail.title}
+                />
+              ) : null}
               <span className="cluster-pill">{detail.durationFmt}</span>
               <span className="cluster-pill">{model.tempoSpan}</span>
               <span className="cluster-pill">Generated {model.generatedDisplay}</span>
@@ -1632,14 +1667,7 @@ export function ArchiveSetExplorer({
                 id="sourcePlayerFrame"
               >
                 {model.source.kind === "youtube" && !ytEmbedBlocked ? (
-                  <iframe
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
-                    loading="lazy"
-                    ref={youtubeFrameRef}
-                    src={`https://www.youtube-nocookie.com/embed/${model.source.embedId}?enablejsapi=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1`}
-                    title="Set source player"
-                  />
+                  <div className="youtube-player-host" ref={youtubeFrameRef} />
                 ) : null}
                 {model.source.kind === "soundcloud" && !scEmbedBlocked ? (
                   <iframe
@@ -1989,7 +2017,6 @@ export function ArchiveSetExplorer({
                           data-track-idx={String(track.idx)}
                           id={`track-${track.idx}`}
                           key={track.idx}
-                          onClick={() => jumpTo(track.start, false, true)}
                           onMouseEnter={() => setHoveredTrackIdx(track.idx)}
                           onMouseLeave={() => setHoveredTrackIdx(null)}
                         >
@@ -2042,18 +2069,9 @@ export function ArchiveSetExplorer({
                                       ? "❚❚"
                                       : "▶"}
                                 </button>
-                                <a
-                                  className="track-time-link js-track-time"
-                                  href={`#track-${track.idx}`}
-                                  onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    jumpTo(track.start, true, true);
-                                  }}
-                                  title="Jump to this timestamp"
-                                >
+                                <span className="track-time-label" title="Track timestamp">
                                   {track.startFmt}
-                                </a>
+                                </span>
                               </div>
                               <div className="track-main">
                                 <div className="track-title-row">
