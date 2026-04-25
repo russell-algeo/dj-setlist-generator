@@ -417,6 +417,7 @@ export const serializeSubmissionDetail = (
         displayStatus: getRunDisplayStatus(run.status, workflowSteps),
         errorSummary: run.errorSummary,
         publishedSetId: run.publishedSetId,
+        publishedSetSlug: run.publishedSetSlug,
         attemptCount: run.attemptCount,
         createdAt: run.createdAt.toISOString(),
         updatedAt: (run.heartbeatAt ?? run.updatedAt)?.toISOString() ?? null,

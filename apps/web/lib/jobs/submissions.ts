@@ -9,6 +9,7 @@ import {
   segmentHits,
   setRunLeases,
   setRuns,
+  sets,
   spotifyConnections,
   submissions,
   workerEvents,
@@ -288,6 +289,9 @@ export const getSubmissionDetail = async (submissionId: string) => {
   ]);
 
   const runIds = runs.map((run) => run.id);
+  const publishedSetIds = runs
+    .map((run) => run.publishedSetId)
+    .filter((id): id is string => Boolean(id));
   const [leaseRollups, segmentHitCounts] = runIds.length
     ? await Promise.all([
         db
@@ -313,6 +317,12 @@ export const getSubmissionDetail = async (submissionId: string) => {
           .groupBy(segmentHits.setRunId),
       ])
     : [[], []];
+  const publishedSetSlugs = publishedSetIds.length
+    ? await db
+        .select({ id: sets.id, slug: sets.slug })
+        .from(sets)
+        .where(inArray(sets.id, publishedSetIds))
+    : [];
 
   const leaseRollupsByRun = new Map(
     leaseRollups.map((rollup) => [rollup.setRunId, rollup] as const),
@@ -320,11 +330,17 @@ export const getSubmissionDetail = async (submissionId: string) => {
   const segmentHitsByRun = new Map(
     segmentHitCounts.map((rollup) => [rollup.setRunId, rollup] as const),
   );
+  const publishedSetSlugById = new Map(
+    publishedSetSlugs.map((set) => [set.id, set.slug] as const),
+  );
 
   return {
     submission,
     runs: runs.map((run) => ({
       ...run,
+      publishedSetSlug: run.publishedSetId
+        ? (publishedSetSlugById.get(run.publishedSetId) ?? null)
+        : null,
       leaseRollup: leaseRollupsByRun.get(run.id) ?? null,
       segmentHitRollup: segmentHitsByRun.get(run.id) ?? null,
     })),

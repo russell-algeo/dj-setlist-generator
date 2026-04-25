@@ -92,6 +92,7 @@ export type SubmissionRunDto = {
   displayStatus: string;
   errorSummary: string | null;
   publishedSetId: string | null;
+  publishedSetSlug: string | null;
   attemptCount: number;
   createdAt: string;
   updatedAt: string | null;

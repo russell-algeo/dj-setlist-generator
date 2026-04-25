@@ -33,7 +33,7 @@ export function RunRow({
   lastActivityMessage,
   onCancel,
   onRetry,
-  publishedSetId,
+  publishedSetSlug,
   retryPending,
   sourcePlatform,
   sourceUrl,
@@ -250,10 +250,10 @@ export function RunRow({
               >
                 {eventsOpen ? "Hide Recent Events" : "See Recent Events"}
               </button>
-              {status === "completed" && publishedSetId ? (
+              {status === "completed" && publishedSetSlug ? (
                 <Link
                   className={`${operatorUiStyles.buttonLink} ${operatorUiStyles.buttonGhost}`}
-                  href={`/sets/${publishedSetId}`}
+                  href={`/sets/${publishedSetSlug}`}
                 >
                   View Set in Archive →
                 </Link>

@@ -2249,7 +2249,7 @@
   }
 
   .root :global(.artist-hero-title) {
-    font-size: clamp(36px, 12vw, 72px);
+    font-size: var(--artist-hero-title-fit-size, clamp(36px, 12vw, 72px));
   }
 
   .root :global(.section-inline-actions) {
@@ -2286,7 +2286,7 @@
   }
 
   .root :global(.artist-hero-title) {
-    font-size: clamp(28px, 10vw, 52px);
+    font-size: var(--artist-hero-title-fit-size, clamp(28px, 10vw, 52px));
   }
 
   /* Change 1: hide hero side-rail scroll wheel */

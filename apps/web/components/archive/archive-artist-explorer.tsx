@@ -692,8 +692,10 @@ export function ArchiveArtistExplorer({
     const titleFits = () => {
       const visualRect = visual.getBoundingClientRect();
       const titleRect = title.getBoundingClientRect();
+      const textFitsOwnBox = title.scrollWidth <= title.clientWidth + HERO_TITLE_SAFE_PADDING;
 
       return (
+        textFitsOwnBox &&
         titleRect.top >= visualRect.top + HERO_TITLE_SAFE_PADDING &&
         titleRect.left >= visualRect.left + HERO_TITLE_SAFE_PADDING &&
         titleRect.right <= visualRect.right - HERO_TITLE_SAFE_PADDING &&

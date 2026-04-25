@@ -193,7 +193,7 @@ body.artist-page::after {
   bottom: clamp(14px, 3vw, 34px);
   margin: 0;
   max-width: calc(100% - clamp(22px, 4vw, 68px));
-  font-size: clamp(52px, 11.8vw, 170px);
+  font-size: var(--artist-hero-title-fit-size, clamp(52px, 11.8vw, 170px));
   line-height: 0.86;
   text-transform: uppercase;
   letter-spacing: -0.05em;
@@ -202,13 +202,13 @@ body.artist-page::after {
   font-weight: 800;
   z-index: 3;
   pointer-events: none;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  text-wrap: balance;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .artist-hero-title span {
   display: block;
+  white-space: nowrap;
 }
 
 .artist-hero-stats {
@@ -2574,6 +2574,61 @@ def save_artist_explorer_html(
     `;
   }
 
+  function fitArtistHeroTitle() {
+    const visual = document.getElementById('artistHeroVisual');
+    const title = visual ? visual.querySelector('.artist-hero-title') : null;
+    if (!visual || !title) return;
+
+    const fitVar = '--artist-hero-title-fit-size';
+    const minSize = 24;
+    const safePadding = 6;
+
+    const applyFontSize = (size) => {
+      if (Number.isFinite(size) && size > 0) {
+        title.style.setProperty(fitVar, `${size}px`);
+      } else {
+        title.style.removeProperty(fitVar);
+      }
+    };
+
+    const titleFits = () => {
+      const visualRect = visual.getBoundingClientRect();
+      const titleRect = title.getBoundingClientRect();
+      const textFitsOwnBox = title.scrollWidth <= title.clientWidth + safePadding;
+      return (
+        textFitsOwnBox &&
+        titleRect.top >= visualRect.top + safePadding &&
+        titleRect.left >= visualRect.left + safePadding &&
+        titleRect.right <= visualRect.right - safePadding &&
+        titleRect.bottom <= visualRect.bottom - safePadding
+      );
+    };
+
+    applyFontSize();
+    const baseSize = Number.parseFloat(window.getComputedStyle(title).fontSize);
+    if (!Number.isFinite(baseSize) || baseSize <= minSize || titleFits()) return;
+
+    let low = minSize;
+    let high = baseSize;
+    let best = minSize;
+
+    applyFontSize(minSize);
+    if (!titleFits()) return;
+
+    for (let iteration = 0; iteration < 12; iteration += 1) {
+      const mid = (low + high) / 2;
+      applyFontSize(mid);
+      if (titleFits()) {
+        best = mid;
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+
+    applyFontSize(Math.floor(best * 10) / 10);
+  }
+
   let artistHeroRailRaf = 0;
   let artistHeroRailLastTs = 0;
 
@@ -4119,11 +4174,26 @@ def save_artist_explorer_html(
   applyRecurringFilters();
   applySetFilters();
   applyAtlasSetList();
+  fitArtistHeroTitle();
   startArtistHeroRail();
+  const artistHeroVisual = document.getElementById('artistHeroVisual');
+  const artistHeroResizeObserver = typeof ResizeObserver === 'undefined'
+    ? null
+    : new ResizeObserver(() => fitArtistHeroTitle());
+  if (artistHeroVisual && artistHeroResizeObserver) {
+    artistHeroResizeObserver.observe(artistHeroVisual);
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => fitArtistHeroTitle());
+  }
   window.addEventListener('resize', startArtistHeroRail);
+  window.addEventListener('resize', fitArtistHeroTitle);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) stopArtistHeroRail();
-    else startArtistHeroRail();
+    else {
+      fitArtistHeroTitle();
+      startArtistHeroRail();
+    }
   });
 })();
   </script>
