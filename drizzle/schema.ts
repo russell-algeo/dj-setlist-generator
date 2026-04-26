@@ -249,6 +249,35 @@ export const setArtists = app.table(
   }),
 );
 
+export const setSourceLinks = app.table(
+  "set_source_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    setId: uuid("set_id")
+      .notNull()
+      .references(() => sets.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(),
+    url: text("url").notNull(),
+    title: text("title"),
+    durationSeconds: integer("duration_seconds"),
+    isPrimary: boolean("is_primary").default(false).notNull(),
+    matchConfidence: numeric("match_confidence", {
+      precision: 5,
+      scale: 4,
+    }),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`).notNull(),
+    ...timestamps(),
+  },
+  (table) => ({
+    setPlatformIdx: index("set_source_links_set_platform_idx").on(table.setId, table.platform),
+    setPlatformUrlIdx: uniqueIndex("set_source_links_set_platform_url_idx").on(
+      table.setId,
+      table.platform,
+      table.url,
+    ),
+  }),
+);
+
 export const setEntries = app.table(
   "set_entries",
   {

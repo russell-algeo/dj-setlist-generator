@@ -5,6 +5,7 @@ import {
   artists,
   setArtists,
   setEntries,
+  setSourceLinks,
   sets,
   trackArtists,
   tracks,
@@ -40,6 +41,134 @@ type UpsertArchiveSetInput = {
     relativeHtmlPath?: string;
     setRunId?: string;
   };
+};
+
+type NormalizedSourceLink = {
+  durationSeconds: number | null;
+  isPrimary: boolean;
+  matchConfidence: string | null;
+  metadata: Record<string, unknown>;
+  platform: string;
+  title: string | null;
+  url: string;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const getString = (value: unknown) =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const getNumber = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const getBoolean = (value: unknown) => (typeof value === "boolean" ? value : null);
+
+const normalizeSourceLink = (
+  value: unknown,
+  fallback: {
+    durationSeconds: number | null;
+    isPrimary: boolean;
+    platform: string | null;
+    title: string | null;
+  },
+): NormalizedSourceLink | null => {
+  const record = asRecord(value);
+  const url = getString(record.url ?? record.source_url ?? record.sourceUrl);
+  if (!url) {
+    return null;
+  }
+
+  const durationSeconds =
+    getNumber(record.duration_seconds ?? record.durationSeconds) ?? fallback.durationSeconds;
+  const matchConfidence = getNumber(record.match_confidence ?? record.matchConfidence);
+  const platform = (
+    getString(record.platform ?? record.source_platform ?? record.sourcePlatform) ??
+    fallback.platform ??
+    detectSourcePlatform(url) ??
+    "unknown"
+  ).toLowerCase();
+
+  return {
+    durationSeconds: durationSeconds == null ? null : Math.round(durationSeconds),
+    isPrimary: getBoolean(record.is_primary ?? record.isPrimary) ?? fallback.isPrimary,
+    matchConfidence: matchConfidence == null ? null : matchConfidence.toFixed(4),
+    metadata: asRecord(record.metadata),
+    platform,
+    title: getString(record.title ?? record.source_title ?? record.sourceTitle) ?? fallback.title,
+    url,
+  };
+};
+
+const buildSourceLinks = ({
+  durationSeconds,
+  mixInfo,
+  sourcePlatform,
+  sourceUrl,
+  setTitle,
+}: {
+  durationSeconds: number | null;
+  mixInfo: Record<string, unknown>;
+  sourcePlatform: string | null;
+  sourceUrl: string | null;
+  setTitle: string;
+}) => {
+  const sourceLinksInput = Array.isArray(mixInfo.source_links)
+    ? mixInfo.source_links
+    : Array.isArray(mixInfo.sourceLinks)
+      ? mixInfo.sourceLinks
+      : [];
+  const links: NormalizedSourceLink[] = [];
+
+  if (sourceUrl) {
+    links.push({
+      durationSeconds,
+      isPrimary: true,
+      matchConfidence: "1.0000",
+      metadata: { source: "canonical" },
+      platform: sourcePlatform ?? detectSourcePlatform(sourceUrl) ?? "unknown",
+      title: setTitle,
+      url: sourceUrl,
+    });
+  }
+
+  for (const sourceLinkInput of sourceLinksInput) {
+    const normalized = normalizeSourceLink(sourceLinkInput, {
+      durationSeconds,
+      isPrimary: false,
+      platform: null,
+      title: setTitle,
+    });
+    if (normalized) {
+      links.push(normalized);
+    }
+  }
+
+  const deduped = new Map<string, NormalizedSourceLink>();
+  for (const link of links) {
+    const key = `${link.platform}:${link.url}`;
+    const existing = deduped.get(key);
+    deduped.set(key, {
+      ...link,
+      isPrimary: Boolean(existing?.isPrimary || link.isPrimary),
+      metadata: {
+        ...(existing?.metadata ?? {}),
+        ...link.metadata,
+      },
+    });
+  }
+
+  return [...deduped.values()];
 };
 
 export const upsertArtist = async (
@@ -165,15 +294,17 @@ export const upsertArchiveSet = async ({
   const setSlug = existingSet?.slug ?? proposedSetSlug;
   const totalTracks = Number(payload.metadata.total_tracks ?? payload.tracks.length ?? 0);
   const uncertainTracks = Number(payload.metadata.uncertain_tracks ?? 0);
+  const durationSeconds = Math.round(Number(mixInfo.duration ?? 0));
+  const sourcePlatform = detectSourcePlatform(sourceUrl);
   const recognitionRate =
     totalTracks > 0 ? (((totalTracks - uncertainTracks) / totalTracks) * 100).toFixed(2) : null;
   const setValues = {
     slug: setSlug,
     title: setTitle,
     normalizedTitle: normalizeText(setTitle),
-    sourcePlatform: detectSourcePlatform(sourceUrl),
+    sourcePlatform,
     sourceUrl,
-    durationSeconds: Math.round(Number(mixInfo.duration ?? 0)),
+    durationSeconds,
     uploader: (mixInfo.uploader as string | undefined) ?? null,
     imageUrl: resolveSetSpecificImageUrl(mixInfo),
     recognitionRate,
@@ -213,6 +344,43 @@ export const upsertArchiveSet = async ({
       .insert(setArtists)
       .values({ setId: setRecord.id, artistId: artist.id, role: "primary" })
       .onConflictDoNothing();
+  }
+
+  const sourceLinks = buildSourceLinks({
+    durationSeconds,
+    mixInfo,
+    sourcePlatform,
+    sourceUrl,
+    setTitle,
+  });
+  for (const sourceLink of sourceLinks) {
+    await db
+      .insert(setSourceLinks)
+      .values({
+        setId: setRecord.id,
+        platform: sourceLink.platform,
+        url: sourceLink.url,
+        title: sourceLink.title,
+        durationSeconds: sourceLink.durationSeconds,
+        isPrimary: sourceLink.isPrimary,
+        matchConfidence: sourceLink.matchConfidence,
+        metadata: sourceLink.metadata,
+      })
+      .onConflictDoUpdate({
+        target: [
+          setSourceLinks.setId,
+          setSourceLinks.platform,
+          setSourceLinks.url,
+        ],
+        set: {
+          title: sourceLink.title,
+          durationSeconds: sourceLink.durationSeconds,
+          isPrimary: sourceLink.isPrimary,
+          matchConfidence: sourceLink.matchConfidence,
+          metadata: sourceLink.metadata,
+          updatedAt: new Date(),
+        },
+      });
   }
 
   await db.delete(setEntries).where(eq(setEntries.setId, setRecord.id));

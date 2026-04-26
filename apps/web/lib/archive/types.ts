@@ -52,6 +52,16 @@ export type ArchiveSetTimelineSegment = {
   timeRange: string;
 };
 
+export type ArchiveSetSourceLink = {
+  id: string | null;
+  platform: string;
+  url: string;
+  title: string | null;
+  durationSeconds: number | null;
+  isPrimary: boolean;
+  matchConfidence: number | null;
+};
+
 export type ArchiveSetDetail = {
   id: string;
   slug: string;
@@ -66,6 +76,7 @@ export type ArchiveSetDetail = {
   thumbnailUrl: string | null;
   sourcePlatform: string | null;
   sourceUrl: string | null;
+  sourceLinks: ArchiveSetSourceLink[];
   embedUrl: string | null;
   duration: number;
   durationFmt: string;

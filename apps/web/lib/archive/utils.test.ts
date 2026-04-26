@@ -33,4 +33,13 @@ describe("archive utils", () => {
       }),
     ).toContain("youtube-nocookie.com/embed/p6ozF0Y-PzU");
   });
+
+  it("builds a SoundCloud embed URL", () => {
+    expect(
+      buildArchiveEmbed({
+        sourcePlatform: "soundcloud",
+        sourceUrl: "https://soundcloud.com/platform/channel-one-boiler-room-x-notting-hill-carnival-2017-dj-set",
+      }),
+    ).toContain("w.soundcloud.com/player/");
+  });
 });

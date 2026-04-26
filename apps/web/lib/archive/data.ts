@@ -22,6 +22,7 @@ import {
   setArtists,
   setEntries,
   setRuns,
+  setSourceLinks,
   sets,
   submissions,
   tracks,
@@ -38,6 +39,7 @@ import type {
   ArchiveJourneyPoint,
   ArchiveRecurringTrack,
   ArchiveSetDetail,
+  ArchiveSetSourceLink,
   ArchiveSetTimelineSegment,
   ArchiveSetTrack,
 } from "@/lib/archive/types";
@@ -231,6 +233,46 @@ const buildJourneyPoints = (tracks: ArchiveSetTrack[]): ArchiveJourneyPoint[] =>
 const getArchiveArtistPayloadSize = (artist: ArchiveArtistSummary) =>
   Buffer.byteLength(JSON.stringify(artist), "utf8");
 
+const buildCanonicalSourceLink = (setRecord: {
+  id: string;
+  sourcePlatform: string | null;
+  sourceUrl: string | null;
+  title: string;
+  durationSeconds: number | null;
+}): ArchiveSetSourceLink | null => {
+  if (!setRecord.sourceUrl) {
+    return null;
+  }
+
+  return {
+    id: null,
+    platform: setRecord.sourcePlatform ?? "unknown",
+    url: setRecord.sourceUrl,
+    title: setRecord.title,
+    durationSeconds: setRecord.durationSeconds,
+    isPrimary: true,
+    matchConfidence: 1,
+  };
+};
+
+const uniqueSourceLinks = (links: ArchiveSetSourceLink[]) => {
+  const deduped = new Map<string, ArchiveSetSourceLink>();
+  for (const link of links) {
+    const key = `${link.platform.toLowerCase()}:${link.url}`;
+    const existing = deduped.get(key);
+    deduped.set(key, {
+      ...link,
+      isPrimary: Boolean(existing?.isPrimary || link.isPrimary),
+    });
+  }
+  return [...deduped.values()].sort((left, right) => {
+    if (left.isPrimary !== right.isPrimary) {
+      return left.isPrimary ? -1 : 1;
+    }
+    return left.platform.localeCompare(right.platform) || left.url.localeCompare(right.url);
+  });
+};
+
 const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDetail | null> => {
   const db = getDb();
   const [setRecord] = await db.select().from(sets).where(eq(sets.slug, slug)).limit(1);
@@ -239,7 +281,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
     return null;
   }
 
-  const [artistRows, entryRows] = await Promise.all([
+  const [artistRows, entryRows, sourceLinkRows] = await Promise.all([
     db
       .select({
         id: artists.id,
@@ -275,6 +317,19 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
       .leftJoin(tracks, eq(tracks.id, setEntries.trackId))
       .where(eq(setEntries.setId, setRecord.id))
       .orderBy(asc(setEntries.position)),
+    db
+      .select({
+        id: setSourceLinks.id,
+        platform: setSourceLinks.platform,
+        url: setSourceLinks.url,
+        title: setSourceLinks.title,
+        durationSeconds: setSourceLinks.durationSeconds,
+        isPrimary: setSourceLinks.isPrimary,
+        matchConfidence: setSourceLinks.matchConfidence,
+      })
+      .from(setSourceLinks)
+      .where(eq(setSourceLinks.setId, setRecord.id))
+      .orderBy(desc(setSourceLinks.isPrimary), asc(setSourceLinks.platform), asc(setSourceLinks.url)),
   ]);
 
   const trackCards = entryRows.map(mapSetTrack);
@@ -353,6 +408,20 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
     getString(asRecord(setMetadata.summary).generated_at) ??
     setRecord.updatedAt?.toISOString() ??
     null;
+  const canonicalSourceLink = buildCanonicalSourceLink(setRecord);
+  const sourceLinks = uniqueSourceLinks([
+    ...(canonicalSourceLink ? [canonicalSourceLink] : []),
+    ...sourceLinkRows.map((sourceLink): ArchiveSetSourceLink => ({
+      id: sourceLink.id,
+      platform: sourceLink.platform,
+      url: sourceLink.url,
+      title: sourceLink.title,
+      durationSeconds: sourceLink.durationSeconds,
+      isPrimary: sourceLink.isPrimary,
+      matchConfidence:
+        sourceLink.matchConfidence == null ? null : Number(sourceLink.matchConfidence),
+    })),
+  ]);
 
   return {
     id: setRecord.id,
@@ -368,6 +437,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
     thumbnailUrl: resolveSetVisualImageUrl(setRecord),
     sourcePlatform: setRecord.sourcePlatform,
     sourceUrl: setRecord.sourceUrl,
+    sourceLinks,
     embedUrl: buildArchiveEmbed({
       sourcePlatform: setRecord.sourcePlatform,
       sourceUrl: setRecord.sourceUrl,

@@ -625,6 +625,7 @@ async def publish_phase(set_run_id: str) -> str | None:
             source_metadata=source_metadata,
             require_audio=False,
         )
+        context.mix_info["source_links"] = source_metadata.get("source_links") or []
 
         enriched_tracks, mix_info = enrich_tracks(
             tracks,

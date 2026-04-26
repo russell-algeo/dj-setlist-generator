@@ -4,6 +4,7 @@ from dj_set_discovery import (
     DiscoveredSet,
     _build_search_queries,
     _deduplicate_near_duplicates,
+    _ensure_source_links,
     _filter_and_map,
     _should_reuse_cached_results,
 )
@@ -33,6 +34,11 @@ class DjSetDiscoveryDedupTests(unittest.TestCase):
         self.assertEqual(1, len(discovered_sets))
         self.assertEqual("youtube", discovered_sets[0].platform)
         self.assertEqual("https://www.youtube.com/watch?v=yt123", discovered_sets[0].url)
+        self.assertEqual(2, len(discovered_sets[0].source_links))
+        self.assertEqual(
+            {"soundcloud", "youtube"},
+            {link["platform"] for link in discovered_sets[0].source_links},
+        )
 
     def test_near_duplicate_dedup_prefers_youtube_over_soundcloud(self):
         discovered_sets = [
@@ -59,6 +65,7 @@ class DjSetDiscoveryDedupTests(unittest.TestCase):
         self.assertEqual(1, len(deduped_sets))
         self.assertEqual("youtube", deduped_sets[0].platform)
         self.assertEqual("https://www.youtube.com/watch?v=yt123", deduped_sets[0].url)
+        self.assertEqual(2, len(deduped_sets[0].source_links))
 
     def test_filter_and_map_accepts_alias_matches(self):
         raw_results = [
@@ -109,6 +116,84 @@ class DjSetDiscoveryDedupTests(unittest.TestCase):
 
         self.assertEqual(1, len(deduped_sets))
         self.assertEqual("youtube", deduped_sets[0].platform)
+
+    def test_near_duplicate_dedup_accepts_exact_duration_low_similarity_match(self):
+        discovered_sets = [
+            DiscoveredSet(
+                url="https://www.youtube.com/watch?v=ra500",
+                title="RA.500 Ben UFO",
+                platform="youtube",
+                event="Resident Advisor",
+                year="2015",
+                duration_minutes=120,
+            ),
+            DiscoveredSet(
+                url="https://soundcloud.com/resident-advisor/ra500-ben-ufo",
+                title="Ben UFO - Resident Advisor 500 (28 December 2015)",
+                platform="soundcloud",
+                event="Resident Advisor",
+                year="2015",
+                duration_minutes=120,
+            ),
+        ]
+
+        deduped_sets = _deduplicate_near_duplicates(discovered_sets, ["Ben UFO"])
+
+        self.assertEqual(1, len(deduped_sets))
+        self.assertEqual("youtube", deduped_sets[0].platform)
+        self.assertEqual(2, len(deduped_sets[0].source_links))
+        alternate = next(link for link in deduped_sets[0].source_links if not link["is_primary"])
+        self.assertEqual("near_exact_duration_context_match", alternate["metadata"]["discovery_match"]["reason"])
+
+    def test_near_duplicate_dedup_keeps_manual_review_grade_false_positive_separate(self):
+        discovered_sets = [
+            DiscoveredSet(
+                url="https://www.youtube.com/watch?v=epic028",
+                title="Raresh Rush - Epic 028 (Home Mix)",
+                platform="youtube",
+                event="Resident Advisor",
+                year=None,
+                duration_minutes=None,
+            ),
+            DiscoveredSet(
+                url="https://soundcloud.com/example/raresh-rush-epic-021",
+                title="Raresh Rush - EPIC 021 (Studio Mix)",
+                platform="soundcloud",
+                event="Example",
+                year=None,
+                duration_minutes=61,
+            ),
+        ]
+
+        deduped_sets = _deduplicate_near_duplicates(discovered_sets, ["Raresh"])
+        _ensure_source_links(deduped_sets)
+
+        self.assertEqual(2, len(deduped_sets))
+        self.assertTrue(all(len(item.source_links) == 1 for item in deduped_sets))
+
+    def test_near_duplicate_dedup_rejects_same_series_different_explicit_date(self):
+        discovered_sets = [
+            DiscoveredSet(
+                url="https://www.youtube.com/watch?v=chez1",
+                title="Chez Damier @TheLotRadio 08-01-2025",
+                platform="youtube",
+                event="The Lot Radio",
+                year="2025",
+                duration_minutes=120,
+            ),
+            DiscoveredSet(
+                url="https://soundcloud.com/thelotradio/chez-damier-the-lot-radio-08",
+                title="Chez Damier @ The Lot Radio 08-24-2025",
+                platform="soundcloud",
+                event="The Lot Radio",
+                year="2025",
+                duration_minutes=122,
+            ),
+        ]
+
+        deduped_sets = _deduplicate_near_duplicates(discovered_sets, ["Chez Damier"])
+
+        self.assertEqual(2, len(deduped_sets))
 
     def test_cache_reuse_rejects_alias_mismatches(self):
         self.assertTrue(

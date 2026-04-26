@@ -13,6 +13,7 @@ import type {
   ArchiveConfidence,
   ArchiveJourneyPoint,
   ArchiveSetDetail,
+  ArchiveSetSourceLink,
   ArchiveSetTrack,
 } from "@/lib/archive/types";
 import {
@@ -70,22 +71,30 @@ type SetSourceModel =
     embedId: string;
     frameClass: string;
     kind: "youtube";
+    label: string;
+    platform: string;
     sourceUrl: string;
   }
   | {
     embedSrc: string;
     frameClass: string;
     kind: "soundcloud";
+    label: string;
+    platform: string;
     sourceUrl: string;
   }
   | {
     frameClass: string;
     kind: "fallback";
+    label: string;
+    platform: string;
     sourceUrl: string;
   }
   | {
     frameClass: string;
     kind: "missing";
+    label: string;
+    platform: string;
     sourceUrl: null;
   };
 
@@ -197,9 +206,26 @@ const formatGeneratedAt = (value: string | null) => {
   return value.replace("T", " ").replace(/:\d{2}(?:\.\d+)?Z?$/u, "").slice(0, 16);
 };
 
-const detectSourceModel = (detail: ArchiveSetDetail): SetSourceModel => {
-  const sourceUrl = detail.sourceUrl;
-  const normalizedPlatform = String(detail.sourcePlatform ?? "").toLowerCase();
+const sourceLabel = (platform: string) => {
+  const normalized = platform.toLowerCase();
+  if (normalized === "youtube" || normalized === "youtu") {
+    return "YouTube";
+  }
+  if (normalized === "soundcloud") {
+    return "SoundCloud";
+  }
+  return "Source";
+};
+
+const detectSourceModel = ({
+  platform,
+  sourceUrl,
+}: {
+  platform: string | null;
+  sourceUrl: string | null;
+}): SetSourceModel => {
+  const normalizedPlatform = String(platform ?? "").toLowerCase();
+  const label = sourceLabel(normalizedPlatform);
   const embedId = sourceUrl ? extractYouTubeId(sourceUrl) : null;
 
   if ((normalizedPlatform === "youtube" || normalizedPlatform === "youtu" || embedId) && sourceUrl) {
@@ -207,6 +233,8 @@ const detectSourceModel = (detail: ArchiveSetDetail): SetSourceModel => {
       embedId: embedId ?? "",
       frameClass: "source-player-frame is-youtube",
       kind: "youtube",
+      label: "YouTube",
+      platform: "youtube",
       sourceUrl,
     };
   }
@@ -219,6 +247,8 @@ const detectSourceModel = (detail: ArchiveSetDetail): SetSourceModel => {
         "&show_user=true&show_reposts=false&show_teaser=false&visual=false",
       frameClass: "source-player-frame is-soundcloud",
       kind: "soundcloud",
+      label: "SoundCloud",
+      platform: "soundcloud",
       sourceUrl,
     };
   }
@@ -227,6 +257,8 @@ const detectSourceModel = (detail: ArchiveSetDetail): SetSourceModel => {
     return {
       frameClass: "source-player-frame is-fallback",
       kind: "fallback",
+      label,
+      platform: normalizedPlatform || "unknown",
       sourceUrl,
     };
   }
@@ -234,8 +266,49 @@ const detectSourceModel = (detail: ArchiveSetDetail): SetSourceModel => {
   return {
     frameClass: "source-player-frame is-fallback",
     kind: "missing",
+    label: "Source",
+    platform: "unknown",
     sourceUrl: null,
   };
+};
+
+const buildSourceOptions = (detail: ArchiveSetDetail) => {
+  const canonicalLink: ArchiveSetSourceLink | null = detail.sourceUrl
+    ? {
+      id: null,
+      platform: detail.sourcePlatform ?? "unknown",
+      url: detail.sourceUrl,
+      title: detail.title,
+      durationSeconds: detail.duration,
+      isPrimary: true,
+      matchConfidence: 1,
+    }
+    : null;
+  const rawLinks = [...(canonicalLink ? [canonicalLink] : []), ...(detail.sourceLinks ?? [])];
+  const deduped = new Map<string, ArchiveSetSourceLink>();
+
+  for (const link of rawLinks) {
+    const platform = link.platform.toLowerCase();
+    if (platform !== "youtube" && platform !== "youtu" && platform !== "soundcloud") {
+      continue;
+    }
+    const key = `${platform}:${link.url}`;
+    const existing = deduped.get(key);
+    deduped.set(key, {
+      ...link,
+      isPrimary: Boolean(existing?.isPrimary || link.isPrimary),
+    });
+  }
+
+  return [...deduped.values()]
+    .sort((left, right) => {
+      if (left.isPrimary !== right.isPrimary) {
+        return left.isPrimary ? -1 : 1;
+      }
+      return left.platform.localeCompare(right.platform) || left.url.localeCompare(right.url);
+    })
+    .map((link) => detectSourceModel({ platform: link.platform, sourceUrl: link.url }))
+    .filter((source) => source.kind === "youtube" || source.kind === "soundcloud");
 };
 
 const buildUiTrack = (track: ArchiveSetTrack, duration: number): UiTrack => {
@@ -315,7 +388,6 @@ const buildSetModel = (detail: ArchiveSetDetail) => {
     heroTitleMinSize: titleLength >= 68 ? 20 : titleLength >= 44 ? 22 : 24,
     heroTitleVariant: titleLength >= 68 ? "xlong" : titleLength >= 44 ? "long" : "default",
     identificationRate: formatStaticPercent(detail.stats.identifiedTracks, tracks.length),
-    source: detectSourceModel(detail),
     tempoSpan:
       bpmValues.length > 0
         ? `${Math.min(...bpmValues).toFixed(0)} - ${Math.max(...bpmValues).toFixed(0)} BPM`
@@ -670,6 +742,27 @@ export function ArchiveSetExplorer({
   management: SetManagement;
 }) {
   const model = useMemo(() => buildSetModel(detail), [detail]);
+  const sourceOptions = useMemo(() => buildSourceOptions(detail), [detail]);
+  const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | null>(null);
+  const activeSource = useMemo(() => {
+    if (sourceOptions.length === 0) {
+      return detectSourceModel({
+        platform: detail.sourcePlatform,
+        sourceUrl: detail.sourceUrl,
+      });
+    }
+
+    return (
+      sourceOptions.find((source) => source.sourceUrl === selectedSourceUrl) ??
+      sourceOptions.find((source) => source.sourceUrl === detail.sourceUrl) ??
+      sourceOptions[0]!
+    );
+  }, [detail.sourcePlatform, detail.sourceUrl, selectedSourceUrl, sourceOptions]);
+  const sourceSwitcherSources = useMemo(() => {
+    const soundCloudSource = sourceOptions.find((source) => source.kind === "soundcloud");
+    const youtubeSource = sourceOptions.find((source) => source.kind === "youtube");
+    return [soundCloudSource, youtubeSource].filter((source): source is SetSourceModel => Boolean(source?.sourceUrl));
+  }, [sourceOptions]);
   const spotifyExportCounts = useMemo(() => buildSetSpotifyExportCounts(detail), [detail]);
   const [query, setQuery] = useState(initialQuery);
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
@@ -714,6 +807,25 @@ export function ArchiveSetExplorer({
   }, [initialQuery]);
 
   useEffect(() => {
+    setSelectedSourceUrl(null);
+  }, [detail.id]);
+
+  useEffect(() => {
+    if (sourceOptions.length < 2 || typeof window === "undefined") {
+      return;
+    }
+
+    const soundCloudSource = sourceOptions.find((source) => source.kind === "soundcloud");
+    const youtubeSource = sourceOptions.find((source) => source.kind === "youtube");
+    if (!soundCloudSource || !youtubeSource) {
+      return;
+    }
+
+    const prefersSoundCloud = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+    setSelectedSourceUrl((prefersSoundCloud ? soundCloudSource : youtubeSource).sourceUrl);
+  }, [detail.id, sourceOptions]);
+
+  useEffect(() => {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
 
@@ -737,7 +849,7 @@ export function ArchiveSetExplorer({
   const journeyView = buildJourneyViewModel(detail.journeyPoints, activeMetrics, detail.duration);
   const activeTrack = model.tracks.find((track) => track.idx === activeIdx) ?? null;
   const showDock =
-    (model.source.kind === "youtube" || model.source.kind === "soundcloud") &&
+    (activeSource.kind === "youtube" || activeSource.kind === "soundcloud") &&
     !ytEmbedBlocked &&
     !scEmbedBlocked;
 
@@ -941,7 +1053,7 @@ export function ArchiveSetExplorer({
     }
 
     if (
-      model.source.kind === "youtube" &&
+      activeSource.kind === "youtube" &&
       ytPlayerRef.current?.getCurrentTime &&
       ytPlayerRef.current?.getPlayerState
     ) {
@@ -965,7 +1077,7 @@ export function ArchiveSetExplorer({
       return;
     }
 
-    if (model.source.kind === "soundcloud" && scWidgetRef.current?.getPosition) {
+    if (activeSource.kind === "soundcloud" && scWidgetRef.current?.getPosition) {
       scWidgetRef.current.isPaused?.((paused) => {
         const nextPlaying = !paused;
         if (nextPlaying !== isPlayingRef.current) {
@@ -1028,7 +1140,7 @@ export function ArchiveSetExplorer({
     updateFromTime(safeSeconds, scroll);
     seekLockUntilRef.current = Date.now() + 1500;
 
-    if (model.source.kind === "youtube") {
+    if (activeSource.kind === "youtube") {
       if (ytEmbedBlocked) {
         setIsPlaying(false);
         return;
@@ -1052,7 +1164,7 @@ export function ArchiveSetExplorer({
       return;
     }
 
-    if (model.source.kind === "soundcloud") {
+    if (activeSource.kind === "soundcloud") {
       if (scEmbedBlocked) {
         setIsPlaying(false);
         return;
@@ -1090,7 +1202,7 @@ export function ArchiveSetExplorer({
   };
 
   const pausePlayer = () => {
-    if (model.source.kind === "youtube" && ytPlayerRef.current?.pauseVideo && playerReadyRef.current) {
+    if (activeSource.kind === "youtube" && ytPlayerRef.current?.pauseVideo && playerReadyRef.current) {
       setIsPlaying(false);
       stopFallbackTick();
       ytPlayerRef.current.pauseVideo();
@@ -1098,7 +1210,7 @@ export function ArchiveSetExplorer({
       return;
     }
 
-    if (model.source.kind === "soundcloud" && scWidgetRef.current?.pause && playerReadyRef.current) {
+    if (activeSource.kind === "soundcloud" && scWidgetRef.current?.pause && playerReadyRef.current) {
       setIsPlaying(false);
       stopFallbackTick();
       scWidgetRef.current.pause();
@@ -1111,7 +1223,7 @@ export function ArchiveSetExplorer({
   };
 
   const playPlayer = () => {
-    if (model.source.kind === "youtube") {
+    if (activeSource.kind === "youtube") {
       if (ytEmbedBlocked) {
         setIsPlaying(false);
         return;
@@ -1126,7 +1238,7 @@ export function ArchiveSetExplorer({
       return;
     }
 
-    if (model.source.kind === "soundcloud") {
+    if (activeSource.kind === "soundcloud") {
       if (scEmbedBlocked) {
         setIsPlaying(false);
         return;
@@ -1147,7 +1259,7 @@ export function ArchiveSetExplorer({
 
   const togglePlay = () => {
     if (
-      model.source.kind === "youtube" &&
+      activeSource.kind === "youtube" &&
       ytPlayerRef.current?.getPlayerState &&
       playerReadyRef.current
     ) {
@@ -1168,7 +1280,7 @@ export function ArchiveSetExplorer({
     }
 
     if (
-      model.source.kind === "soundcloud" &&
+      activeSource.kind === "soundcloud" &&
       scWidgetRef.current?.isPaused &&
       playerReadyRef.current
     ) {
@@ -1325,8 +1437,9 @@ export function ArchiveSetExplorer({
     setYtEmbedBlocked(false);
     setScEmbedBlocked(false);
     destroyPlayers();
+    setIsPlaying(false);
 
-    const youtubeEmbedId = model.source.kind === "youtube" ? model.source.embedId : null;
+    const youtubeEmbedId = activeSource.kind === "youtube" ? activeSource.embedId : null;
 
     if (youtubeEmbedId && youtubeFrameRef.current) {
       loadScript("https://www.youtube.com/iframe_api")
@@ -1398,7 +1511,7 @@ export function ArchiveSetExplorer({
         });
     }
 
-    if (model.source.kind === "soundcloud" && soundCloudFrameRef.current) {
+    if (activeSource.kind === "soundcloud" && soundCloudFrameRef.current) {
       loadScript("https://w.soundcloud.com/player/api.js")
         .then(() => {
           const playerWindow = window as PlayerWindow;
@@ -1480,7 +1593,7 @@ export function ArchiveSetExplorer({
       destroyPlayers();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.id, model.source.kind, model.source.sourceUrl]);
+  }, [detail.id, activeSource.kind, activeSource.sourceUrl]);
 
   useEffect(() => {
     const handleHash = () => {
@@ -1660,21 +1773,21 @@ export function ArchiveSetExplorer({
             <div className="panel timeline-journey-panel" id="timeline">
               <div
                 className={joinClasses(
-                  model.source.frameClass,
+                  activeSource.frameClass,
                   ytEmbedBlocked && "is-youtube-error",
                   scEmbedBlocked && "is-embed-error",
                 )}
                 id="sourcePlayerFrame"
               >
-                {model.source.kind === "youtube" && !ytEmbedBlocked ? (
+                {activeSource.kind === "youtube" && !ytEmbedBlocked ? (
                   <div className="youtube-player-host" ref={youtubeFrameRef} />
                 ) : null}
-                {model.source.kind === "soundcloud" && !scEmbedBlocked ? (
+                {activeSource.kind === "soundcloud" && !scEmbedBlocked ? (
                   <iframe
                     allow="autoplay"
                     loading="lazy"
                     ref={soundCloudFrameRef}
-                    src={model.source.embedSrc}
+                    src={activeSource.embedSrc}
                     title="Set source player"
                   />
                 ) : null}
@@ -1688,17 +1801,17 @@ export function ArchiveSetExplorer({
                     SoundCloud embedded player requires validation in this browser. Use Open Source to continue.
                   </div>
                 ) : null}
-                {model.source.kind === "fallback" ? (
+                {activeSource.kind === "fallback" ? (
                   <div className="source-player-fallback">
                     Embedded playback is unavailable for this source.
                     <br />
-                    <a href={model.source.sourceUrl} rel="noopener" target="_blank">
+                    <a href={activeSource.sourceUrl} rel="noopener" target="_blank">
                       Open original source
                     </a>
                     .
                   </div>
                 ) : null}
-                {model.source.kind === "missing" ? (
+                {activeSource.kind === "missing" ? (
                   <div className="source-player-fallback">No source URL available for this set.</div>
                 ) : null}
               </div>
@@ -1735,7 +1848,7 @@ export function ArchiveSetExplorer({
                             clearActiveTrack();
                             return;
                           }
-                          jumpTo(track.start, ytEmbedBlocked && model.source.kind === "youtube", true);
+                          jumpTo(track.start, ytEmbedBlocked && activeSource.kind === "youtube", true);
                         }}
                         onMouseEnter={(event) => {
                           setHoveredTrackIdx(track.idx);
@@ -1791,8 +1904,23 @@ export function ArchiveSetExplorer({
               </div>
 
               <div className="workspace-actions">
-                {model.source.sourceUrl ? (
-                  <a className="source-player-open" href={model.source.sourceUrl} rel="noopener" target="_blank">
+                {sourceSwitcherSources.length >= 2 ? (
+                  <div aria-label="Choose playback source" className="source-switcher" role="group">
+                    {sourceSwitcherSources.map((source) => (
+                      <button
+                        aria-pressed={activeSource.sourceUrl === source.sourceUrl}
+                        className={joinClasses("source-switcher-option", activeSource.sourceUrl === source.sourceUrl && "active")}
+                        key={source.sourceUrl}
+                        onClick={() => setSelectedSourceUrl(source.sourceUrl)}
+                        type="button"
+                      >
+                        {source.kind === "soundcloud" ? "Soundcloud" : "Youtube"}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {activeSource.sourceUrl ? (
+                  <a className="source-player-open" href={activeSource.sourceUrl} rel="noopener" target="_blank">
                     Open Source
                   </a>
                 ) : null}
@@ -2040,9 +2168,9 @@ export function ArchiveSetExplorer({
                                   data-time={track.start.toFixed(3)}
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    if (ytEmbedBlocked && model.source.kind === "youtube") {
+                                    if (ytEmbedBlocked && activeSource.kind === "youtube") {
                                       jumpTo(track.start, true, false);
-                                      const sourceLink = buildSourceLinkAt(model.source, track.start);
+                                      const sourceLink = buildSourceLinkAt(activeSource, track.start);
                                       if (sourceLink) {
                                         window.open(sourceLink, "_blank", "noopener");
                                       }
@@ -2057,13 +2185,13 @@ export function ArchiveSetExplorer({
                                     jumpTo(track.start, true, true);
                                   }}
                                   title={
-                                    ytEmbedBlocked && model.source.kind === "youtube"
+                                    ytEmbedBlocked && activeSource.kind === "youtube"
                                       ? "Open source on YouTube at this timestamp"
                                       : "Play / pause at this track"
                                   }
                                   type="button"
                                 >
-                                  {ytEmbedBlocked && model.source.kind === "youtube"
+                                  {ytEmbedBlocked && activeSource.kind === "youtube"
                                     ? "YT"
                                     : isActive && isPlaying
                                       ? "❚❚"

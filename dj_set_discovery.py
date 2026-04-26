@@ -8,9 +8,10 @@ import json
 import re
 import subprocess
 from collections import defaultdict
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional, Sequence
 from config import Config
+from source_link_matcher import ACCEPTED, MatchSource, score_source_match
 
 
 @dataclass
@@ -22,6 +23,7 @@ class DiscoveredSet:
     event: Optional[str]
     year: Optional[str]
     duration_minutes: Optional[int]
+    source_links: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'DiscoveredSet':
@@ -32,6 +34,7 @@ class DiscoveredSet:
             event=data.get("event"),
             year=data.get("year"),
             duration_minutes=data.get("duration_minutes"),
+            source_links=data.get("source_links") or [],
         )
 
 
@@ -58,6 +61,7 @@ class DjSetDiscoverer:
             if _should_reuse_cached_results(cached.get("search_terms"), self._search_names):
                 print(f"  Loaded {len(cached['sets'])} previously discovered sets")
                 sets = [DiscoveredSet.from_dict(s) for s in cached["sets"]]
+                _ensure_source_links(sets)
                 self._print_results(sets)
                 return sets
             print("  Ignoring cached discovery results because the alias set changed")
@@ -88,6 +92,7 @@ class DjSetDiscoverer:
         print(f"  After filtering: {len(sets)} DJ sets")
 
         sets = _deduplicate_near_duplicates(sets, self._search_names)
+        _ensure_source_links(sets)
 
         if not sets:
             print("  No DJ sets found matching criteria.")
@@ -306,6 +311,28 @@ def _extract_episode_numbers(title: str) -> set[int]:
     return nums
 
 
+def _cross_platform_duplicate_decision(
+    a: DiscoveredSet,
+    b: DiscoveredSet,
+    search_names: Sequence[str],
+) -> dict:
+    return score_source_match(
+        MatchSource(
+            title=a.title,
+            platform=a.platform,
+            duration_seconds=a.duration_minutes * 60 if a.duration_minutes else None,
+            uploader=a.event,
+        ),
+        MatchSource(
+            title=b.title,
+            platform=b.platform,
+            duration_seconds=b.duration_minutes * 60 if b.duration_minutes else None,
+            uploader=b.event,
+        ),
+        artist_names=search_names,
+    )
+
+
 def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, search_names: Sequence[str]) -> bool:
     """Return True if a and b are near-duplicates (same set, differently titled).
 
@@ -329,6 +356,9 @@ def _are_near_duplicates(a: DiscoveredSet, b: DiscoveredSet, search_names: Seque
          (including "podcast"), if both titles have non-empty, fully disjoint
          token sets they describe different events → not duplicates.
     """
+    if a.platform != b.platform:
+        return _cross_platform_duplicate_decision(a, b, search_names)["status"] == ACCEPTED
+
     # Rule 1: duration required and within window
     if a.duration_minutes is None or b.duration_minutes is None:
         return False
@@ -393,6 +423,101 @@ def _platform_preference(platform: str) -> int:
     return _PLATFORM_PREFERENCE.get(platform, len(_PLATFORM_PREFERENCE))
 
 
+def _source_link_for(
+    discovered_set: DiscoveredSet,
+    *,
+    is_primary: bool = False,
+    match_decision: Optional[dict] = None,
+) -> dict:
+    """Return a serializable source-link record for a discovered set."""
+    metadata = {
+        "event": discovered_set.event,
+        "year": discovered_set.year,
+        "duration_minutes": discovered_set.duration_minutes,
+    }
+    if match_decision and not is_primary:
+        metadata["discovery_match"] = match_decision
+    return {
+        "url": discovered_set.url,
+        "platform": discovered_set.platform,
+        "title": discovered_set.title,
+        "duration_seconds": discovered_set.duration_minutes * 60 if discovered_set.duration_minutes else None,
+        "is_primary": is_primary,
+        "match_confidence": 1.0 if is_primary else (match_decision or {}).get("score"),
+        "metadata": metadata,
+    }
+
+
+def _source_links_for(
+    winner: DiscoveredSet,
+    members: Sequence[DiscoveredSet],
+    match_decisions: Optional[dict[str, dict]] = None,
+) -> list[dict]:
+    """Build de-duplicated source links for a winner and its matched alternates."""
+    links: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for member in [winner, *members]:
+        member_decision = (match_decisions or {}).get(member.url)
+        member_links = member.source_links or [
+            _source_link_for(
+                member,
+                is_primary=member.url == winner.url,
+                match_decision=member_decision,
+            )
+        ]
+        for member_link in member_links:
+            platform = str(member_link.get("platform") or member.platform)
+            url = str(member_link.get("url") or member.url)
+            key = (platform, url)
+            if key in seen:
+                continue
+            seen.add(key)
+            is_primary = url == winner.url
+            link_decision = None if is_primary else (match_decisions or {}).get(url)
+            metadata = dict(member_link.get("metadata") or {})
+            if link_decision:
+                metadata["discovery_match"] = link_decision
+            links.append(
+                {
+                    **member_link,
+                    "platform": platform,
+                    "url": url,
+                    "is_primary": is_primary,
+                    "match_confidence": (
+                        1.0
+                        if is_primary
+                        else link_decision.get("score")
+                        if link_decision
+                        else member_link.get("match_confidence")
+                    ),
+                    "metadata": metadata,
+                }
+            )
+
+    primary_links = [link for link in links if link.get("is_primary")]
+    best_alternates: dict[str, dict] = {}
+    for link in links:
+        if link.get("is_primary"):
+            continue
+        platform = str(link.get("platform") or "")
+        current = best_alternates.get(platform)
+        current_score = float(current.get("match_confidence") or 0) if current else -1.0
+        link_score = float(link.get("match_confidence") or 0)
+        if current is None or link_score > current_score:
+            best_alternates[platform] = link
+
+    return primary_links + [
+        best_alternates[platform]
+        for platform in sorted(best_alternates, key=_platform_preference)
+    ]
+
+
+def _ensure_source_links(sets: Sequence[DiscoveredSet]) -> None:
+    for discovered_set in sets:
+        if not discovered_set.source_links:
+            discovered_set.source_links = _source_links_for(discovered_set, [])
+
+
 def _deduplicate_near_duplicates(
     sets: list[DiscoveredSet], search_names: Sequence[str]
 ) -> list[DiscoveredSet]:
@@ -445,26 +570,39 @@ def _deduplicate_near_duplicates(
         # Prefer YouTube, then SoundCloud; otherwise keep first by original order.
         winner_idx = min(members, key=lambda idx: (_platform_preference(sets[idx].platform), idx))
         winner = sets[winner_idx]
-        winners.append(winner)
         w_plat = winner.platform.upper()[:2]
 
         # Clique check: only drop members that directly match the winner.
         # Members that reached this cluster only transitively are evicted back
         # to singleton status to prevent false-positive removals.
         dropped_count = 0
+        grouped_alternates: list[DiscoveredSet] = []
+        grouped_decisions: dict[str, dict] = {}
         for idx in members:
             if idx == winner_idx:
                 continue
             candidate = sets[idx]
             plat = candidate.platform.upper()[:2]
-            if _are_near_duplicates(candidate, winner, search_names):
+            if candidate.platform != winner.platform:
+                decision = _cross_platform_duplicate_decision(winner, candidate, search_names)
+                is_duplicate = decision["status"] == ACCEPTED
+            else:
+                decision = {}
+                is_duplicate = _are_near_duplicates(candidate, winner, search_names)
+            if is_duplicate:
+                grouped_alternates.append(candidate)
+                if decision:
+                    grouped_decisions[candidate.url] = decision
                 removed_count += 1
                 dropped_count += 1
                 print(f"  [dedup] Dropped [{plat}] '{candidate.title}'")
             else:
+                candidate.source_links = _source_links_for(candidate, [])
                 winners.append(candidate)
                 print(f"  [dedup] Evicted [{plat}] '{candidate.title}' (transitive-only match)")
 
+        winner.source_links = _source_links_for(winner, grouped_alternates, grouped_decisions)
+        winners.append(winner)
         print(f"  [dedup] Kept    [{w_plat}] '{winner.title}' (dropped {dropped_count} duplicate(s))")
 
     if removed_count:
@@ -589,10 +727,32 @@ def _filter_and_map(raw_results: list[dict], search_names: Sequence[str]) -> lis
         title_norm = _normalize(title)
         if title_norm in seen_titles:
             existing_idx = seen_titles[title_norm]
-            if _platform_preference(discovered_set.platform) < _platform_preference(sets[existing_idx].platform):
-                sets[existing_idx] = discovered_set
+            existing_set = sets[existing_idx]
+            if existing_set.platform != discovered_set.platform:
+                decision = _cross_platform_duplicate_decision(existing_set, discovered_set, search_names)
+                if decision["status"] != ACCEPTED:
+                    discovered_set.source_links = _source_links_for(discovered_set, [])
+                    seen_titles[f"{title_norm}:{len(sets)}"] = len(sets)
+                    sets.append(discovered_set)
+                    continue
+                source_links = _source_links_for(
+                    existing_set,
+                    [discovered_set],
+                    {discovered_set.url: decision},
+                )
+                if _platform_preference(discovered_set.platform) < _platform_preference(existing_set.platform):
+                    sets[existing_idx] = discovered_set
+                    source_links = _source_links_for(
+                        discovered_set,
+                        [existing_set],
+                        {existing_set.url: _cross_platform_duplicate_decision(discovered_set, existing_set, search_names)},
+                    )
+                sets[existing_idx].source_links = source_links
+            # Same-platform exact title collisions are usually duplicate search
+            # results from overlapping queries; keep the first URL.
             continue
 
+        discovered_set.source_links = _source_links_for(discovered_set, [])
         seen_titles[title_norm] = len(sets)
         sets.append(discovered_set)
 

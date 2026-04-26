@@ -62,35 +62,52 @@ def run(submission_id: str) -> None:
         execute("delete from ops.discovery_candidates where submission_id = %s", (submission_id,))
 
         for candidate in sets:
-            execute(
-                """
-                insert into ops.discovery_candidates (
-                  submission_id,
-                  source_url,
-                  source_platform,
-                  source_title,
-                  duration_seconds,
-                  status,
-                  metadata
-                )
-                values (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    submission_id,
-                    candidate.url,
-                    candidate.platform,
-                    candidate.title,
-                    candidate.duration_minutes * 60 if candidate.duration_minutes else None,
-                    "accepted",
-                    json_value(
-                        {
-                            "event": candidate.event,
-                            "year": candidate.year,
-                            "duration_minutes": candidate.duration_minutes,
-                        }
+            source_links = candidate.source_links or [
+                {
+                    "url": candidate.url,
+                    "platform": candidate.platform,
+                    "title": candidate.title,
+                    "duration_seconds": candidate.duration_minutes * 60 if candidate.duration_minutes else None,
+                    "is_primary": True,
+                    "metadata": {
+                        "event": candidate.event,
+                        "year": candidate.year,
+                        "duration_minutes": candidate.duration_minutes,
+                    },
+                }
+            ]
+            for source_link in source_links:
+                is_primary = source_link.get("url") == candidate.url
+                execute(
+                    """
+                    insert into ops.discovery_candidates (
+                      submission_id,
+                      source_url,
+                      source_platform,
+                      source_title,
+                      duration_seconds,
+                      status,
+                      metadata
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        submission_id,
+                        source_link.get("url") or candidate.url,
+                        source_link.get("platform") or candidate.platform,
+                        source_link.get("title") or candidate.title,
+                        source_link.get("duration_seconds")
+                        or (candidate.duration_minutes * 60 if candidate.duration_minutes else None),
+                        "accepted" if is_primary else "alternate",
+                        json_value(
+                            {
+                                **dict(source_link.get("metadata") or {}),
+                                "primary_source_url": candidate.url,
+                                "is_primary": is_primary,
+                            }
+                        ),
                     ),
-                ),
-            )
+                )
 
         if not sets:
             mark_submission(submission_id, status="failed", error_summary="No DJ sets discovered")
@@ -155,6 +172,7 @@ def run(submission_id: str) -> None:
                             "event": candidate.event,
                             "year": candidate.year,
                             "duration_minutes": candidate.duration_minutes,
+                            "source_links": candidate.source_links,
                         }
                     ),
                     candidate.url,
