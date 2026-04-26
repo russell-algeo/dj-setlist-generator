@@ -98,6 +98,8 @@ type SetSourceModel =
     sourceUrl: null;
   };
 
+type EmbeddableSetSourceModel = Extract<SetSourceModel, { kind: "youtube" | "soundcloud" }>;
+
 type TimelineTooltipState = {
   badge: string;
   badgeColor: string;
@@ -761,7 +763,9 @@ export function ArchiveSetExplorer({
   const sourceSwitcherSources = useMemo(() => {
     const soundCloudSource = sourceOptions.find((source) => source.kind === "soundcloud");
     const youtubeSource = sourceOptions.find((source) => source.kind === "youtube");
-    return [soundCloudSource, youtubeSource].filter((source): source is SetSourceModel => Boolean(source?.sourceUrl));
+    return [soundCloudSource, youtubeSource].filter(
+      (source): source is EmbeddableSetSourceModel => Boolean(source?.sourceUrl),
+    );
   }, [sourceOptions]);
   const spotifyExportCounts = useMemo(() => buildSetSpotifyExportCounts(detail), [detail]);
   const [query, setQuery] = useState(initialQuery);
