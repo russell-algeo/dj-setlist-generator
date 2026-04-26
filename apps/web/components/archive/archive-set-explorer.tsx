@@ -789,7 +789,7 @@ export function ArchiveSetExplorer({
   const heroSideRef = useRef<HTMLDivElement | null>(null);
   const heroViewportRef = useRef<HTMLDivElement | null>(null);
   const heroTrackRef = useRef<HTMLDivElement | null>(null);
-  const youtubeFrameRef = useRef<HTMLDivElement | null>(null);
+  const youtubeHostRef = useRef<HTMLDivElement | null>(null);
   const soundCloudFrameRef = useRef<HTMLIFrameElement | null>(null);
   const currentTimeRef = useRef(currentTime);
   const isPlayingRef = useRef(isPlaying);
@@ -1444,17 +1444,22 @@ export function ArchiveSetExplorer({
     setIsPlaying(false);
 
     const youtubeEmbedId = activeSource.kind === "youtube" ? activeSource.embedId : null;
+    const youtubeHost = youtubeHostRef.current;
 
-    if (youtubeEmbedId && youtubeFrameRef.current) {
+    if (youtubeEmbedId && youtubeHost) {
+      youtubeHost.replaceChildren();
+      const youtubePlayerElement = document.createElement("div");
+      youtubeHost.appendChild(youtubePlayerElement);
+
       loadScript("https://www.youtube.com/iframe_api")
         .then(() => {
           const playerWindow = window as PlayerWindow;
           const boot = () => {
-            if (cancelled || !playerWindow.YT?.Player || !youtubeFrameRef.current) {
+            if (cancelled || !playerWindow.YT?.Player || !youtubePlayerElement.isConnected) {
               return;
             }
 
-            ytPlayerRef.current = new playerWindow.YT.Player(youtubeFrameRef.current, {
+            ytPlayerRef.current = new playerWindow.YT.Player(youtubePlayerElement, {
               playerVars: {
                 iv_load_policy: 3,
                 modestbranding: 1,
@@ -1595,6 +1600,7 @@ export function ArchiveSetExplorer({
     return () => {
       cancelled = true;
       destroyPlayers();
+      youtubeHost?.replaceChildren();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id, activeSource.kind, activeSource.sourceUrl]);
@@ -1784,7 +1790,7 @@ export function ArchiveSetExplorer({
                 id="sourcePlayerFrame"
               >
                 {activeSource.kind === "youtube" && !ytEmbedBlocked ? (
-                  <div className="youtube-player-host" ref={youtubeFrameRef} />
+                  <div className="youtube-player-host" ref={youtubeHostRef} />
                 ) : null}
                 {activeSource.kind === "soundcloud" && !scEmbedBlocked ? (
                   <iframe
