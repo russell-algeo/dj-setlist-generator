@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const callbackUrl =
     requestUrl.searchParams.get("callbackUrl") ??
-    new URL("/dashboard/settings?spotify=connected", request.url).toString();
+    new URL("/?spotify=connected", request.url).toString();
   const signInUrl = new URL("/api/auth/signin/spotify", request.url);
   signInUrl.searchParams.set("callbackUrl", callbackUrl);
 

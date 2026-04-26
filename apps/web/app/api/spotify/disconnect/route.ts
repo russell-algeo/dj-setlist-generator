@@ -9,7 +9,7 @@ import { spotifyConnections } from "@/lib/db/schema";
 const db = getDb();
 
 export async function POST(request: Request) {
-  const actor = await requireSessionActor("/dashboard/settings");
+  const actor = await requireSessionActor("/");
 
   await db
     .update(spotifyConnections)
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  return NextResponse.redirect(new URL("/dashboard/settings?spotify=disconnected", request.url), {
+  return NextResponse.redirect(new URL("/?spotify=disconnected", request.url), {
     status: 303,
   });
 }

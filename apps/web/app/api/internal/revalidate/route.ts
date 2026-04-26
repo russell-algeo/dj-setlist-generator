@@ -18,7 +18,7 @@ export async function POST(request: Request) {
           .split(/\r?\n|,/u)
           .map((value) => value.trim())
           .filter(Boolean)
-    : ["/", "/artists", "/sets"];
+    : ["/"];
   const tags = body.tags
     ? Array.isArray(body.tags)
       ? body.tags.map((value) => String(value))

@@ -39,11 +39,11 @@ export const getSessionActor = async (): Promise<SessionActor | null> => {
   };
 };
 
-export const requireSessionActor = async (callbackUrl = "/dashboard") => {
+export const requireSessionActor = async (callbackUrl = "/") => {
   const actor = await getSessionActor();
 
   if (!actor) {
-    redirect(`/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`);
+    redirect(`/?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   }
 
   return actor;

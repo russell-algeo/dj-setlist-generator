@@ -10,7 +10,7 @@ import { encryptSecret } from "@/lib/security/encryption";
 const db = getDb();
 
 export async function GET(request: Request) {
-  const actor = await requireSessionActor("/dashboard/settings");
+  const actor = await requireSessionActor("/");
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -19,15 +19,15 @@ export async function GET(request: Request) {
   const expectedState = cookieStore.get("spotify_oauth_state")?.value;
 
   if (error) {
-    return NextResponse.redirect(new URL("/dashboard/settings?spotify=error", request.url));
+    return NextResponse.redirect(new URL("/?spotify=error", request.url));
   }
 
   if (!code || !state || !expectedState || state !== expectedState) {
-    return NextResponse.redirect(new URL("/dashboard/settings?spotify=invalid_state", request.url));
+    return NextResponse.redirect(new URL("/?spotify=invalid_state", request.url));
   }
 
   if (!env.spotifyClientId || !env.spotifyClientSecret || !env.spotifyRedirectUri) {
-    return NextResponse.redirect(new URL("/dashboard/settings?spotify=missing_config", request.url));
+    return NextResponse.redirect(new URL("/?spotify=missing_config", request.url));
   }
 
   const tokenResponse = await fetch("https://accounts.spotify.com/api/token", {
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
   });
 
   if (!tokenResponse.ok) {
-    return NextResponse.redirect(new URL("/dashboard/settings?spotify=token_error", request.url));
+    return NextResponse.redirect(new URL("/?spotify=token_error", request.url));
   }
 
   const tokenPayload = (await tokenResponse.json()) as {
@@ -60,7 +60,7 @@ export async function GET(request: Request) {
   });
 
   if (!profileResponse.ok) {
-    return NextResponse.redirect(new URL("/dashboard/settings?spotify=profile_error", request.url));
+    return NextResponse.redirect(new URL("/?spotify=profile_error", request.url));
   }
 
   const profile = (await profileResponse.json()) as {
@@ -99,5 +99,5 @@ export async function GET(request: Request) {
 
   cookieStore.delete("spotify_oauth_state");
 
-  return NextResponse.redirect(new URL("/dashboard/settings?spotify=connected", request.url));
+  return NextResponse.redirect(new URL("/?spotify=connected", request.url));
 }

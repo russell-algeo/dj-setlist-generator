@@ -30,8 +30,8 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 const userColumns = {
-  "--operator-columns": "minmax(220px, 2fr) 120px 120px 110px 90px 120px",
-  "--operator-min-width": "860px",
+  "--operator-columns": "minmax(220px, 2fr) 120px 120px 110px 90px",
+  "--operator-min-width": "740px",
 } as CSSProperties;
 
 const activityColumns = {
@@ -119,7 +119,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     <span>Submissions</span>
                     <span>Admin</span>
                     <span>Spotify</span>
-                    <span>View As</span>
                   </div>
 
                   {users.map((user) => {
@@ -161,18 +160,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           </form>
                         </div>
                         <span className={operatorUiStyles.dim}>—</span>
-                        <div>
-                          {!isSelf ? (
-                            <Link
-                              className={`${operatorUiStyles.buttonLink} ${operatorUiStyles.buttonGhost}`}
-                              href={`/artists?viewAs=${user.userId}`}
-                            >
-                              View As →
-                            </Link>
-                          ) : (
-                            <span className={operatorUiStyles.dim}>—</span>
-                          )}
-                        </div>
                       </div>
                     );
                   })}

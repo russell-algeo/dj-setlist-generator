@@ -279,25 +279,6 @@ export const setEntries = app.table(
   }),
 );
 
-export const sitePages = app.table(
-  "site_pages",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    path: text("path").notNull(),
-    pageType: text("page_type").notNull(),
-    artistId: uuid("artist_id").references(() => artists.id, { onDelete: "cascade" }),
-    setId: uuid("set_id").references(() => sets.id, { onDelete: "cascade" }),
-    slug: text("slug"),
-    html: text("html").notNull(),
-    metadata: jsonb("metadata").default(sql`'{}'::jsonb`).notNull(),
-    ...timestamps(),
-  },
-  (table) => ({
-    pathIdx: uniqueIndex("site_pages_path_idx").on(table.path),
-    slugIdx: index("site_pages_slug_idx").on(table.slug),
-  }),
-);
-
 export const submissions = ops.table(
   "submissions",
   {

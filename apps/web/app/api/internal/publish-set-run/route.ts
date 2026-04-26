@@ -8,7 +8,6 @@ import { readRequestBody } from "@/lib/http/request-body";
 
 const publishPayloadSchema = z.object({
   setRunId: z.string().uuid(),
-  html: z.string().min(1).optional(),
   payload: z.object({
     mix_info: z.record(z.string(), z.unknown()),
     metadata: z.record(z.string(), z.unknown()),

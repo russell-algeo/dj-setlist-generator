@@ -89,7 +89,7 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.redirect(new URL(`/dashboard/jobs/${submission.id}`, request.url), {
+  return NextResponse.redirect(new URL(`/submissions/${submission.id}`, request.url), {
     status: 303,
   });
 }

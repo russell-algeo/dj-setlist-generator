@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import os
 import socket
-from pathlib import Path
 
 from psycopg.errors import ForeignKeyViolation
 
@@ -75,8 +74,6 @@ def _publish_set_run_payload(
     *,
     set_run_id: str,
     payload: dict[str, object],
-    html: str,
-    legacy_path: str,
 ) -> dict[str, object]:
     import requests
 
@@ -90,8 +87,6 @@ def _publish_set_run_payload(
         json={
             "setRunId": set_run_id,
             "payload": payload,
-            "html": html,
-            "legacyPath": legacy_path,
         },
         timeout=120,
     )
@@ -125,22 +120,6 @@ def _detect_source_platform(source_url: str) -> str:
     if "youtu" in source_url:
         return "youtube"
     return "unknown"
-
-
-def _output_legacy_path(output_dir: Path, filename: str) -> str:
-    html_path = output_dir / f"{filename}.html"
-    output_root = Path(Config.OUTPUT_DIR)
-
-    try:
-        relative_path = html_path.relative_to(output_root)
-    except ValueError:
-        if html_path.is_absolute() and output_root.is_absolute():
-            relative_path = html_path.resolve().relative_to(output_root.resolve())
-        else:
-            relative_path = html_path
-
-    relative_string = relative_path.as_posix().lstrip("/")
-    return "/" if relative_string == "index.html" else f"/{relative_string}"
 
 
 def _load_run(set_run_id: str) -> dict[str, object]:
@@ -280,7 +259,6 @@ def _mark_published_with_errors(
                     "published": {
                         "set_id": published_row.get("setId"),
                         "slug": published_row.get("slug"),
-                        "legacy_path": published_row.get("legacyPath"),
                     }
                 },
             )
@@ -297,7 +275,6 @@ def _mark_published_with_errors(
         details = {
             "published_set_id": resolved_published_set_id,
             "slug": published_row.get("slug"),
-            "legacy_path": published_row.get("legacyPath"),
         }
     elif resolved_published_set_id:
         details = {"published_set_id": resolved_published_set_id}
@@ -512,7 +489,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
 
 async def publish_phase(set_run_id: str) -> str | None:
     from worker.pipeline.aggregate import build_tracks_from_recognitions, recognitions_from_segment_hits
-    from worker.pipeline.enrich import build_set_payload, enrich_tracks, render_set_page_html
+    from worker.pipeline.enrich import build_set_payload, enrich_tracks
     from worker.pipeline.recognize import restore_set_context
 
     run_row = _load_run(set_run_id)
@@ -555,7 +532,7 @@ async def publish_phase(set_run_id: str) -> str | None:
                 message="Post-publish bookkeeping retry completed",
                 details={"published_set_id": existing_published_set_id},
             )
-            _revalidate(["/", "/artists", "/sets", "/archive-preview"], ["archive:home", "archive:lists"])
+            _revalidate(["/", "/archive-preview"], ["archive:home", "archive:lists"])
             mark_set_run(set_run_id, status="completed", stage="published")
         except Exception as bookkeeping_error:
             _mark_published_with_errors(
@@ -660,7 +637,7 @@ async def publish_phase(set_run_id: str) -> str | None:
             status="publishing",
             stage="publishing",
             event_type="set_run.publish.started",
-            message="Publishing canonical set data and legacy page",
+            message="Publishing canonical set data",
         )
 
         _assert_workflow_ownership(set_run_id)
@@ -668,16 +645,9 @@ async def publish_phase(set_run_id: str) -> str | None:
             enriched_tracks=enriched_tracks,
             mix_info=mix_info,
         )
-        set_html, filename = render_set_page_html(
-            output_dir=context.checkpoint_manager.output_dir,
-            enriched_tracks=enriched_tracks,
-            mix_info=mix_info,
-        )
         published_row = _publish_set_run_payload(
             set_run_id=set_run_id,
             payload=set_payload,
-            html=set_html,
-            legacy_path=_output_legacy_path(context.checkpoint_manager.output_dir, filename),
         )
     except PublishSetRunPartialError as error:
         _mark_published_with_errors(run_row, error, published_row=error.published_row)
@@ -716,7 +686,6 @@ async def publish_phase(set_run_id: str) -> str | None:
                 "published": {
                     "set_id": published_row.get("setId"),
                     "slug": published_row.get("slug"),
-                    "legacy_path": published_row.get("legacyPath"),
                 }
             },
         )
@@ -729,14 +698,11 @@ async def publish_phase(set_run_id: str) -> str | None:
             details={
                 "published_set_id": published_set_id,
                 "slug": published_row.get("slug"),
-                "legacy_path": published_row.get("legacyPath"),
             },
         )
 
         revalidate_paths = [
             "/",
-            "/artists",
-            "/sets",
             "/archive-preview",
         ]
         revalidate_tags = ["archive:home", "archive:lists"]
@@ -753,10 +719,6 @@ async def publish_phase(set_run_id: str) -> str | None:
                 f"/archive-preview/artists/{artist_slug}",
             ])
             revalidate_tags.append(f"archive:artist:{artist_slug}")
-        for artist_path in published_row.get("affectedArtistLegacyPaths", []) or []:
-            revalidate_paths.append(str(artist_path))
-        if published_row.get("legacyPath"):
-            revalidate_paths.append(str(published_row["legacyPath"]))
         _revalidate(sorted(set(revalidate_paths)), sorted(set(revalidate_tags)))
     except Exception as bookkeeping_error:
         _mark_published_with_errors(run_row, bookkeeping_error, published_row=published_row)

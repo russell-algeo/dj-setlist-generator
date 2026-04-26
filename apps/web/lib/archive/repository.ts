@@ -18,7 +18,7 @@ import {
 
 import { getDb } from "@/lib/db/client";
 import { normalizeText } from "@/lib/archive/import-helpers";
-import { artists, setArtists, setRuns, sets, sitePages } from "@/lib/db/schema";
+import { artists, setArtists, setRuns, sets } from "@/lib/db/schema";
 
 const clampPage = (page: number) => (Number.isFinite(page) && page > 0 ? Math.floor(page) : 1);
 
@@ -207,22 +207,4 @@ export const listSets = async ({
     pageSize,
     totalItems: Number(countRow?.value ?? 0),
   };
-};
-
-export const getLatestImportedPages = async () => {
-  const db = getDb();
-
-  const pages = await db
-    .select({
-      path: sitePages.path,
-      pageType: sitePages.pageType,
-      slug: sitePages.slug,
-      updatedAt: sitePages.updatedAt,
-    })
-    .from(sitePages)
-    .where(and(isNotNull(sitePages.slug), isNotNull(sitePages.updatedAt)))
-    .orderBy(desc(sitePages.updatedAt))
-    .limit(12);
-
-  return pages;
 };

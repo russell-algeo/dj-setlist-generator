@@ -43,5 +43,5 @@ export async function POST(request: Request, { params }: Params) {
   if (!updated) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  return NextResponse.redirect(new URL("/dashboard/admin", request.url), { status: 303 });
+  return NextResponse.redirect(new URL("/admin", request.url), { status: 303 });
 }

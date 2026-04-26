@@ -25,7 +25,7 @@ const revoke = async (request: Request, tokenId: string) => {
     return NextResponse.json({ ok: true });
   }
 
-  return NextResponse.redirect(new URL("/dashboard/tokens", request.url), {
+  return NextResponse.redirect(new URL("/", request.url), {
     status: 303,
   });
 };

@@ -34,6 +34,17 @@ function getSpotifyConnectionCallbackUrl() {
   return url.toString();
 }
 
+function getSignInCallbackUrl() {
+  const url = new URL(window.location.href);
+  const callbackUrl = url.searchParams.get("callbackUrl");
+
+  if (callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")) {
+    return callbackUrl;
+  }
+
+  return window.location.href;
+}
+
 export function AuthDropdown() {
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
@@ -95,7 +106,7 @@ export function AuthDropdown() {
                 <button
                   className={styles.providerAction}
                   key={provider}
-                  onClick={() => signIn(provider, { callbackUrl: window.location.href })}
+                  onClick={() => signIn(provider, { callbackUrl: getSignInCallbackUrl() })}
                   type="button"
                 >
                   {SIGN_IN_PROVIDER_LABELS[provider]}

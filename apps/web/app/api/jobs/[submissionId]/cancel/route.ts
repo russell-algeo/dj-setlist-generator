@@ -38,7 +38,7 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json(result);
   }
 
-  return NextResponse.redirect(new URL(`/dashboard/jobs/${submissionId}`, request.url), {
+  return NextResponse.redirect(new URL(`/submissions/${submissionId}`, request.url), {
     status: 303,
   });
 }

@@ -455,8 +455,6 @@ const revalidateArchiveDeletion = async ({
   }
 
   revalidatePath("/");
-  revalidatePath("/artists");
-  revalidatePath("/sets");
 };
 
 export const deleteArchiveSetBySlug = async ({

@@ -44,6 +44,8 @@ checkpoints/
 output/
 .playwright-mcp/
 apps/web/.next.corrupt-*/
+apps/web/public/**/*.html
+apps/web/public/.archive-manifest.json
 
 # Local scratch files from ad-hoc debugging
 /artist_profile_image

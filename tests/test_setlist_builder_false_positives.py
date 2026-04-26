@@ -51,12 +51,14 @@ def _make_rec(
     shazam_track_id=None,
     recognized=True,
     timestamp=None,
+    raw_data=None,
 ):
     return SimpleNamespace(
         timestamp=float(segment_index * 15 if timestamp is None else timestamp),
         track_title=title,
         artist=artist,
         shazam_track_id=shazam_track_id,
+        raw_data=raw_data,
         recognized=recognized,
         segment_index=segment_index,
     )
@@ -71,6 +73,7 @@ def _make_track(
     confidence="LOW",
     detection_count=None,
     shazam_track_id="known-track",
+    isrc=None,
     cluster_density=0.5,
     cluster_span=None,
 ):
@@ -92,6 +95,7 @@ def _make_track(
         confidence=confidence,
         detection_count=detection_count,
         shazam_track_id=shazam_track_id,
+        isrc=isrc,
         cluster_density=cluster_density,
         cluster_span=cluster_span,
         segment_indices=segment_indices,
