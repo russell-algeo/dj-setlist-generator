@@ -788,7 +788,7 @@ def _set_css() -> str:
 }
 
 .track-explorer-panel {
-  margin-top: 0;
+  margin-top: 10px;
 }
 
 .track-head {
@@ -1932,7 +1932,6 @@ def render_set_explorer_html(
       <div class="section-inner">
         <div class="section-head">
           <h2 class="set-workspace-heading">Playback Workspace</h2>
-          <p>Start at the embedded source, scan timeline confidence, and inspect full track evidence below.</p>
         </div>
         <div class="panel timeline-journey-panel" id="timeline">
           <div class="{source_player_frame_class}" id="sourcePlayerFrame">
@@ -1970,7 +1969,6 @@ def render_set_explorer_html(
           </div>
           <div class="timeline-track-atlas" id="tracks">
             <h2 class="panel-title">Track Atlas</h2>
-            <p class="panel-sub">Search, slice, and inspect evidence for each detected track.</p>
             <div class="track-explorer-panel">
           <div class="track-head">
             <div class="controls">

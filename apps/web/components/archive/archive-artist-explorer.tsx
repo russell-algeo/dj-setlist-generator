@@ -1457,10 +1457,7 @@ export function ArchiveArtistExplorer({
           <div className="section-inner">
             <div className="section-head">
               <h2 className="recurring-heading">Recurring Tracks</h2>
-              <p>
-                Index-style track cards with set evidence and source deep links. Threshold and search
-                controls are available below.
-              </p>
+              <p>Repeated track appearances across this artist’s sets.</p>
             </div>
 
             <div className="recurring-controls">
@@ -1574,7 +1571,7 @@ export function ArchiveArtistExplorer({
           <div className="section-inner">
             <div className="section-head">
               <h2>Set Atlas</h2>
-              <p>Pick a set on the left, then investigate genres, labels, track artists, and tracks with evidence in the right pane.</p>
+              <p>Select sets to compare and drill into the right-side taxonomy atlas to investigate genres, labels, artists, and tracks.</p>
             </div>
 
             <div className="atlas-layout">
@@ -2138,7 +2135,7 @@ export function ArchiveArtistExplorer({
           <div className="section-inner">
             <div className="section-head">
               <h2>Set Explorer</h2>
-              <p>Search and compare sets, then inspect shared tracks through expanded tracklists and deep links.</p>
+              <p>Search across all of this artist&apos;s sets and inspect tracklists.</p>
             </div>
 
             <div className="set-panel">

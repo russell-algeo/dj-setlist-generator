@@ -794,6 +794,7 @@ export function ArchiveSetExplorer({
   const currentTimeRef = useRef(currentTime);
   const isPlayingRef = useRef(isPlaying);
   const activeIdxRef = useRef<number | null>(activeIdx);
+  const playbackStartedRef = useRef(false);
   const playerReadyRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
   const pendingAutoplayRef = useRef(false);
@@ -852,6 +853,7 @@ export function ArchiveSetExplorer({
   const visibleTrackIds = new Set(confidenceFilteredTracks.map((track) => track.idx));
   const journeyView = buildJourneyViewModel(detail.journeyPoints, activeMetrics, detail.duration);
   const activeTrack = model.tracks.find((track) => track.idx === activeIdx) ?? null;
+  const dockTrack = activeTrack ?? model.tracks[0] ?? null;
   const showDock =
     (activeSource.kind === "youtube" || activeSource.kind === "soundcloud") &&
     !ytEmbedBlocked &&
@@ -969,7 +971,7 @@ export function ArchiveSetExplorer({
         }
       }
     }
-    return best ?? model.tracks[model.tracks.length - 1] ?? null;
+    return best ?? model.tracks[0] ?? null;
   };
 
   const scrollToTrack = (idx: number) => {
@@ -983,9 +985,22 @@ export function ArchiveSetExplorer({
     setActiveIdx(null);
   };
 
+  const selectTrackAtTime = (track: UiTrack, scroll: boolean) => {
+    currentTimeRef.current = track.start;
+    activeIdxRef.current = track.idx;
+    setCurrentTime(track.start);
+    setActiveIdx(track.idx);
+    if (scroll) {
+      scrollToTrack(track.idx);
+    }
+  };
+
   const updateFromTime = (seconds: number, scroll: boolean) => {
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
     setCurrentTime(safeSeconds);
+    if (!playbackStartedRef.current) {
+      return;
+    }
     const track = findTrackByTime(safeSeconds);
     if (track) {
       setActiveIdx(track.idx);
@@ -1055,6 +1070,9 @@ export function ArchiveSetExplorer({
 
   const updateFromPolledTime = (seconds: number) => {
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
+    if (!playbackStartedRef.current) {
+      return;
+    }
     setCurrentTime(safeSeconds);
     if (Date.now() < seekLockUntilRef.current) {
       return;
@@ -1155,6 +1173,7 @@ export function ArchiveSetExplorer({
 
   const seekPlayer = (seconds: number, scroll: boolean, autoplay: boolean) => {
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
+    playbackStartedRef.current = true;
     updateFromTime(safeSeconds, scroll);
     seekLockUntilRef.current = Date.now() + 1500;
 
@@ -1241,7 +1260,10 @@ export function ArchiveSetExplorer({
   };
 
   const playPlayer = () => {
+    playbackStartedRef.current = true;
+    updateFromTime(currentTimeRef.current, false);
     publishNowPlayingMetadata();
+    const startAtSeconds = clamp(currentTimeRef.current, 0, Math.max(0, detail.duration));
 
     if (activeSource.kind === "youtube") {
       if (ytEmbedBlocked) {
@@ -1250,8 +1272,12 @@ export function ArchiveSetExplorer({
       }
 
       if (ytPlayerRef.current?.playVideo && playerReadyRef.current) {
+        if (startAtSeconds > 0 && ytPlayerRef.current.seekTo) {
+          ytPlayerRef.current.seekTo(startAtSeconds, true);
+        }
         ytPlayerRef.current.playVideo();
       } else {
+        pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
       }
       setIsPlaying(true);
@@ -1265,8 +1291,12 @@ export function ArchiveSetExplorer({
       }
 
       if (scWidgetRef.current?.play && playerReadyRef.current) {
+        if (startAtSeconds > 0 && scWidgetRef.current.seekTo) {
+          scWidgetRef.current.seekTo(startAtSeconds * 1000);
+        }
         scWidgetRef.current.play();
       } else {
+        pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
       }
       setIsPlaying(true);
@@ -1360,10 +1390,11 @@ export function ArchiveSetExplorer({
   };
 
   useEffect(() => {
-    updateFromTime(0, false);
+    playbackStartedRef.current = false;
+    setActiveIdx(null);
+    setCurrentTime(0);
     setIsPlaying(false);
     setJourneyOpen(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id]);
 
   useEffect(() => {
@@ -1499,6 +1530,7 @@ export function ArchiveSetExplorer({
                   const YT = playerWindow.YT;
                   const playing = event?.data === YT?.PlayerState?.PLAYING;
                   if (playing) {
+                    playbackStartedRef.current = true;
                     publishNowPlayingMetadata();
                     setIsPlaying(true);
                     startPlayerPoll();
@@ -1564,6 +1596,7 @@ export function ArchiveSetExplorer({
             markSoundCloudReady();
           });
           widget.bind(playerWindow.SC.Widget.Events.PLAY, () => {
+            playbackStartedRef.current = true;
             publishNowPlayingMetadata();
             setIsPlaying(true);
             startPlayerPoll();
@@ -1637,7 +1670,8 @@ export function ArchiveSetExplorer({
 
       const track = model.tracks.find((entry) => entry.idx === idx);
       if (track) {
-        updateFromTime(track.start, false);
+        playbackStartedRef.current = false;
+        selectTrackAtTime(track, false);
       } else {
         setActiveIdx(idx);
       }
@@ -1826,7 +1860,6 @@ export function ArchiveSetExplorer({
           <div className="section-inner">
             <div className="section-head">
               <h2 className="set-workspace-heading">Playback Workspace</h2>
-              <p>Start at the embedded source, scan timeline confidence, and inspect full track evidence below.</p>
             </div>
 
             <div className="panel timeline-journey-panel" id="timeline">
@@ -2134,7 +2167,6 @@ export function ArchiveSetExplorer({
 
               <div className="timeline-track-atlas" id="tracks">
                 <h2 className="panel-title">Track Atlas</h2>
-                <p className="panel-sub">Search, slice, and inspect evidence for each detected track.</p>
                 <div className="track-explorer-panel">
                   <div className="track-head">
                     <div className="controls track-atlas-controls">
@@ -2473,26 +2505,26 @@ export function ArchiveSetExplorer({
         <div className="dock" id="playerDock">
           <div className="dock-grid">
             <div className="dock-art-frame">
-              {activeTrack?.albumArt ? (
+              {dockTrack?.albumArt ? (
                 <img
                   alt=""
                   className={joinClasses("dock-art", "visible")}
                   id="dockArt"
                   loading="lazy"
-                  src={activeTrack.albumArt}
+                  src={dockTrack.albumArt}
                 />
               ) : null}
-              <div className={joinClasses("dock-art-fallback", activeTrack?.albumArt && "hidden")} id="dockArtFallback">
+              <div className={joinClasses("dock-art-fallback", dockTrack?.albumArt && "hidden")} id="dockArtFallback">
                 ♫
               </div>
             </div>
             <div className="dock-now">
               <div>
                 <div className="dock-track" id="dockTrack">
-                  {activeTrack?.title ?? "No active track"}
+                  {dockTrack?.title ?? "No tracks available"}
                 </div>
                 <div className="dock-artist" id="dockArtist">
-                  {activeTrack?.artist ?? "—"}
+                  {dockTrack?.artist ?? "—"}
                 </div>
               </div>
             </div>

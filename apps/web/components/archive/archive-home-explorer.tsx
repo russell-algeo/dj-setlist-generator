@@ -68,7 +68,7 @@ type NetworkZoom = { scale: number; panX: number; panY: number };
 
 const CONF_FILTER_LEVELS: ConfidenceFilter[] = ["all", "HIGH", "MEDIUM", "LOW"];
 const THRESHOLD_LEVELS = [1, 2, 3, 5, 8, 12] as const;
-const DEFAULT_NETWORK_MIN_SCORE = 5;
+const DEFAULT_NETWORK_MIN_SCORE = 7.5;
 const NETWORK_EDGE_VISUAL_CURVE = 0.6;
 const NETWORK_EDGE_ALPHA_FLOOR = 0.18;
 const NETWORK_EDGE_ALPHA_RANGE = 0.58;
@@ -1892,7 +1892,7 @@ export function ArchiveHomeExplorer({
           <div className="section-inner">
             <div className="section-head">
               <h2>ARTIST ATLAS</h2>
-              <p>Select artists to compare and drill into the right-side taxonomy atlas for evidence.</p>
+              <p>Select artists to compare and drill into the right-side taxonomy atlas to investigate genres, labels, artists, and tracks.</p>
             </div>
 
             <div className="atlas-layout">
@@ -2354,6 +2354,7 @@ export function ArchiveHomeExplorer({
                     max="100"
                     min="0"
                     onChange={(event) => setNetworkMinScore(Number(event.target.value))}
+                    step="0.5"
                     style={{ margin: 2 }}
                     type="range"
                     value={networkMinScore}
@@ -2720,7 +2721,7 @@ export function ArchiveHomeExplorer({
             <div className="section-head">
               <h2>FULL SET LIBRARY</h2>
               <p>
-                Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
+                Search across all processed sets, filter by artist, and inspect tracklists.
               </p>
             </div>
 

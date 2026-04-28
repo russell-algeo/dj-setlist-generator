@@ -2264,7 +2264,7 @@ def save_artist_explorer_html(
       <div class="section-inner">
         <div class="section-head">
           <h2 class="recurring-heading">Recurring Tracks</h2>
-          <p>Index-style track cards with set evidence and source deep links. Threshold and search controls are available below.</p>
+          <p>Repeated track appearances across this artist’s sets.</p>
         </div>
         <div class="recurring-controls">
           <div class="controls-row">__RECURRING_FILTER_BTNS__ __RECURRING_CONF_FILTER_BTNS__</div>
@@ -2279,7 +2279,7 @@ def save_artist_explorer_html(
       <div class="section-inner">
         <div class="section-head">
           <h2>Set Atlas</h2>
-          <p>Pick a set on the left, then investigate genres, labels, track artists, and tracks with evidence in the right pane.</p>
+          <p>Select sets to compare and drill into the right-side taxonomy atlas to investigate genres, labels, artists, and tracks.</p>
         </div>
 
         <div class="atlas-layout">
@@ -2343,7 +2343,7 @@ def save_artist_explorer_html(
       <div class="section-inner">
         <div class="section-head">
           <h2>Set Explorer</h2>
-          <p>Search and compare sets, then inspect shared tracks through expanded tracklists and deep links.</p>
+          <p>Search across all of this artist's sets and inspect tracklists.</p>
         </div>
 
         <div class="set-panel">

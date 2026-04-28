@@ -2157,7 +2157,7 @@ def _render_html(data: dict) -> str:
         <div class="section-head">
           <h2>ARTIST ATLAS</h2>
           <p>
-            Select artists to compare and drill into the right-side taxonomy atlas for evidence.
+            Select artists to compare and drill into the right-side taxonomy atlas to investigate genres, labels, artists, and tracks.
           </p>
         </div>
 
@@ -2228,7 +2228,7 @@ def _render_html(data: dict) -> str:
           <div class="network-controls">
             <div class="control">
               <label for="networkMinScore">Min Connection Score</label>
-              <input id="networkMinScore" type="range" min="0" max="100" value="10" />
+              <input id="networkMinScore" type="range" min="0" max="100" value="15" />
             </div>
             <div class="control">
               <label for="networkSearch">Find Artist</label>
@@ -2277,7 +2277,7 @@ def _render_html(data: dict) -> str:
         <div class="section-head">
           <h2>FULL SET LIBRARY</h2>
           <p>
-            Search across all processed sets, filter by artist, and inspect set internals with deep links to exact track anchors.
+            Search across all processed sets, filter by artist, and inspect tracklists.
           </p>
         </div>
 
@@ -2353,7 +2353,7 @@ def _render_html(data: dict) -> str:
       taxonomyPage: 0,
       taxonomyActiveName: null,
       taxonomyEvidencePage: 0,
-      networkMinScore: 10,
+      networkMinScore: 15,
       networkSearch: '',
       networkSelectedArtists: new Set(),
       pair: null,
