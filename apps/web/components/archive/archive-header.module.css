@@ -203,16 +203,16 @@
 
     flex-direction: row;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .mobileMenuPanel::-webkit-scrollbar {
-    display: none;
+    overflow: visible;
   }
 
   .mobileMenuPanel > * {
     flex: 0 0 auto;
+  }
+
+  .mobileMenuPanel > *:last-child {
+    margin-left: auto;
   }
 }
