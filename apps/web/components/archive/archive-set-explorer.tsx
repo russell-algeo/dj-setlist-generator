@@ -856,6 +856,20 @@ export function ArchiveSetExplorer({
     (activeSource.kind === "youtube" || activeSource.kind === "soundcloud") &&
     !ytEmbedBlocked &&
     !scEmbedBlocked;
+  const artistNames = detail.artists.map((artist) => artist.name).join(", ");
+  const nowPlayingArtist = detail.artistName ?? (artistNames || "Set Signal Archive");
+
+  const publishNowPlayingMetadata = () => {
+    if (typeof window === "undefined" || !("mediaSession" in navigator) || !("MediaMetadata" in window)) {
+      return;
+    }
+
+    navigator.mediaSession.metadata = new window.MediaMetadata({
+      album: "Set Signal Archive",
+      artist: nowPlayingArtist,
+      title: detail.title,
+    });
+  };
 
   const stopHeroRail = () => {
     if (heroRailRafRef.current != null) {
@@ -1227,6 +1241,8 @@ export function ArchiveSetExplorer({
   };
 
   const playPlayer = () => {
+    publishNowPlayingMetadata();
+
     if (activeSource.kind === "youtube") {
       if (ytEmbedBlocked) {
         setIsPlaying(false);
@@ -1483,6 +1499,7 @@ export function ArchiveSetExplorer({
                   const YT = playerWindow.YT;
                   const playing = event?.data === YT?.PlayerState?.PLAYING;
                   if (playing) {
+                    publishNowPlayingMetadata();
                     setIsPlaying(true);
                     startPlayerPoll();
                     pollPlayerTime();
@@ -1547,6 +1564,7 @@ export function ArchiveSetExplorer({
             markSoundCloudReady();
           });
           widget.bind(playerWindow.SC.Widget.Events.PLAY, () => {
+            publishNowPlayingMetadata();
             setIsPlaying(true);
             startPlayerPoll();
             pollPlayerTime();
@@ -1636,6 +1654,37 @@ export function ArchiveSetExplorer({
     return () => window.removeEventListener("hashchange", handleHash);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("mediaSession" in navigator) || !("MediaMetadata" in window)) {
+      return;
+    }
+
+    publishNowPlayingMetadata();
+
+    return () => {
+      navigator.mediaSession.metadata = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id, detail.title, nowPlayingArtist, activeSource.kind, activeSource.sourceUrl]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("mediaSession" in navigator)) {
+      return;
+    }
+
+    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: Math.max(0, detail.duration),
+        playbackRate: 1,
+        position: clamp(currentTime, 0, Math.max(0, detail.duration)),
+      });
+    } catch {
+      // Position state support is uneven, especially around embedded players.
+    }
+  }, [currentTime, detail.duration, isPlaying]);
 
   useEffect(() => {
     return () => {
