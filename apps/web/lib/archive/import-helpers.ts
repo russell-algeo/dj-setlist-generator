@@ -28,7 +28,7 @@ export const detectSourcePlatform = (url?: string | null) => {
     return "youtube";
   }
 
-  if (url.includes("soundcloud.com")) {
+  if (url.includes("soundcloud.com") || url.includes("snd.sc")) {
     return "soundcloud";
   }
 

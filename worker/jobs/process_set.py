@@ -115,7 +115,7 @@ def _publish_set_run_payload(
 
 
 def _detect_source_platform(source_url: str) -> str:
-    if "soundcloud.com" in source_url:
+    if "soundcloud.com" in source_url or "snd.sc" in source_url:
         return "soundcloud"
     if "youtu" in source_url:
         return "youtube"
@@ -323,7 +323,8 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
             set_run_id,
             metadata_patch,
             set_title=str(context.mix_info.get("title") or ""),
-            source_platform=_detect_source_platform(str(run_row["source_url"])),
+            source_url=str(context.source_url),
+            source_platform=_detect_source_platform(str(context.source_url)),
         )
 
         lease_count = initialize_set_run_leases(
@@ -488,6 +489,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
 
 
 async def publish_phase(set_run_id: str) -> str | None:
+    from source_url_normalizer import resolve_canonical_source_url
     from worker.pipeline.aggregate import build_tracks_from_recognitions, recognitions_from_segment_hits
     from worker.pipeline.enrich import build_set_payload, enrich_tracks
     from worker.pipeline.recognize import restore_set_context
@@ -510,6 +512,14 @@ async def publish_phase(set_run_id: str) -> str | None:
                 },
             )
     _assert_workflow_ownership(set_run_id)
+    canonical_source_url = resolve_canonical_source_url(str(run_row["source_url"]))
+    if canonical_source_url != str(run_row["source_url"]):
+        update_set_run_metadata(
+            set_run_id,
+            {},
+            source_url=canonical_source_url,
+            source_platform=_detect_source_platform(canonical_source_url),
+        )
 
     # If this run already has a published_set_id the data is already in the DB (a prior attempt
     # published successfully but post-publish bookkeeping failed). Skip all the expensive work
@@ -620,11 +630,12 @@ async def publish_phase(set_run_id: str) -> str | None:
     Config.ENABLE_SPOTIFY_PLAYLISTS = bool(run_row.get("create_playlist"))
     try:
         context = restore_set_context(
-            str(run_row["source_url"]),
+            canonical_source_url,
             artist_name=str(run_row["artist_name"]) if run_row.get("artist_name") else None,
             source_metadata=source_metadata,
             require_audio=False,
         )
+        context.mix_info["url"] = canonical_source_url
         context.mix_info["source_links"] = source_metadata.get("source_links") or []
 
         enriched_tracks, mix_info = enrich_tracks(

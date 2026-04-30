@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildArchiveEmbed,
+  buildSoundCloudEmbedUrl,
   buildTrackKey,
   buildYouTubeThumbnail,
+  isEmbeddableSoundCloudUrl,
   normalizeArchiveConfidence,
 } from "./utils";
 
@@ -41,5 +43,18 @@ describe("archive utils", () => {
         sourceUrl: "https://soundcloud.com/platform/channel-one-boiler-room-x-notting-hill-carnival-2017-dj-set",
       }),
     ).toContain("w.soundcloud.com/player/");
+  });
+
+  it("does not treat SoundCloud share links as embeddable widget URLs", () => {
+    const sourceUrl = "https://on.soundcloud.com/lMS932ioS3yPO7fuGe";
+
+    expect(isEmbeddableSoundCloudUrl(sourceUrl)).toBe(false);
+    expect(buildSoundCloudEmbedUrl(sourceUrl)).toBeNull();
+    expect(
+      buildArchiveEmbed({
+        sourcePlatform: "soundcloud",
+        sourceUrl,
+      }),
+    ).toBeNull();
   });
 });

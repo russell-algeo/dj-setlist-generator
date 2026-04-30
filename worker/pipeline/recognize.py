@@ -9,6 +9,7 @@ from typing import Callable
 
 from audio_segmenter import AudioSegmenter
 from checkpoint_manager import CheckpointManager
+from source_url_normalizer import resolve_canonical_source_url
 from worker.pipeline.models import Recognition
 
 
@@ -36,13 +37,17 @@ def prepare_set_context(
     from audio_downloader import AudioDownloader
 
     downloader = AudioDownloader()
-    resolved_mix_info = dict(mix_info or downloader.get_video_info(source_url))
-    resolved_mix_info["url"] = source_url
+    canonical_source_url = resolve_canonical_source_url(source_url)
+    if canonical_source_url != source_url:
+        print(f"Resolved source URL: {canonical_source_url}")
+
+    resolved_mix_info = dict(mix_info or downloader.get_video_info(canonical_source_url))
+    resolved_mix_info["url"] = canonical_source_url
     if artist_name:
         resolved_mix_info["artist_name"] = artist_name
 
-    checkpoint_manager = build_checkpoint_manager(source_url, resolved_mix_info, artist_name)
-    audio_file = downloader.download(source_url, output_path=checkpoint_manager.audio_file)
+    checkpoint_manager = build_checkpoint_manager(canonical_source_url, resolved_mix_info, artist_name)
+    audio_file = downloader.download(canonical_source_url, output_path=checkpoint_manager.audio_file)
 
     segmenter = AudioSegmenter(checkpoint_manager=checkpoint_manager)
     duration = float(resolved_mix_info.get("duration") or 0)
@@ -53,7 +58,7 @@ def prepare_set_context(
     total_segments = segmenter.calculate_total_segments(duration)
 
     return PreparedSetContext(
-        source_url=source_url,
+        source_url=canonical_source_url,
         artist_name=artist_name,
         mix_info=resolved_mix_info,
         checkpoint_manager=checkpoint_manager,

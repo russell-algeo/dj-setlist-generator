@@ -151,6 +151,7 @@ def update_set_run_metadata(
     metadata: dict[str, Any],
     *,
     set_title: str | None = None,
+    source_url: str | None = None,
     source_platform: str | None = None,
 ) -> None:
     execute(
@@ -158,6 +159,7 @@ def update_set_run_metadata(
         update ops.set_runs
         set
           set_title = coalesce(%s, set_title),
+          source_url = coalesce(%s, source_url),
           source_platform = coalesce(%s, source_platform),
           source_metadata = coalesce(source_metadata, '{}'::jsonb) || %s::jsonb,
           heartbeat_at = now(),
@@ -166,6 +168,7 @@ def update_set_run_metadata(
         """,
         (
             set_title,
+            source_url,
             source_platform,
             json_value(metadata),
             set_run_id,

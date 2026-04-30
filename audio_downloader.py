@@ -7,6 +7,7 @@ from pathlib import Path
 import yt_dlp
 
 from config import Config
+from source_url_normalizer import resolve_canonical_source_url
 
 
 MAX_BOT_RETRIES = 10
@@ -88,6 +89,8 @@ class AudioDownloader:
         Returns:
             Path to downloaded MP3 file
         """
+        source_url = resolve_canonical_source_url(url)
+
         if output_path is None:
             output_path = self.assets_dir / "mix.mp3"
 
@@ -113,14 +116,14 @@ class AudioDownloader:
             }
         )
 
-        print(f"Downloading audio from: {url}")
+        print(f"Downloading audio from: {source_url}")
         self._log_yt_dlp_config("download", ydl_opts)
 
         def _do_download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                ydl.download([source_url])
 
-        if self._is_youtube_url(url):
+        if self._is_youtube_url(source_url):
             self._run_with_bot_retry(_do_download)
         else:
             _do_download()
@@ -135,6 +138,7 @@ class AudioDownloader:
         Returns:
             Dictionary with title, duration, uploader, etc.
         """
+        source_url = resolve_canonical_source_url(url)
         ydl_opts = self._apply_auth_ydl_opts(
             {
                 "quiet": True,
@@ -147,12 +151,15 @@ class AudioDownloader:
         def _do_extract():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Raw extraction avoids format resolution during bootstrap metadata lookup.
-                return ydl.extract_info(url, download=False, process=False)
+                return ydl.extract_info(source_url, download=False, process=False)
 
-        info = self._run_with_bot_retry(_do_extract) if self._is_youtube_url(url) else _do_extract()
+        info = self._run_with_bot_retry(_do_extract) if self._is_youtube_url(source_url) else _do_extract()
+        canonical_url = resolve_canonical_source_url(
+            info.get("webpage_url") or info.get("original_url") or source_url
+        )
         return {
             "title": info.get("title", "Unknown"),
             "duration": info.get("duration", 0),
             "uploader": info.get("uploader", "Unknown"),
-            "url": url,
+            "url": canonical_url,
         }

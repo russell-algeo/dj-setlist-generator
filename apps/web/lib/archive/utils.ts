@@ -149,6 +149,42 @@ export const buildYouTubeThumbnail = (sourceUrl: string | null) => {
   return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : null;
 };
 
+export const isEmbeddableSoundCloudUrl = (sourceUrl: string | null | undefined) => {
+  if (!sourceUrl) {
+    return false;
+  }
+
+  try {
+    const host = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./u, "");
+    return host === "soundcloud.com" || host === "m.soundcloud.com";
+  } catch {
+    return false;
+  }
+};
+
+export const buildSoundCloudEmbedUrl = (
+  sourceUrl: string | null | undefined,
+  {
+    color = "%23b9975b",
+    visual = "true",
+    showTeaser = "true",
+  }: {
+    color?: string;
+    showTeaser?: "false" | "true";
+    visual?: "false" | "true";
+  } = {},
+) => {
+  if (!sourceUrl || !isEmbeddableSoundCloudUrl(sourceUrl)) {
+    return null;
+  }
+
+  return (
+    `https://w.soundcloud.com/player/?url=${encodeURIComponent(sourceUrl)}` +
+    `&color=${color}&auto_play=false&hide_related=false&show_comments=false` +
+    `&show_user=true&show_reposts=false&show_teaser=${showTeaser}&visual=${visual}`
+  );
+};
+
 export const buildArchiveEmbed = ({
   sourcePlatform,
   sourceUrl,
@@ -170,7 +206,7 @@ export const buildArchiveEmbed = ({
   }
 
   if (normalizedPlatform === "soundcloud") {
-    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(sourceUrl)}&color=%23b9975b&auto_play=false&hide_related=false&show_comments=false&show_user=true&show_reposts=false&show_teaser=true&visual=true`;
+    return buildSoundCloudEmbedUrl(sourceUrl);
   }
 
   return null;

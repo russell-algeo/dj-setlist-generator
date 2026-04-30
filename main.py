@@ -59,7 +59,10 @@ class SetlistGenerator:
         print("\n[1/5] Fetching video information...")
         temp_downloader = AudioDownloader()
         mix_info = temp_downloader.get_video_info(url)
-        mix_info['url'] = url  # Store original URL for playlist description
+        source_url = str(mix_info.get('url') or url)
+        if source_url != url:
+            mix_info['submitted_url'] = url
+            print(f"  Resolved source URL: {source_url}")
         if artist_name:
             mix_info['artist_name'] = artist_name
         mix_name = mix_info['title']
@@ -69,7 +72,7 @@ class SetlistGenerator:
         print(f"  Uploader: {mix_info['uploader']}")
 
         # Initialize checkpoint manager with mix name (single source of truth for paths)
-        checkpoint_manager = CheckpointManager(url, mix_name, artist_name=artist_name)
+        checkpoint_manager = CheckpointManager(source_url, mix_name, artist_name=artist_name)
 
         print(f"\n📁 Directory structure:")
         print(f"  Assets: {checkpoint_manager.assets_dir}")
@@ -120,7 +123,7 @@ class SetlistGenerator:
                 print("\n[2/5] Downloading audio...")
                 emit_progress("downloading")
                 audio_path = checkpoint_manager.audio_file
-                audio_file = downloader.download(url, output_path=audio_path)
+                audio_file = downloader.download(source_url, output_path=audio_path)
 
                 if not checkpoint or checkpoint['stage'] in [STAGE_DOWNLOADED, STAGE_AUDIO_ONLY]:
                     checkpoint_manager.save_checkpoint(STAGE_DOWNLOADED, {

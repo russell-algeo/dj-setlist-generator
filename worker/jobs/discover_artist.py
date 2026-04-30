@@ -7,6 +7,7 @@ import requests
 
 from checkpoint_manager import ArtistManager
 from config import Config
+from source_url_normalizer import resolve_canonical_source_url
 from worker.config import get_settings
 from worker.db import execute, fetch_one, finalize_submission_from_runs, insert_worker_event, json_value, mark_submission
 from worker.providers.ytdlp import DjSetDiscoverer
@@ -58,11 +59,10 @@ def run(submission_id: str) -> None:
 
         artist_manager = ArtistManager(artist_name)
         sets = DjSetDiscoverer(artist_manager=artist_manager, search_names=search_names).discover()
-
-        execute("delete from ops.discovery_candidates where submission_id = %s", (submission_id,))
-
+        canonical_sets = []
         for candidate in sets:
-            source_links = candidate.source_links or [
+            canonical_url = resolve_canonical_source_url(candidate.url)
+            raw_source_links = candidate.source_links or [
                 {
                     "url": candidate.url,
                     "platform": candidate.platform,
@@ -76,8 +76,22 @@ def run(submission_id: str) -> None:
                     },
                 }
             ]
+            canonical_source_links = []
+            for source_link in raw_source_links:
+                link_url = str(source_link.get("url") or candidate.url)
+                canonical_source_links.append(
+                    {
+                        **dict(source_link),
+                        "url": resolve_canonical_source_url(link_url),
+                    }
+                )
+            canonical_sets.append((candidate, canonical_url, canonical_source_links))
+
+        execute("delete from ops.discovery_candidates where submission_id = %s", (submission_id,))
+
+        for candidate, canonical_url, source_links in canonical_sets:
             for source_link in source_links:
-                is_primary = source_link.get("url") == candidate.url
+                is_primary = source_link.get("url") == canonical_url
                 execute(
                     """
                     insert into ops.discovery_candidates (
@@ -93,7 +107,7 @@ def run(submission_id: str) -> None:
                     """,
                     (
                         submission_id,
-                        source_link.get("url") or candidate.url,
+                        source_link.get("url") or canonical_url,
                         source_link.get("platform") or candidate.platform,
                         source_link.get("title") or candidate.title,
                         source_link.get("duration_seconds")
@@ -102,7 +116,7 @@ def run(submission_id: str) -> None:
                         json_value(
                             {
                                 **dict(source_link.get("metadata") or {}),
-                                "primary_source_url": candidate.url,
+                                "primary_source_url": canonical_url,
                                 "is_primary": is_primary,
                             }
                         ),
@@ -118,7 +132,7 @@ def run(submission_id: str) -> None:
             )
             return
 
-        for candidate in sets:
+        for candidate, canonical_url, source_links in canonical_sets:
             execute(
                 """
                 insert into ops.set_runs (
@@ -164,7 +178,7 @@ def run(submission_id: str) -> None:
                   )
                 """,
                 (
-                    candidate.url,
+                    canonical_url,
                     candidate.platform,
                     candidate.title,
                     json_value(
@@ -172,12 +186,12 @@ def run(submission_id: str) -> None:
                             "event": candidate.event,
                             "year": candidate.year,
                             "duration_minutes": candidate.duration_minutes,
-                            "source_links": candidate.source_links,
+                            "source_links": source_links,
                         }
                     ),
-                    candidate.url,
+                    canonical_url,
                     submission_id,
-                    candidate.url,
+                    canonical_url,
                 ),
             )
 

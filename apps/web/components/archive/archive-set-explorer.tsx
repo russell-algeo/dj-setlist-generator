@@ -19,6 +19,7 @@ import type {
 import {
   buildDiscogsSearchUrl,
   buildSearchBlob,
+  buildSoundCloudEmbedUrl,
   buildSpotifySearchUrl,
   buildYouTubeSearchUrl,
   extractSpotifyTrackId,
@@ -242,11 +243,24 @@ const detectSourceModel = ({
   }
 
   if ((normalizedPlatform === "soundcloud" || sourceUrl?.includes("soundcloud.com")) && sourceUrl) {
+    const embedSrc = buildSoundCloudEmbedUrl(sourceUrl, {
+      color: "%23111111",
+      showTeaser: "false",
+      visual: "false",
+    });
+
+    if (!embedSrc) {
+      return {
+        frameClass: "source-player-frame is-fallback",
+        kind: "fallback",
+        label,
+        platform: normalizedPlatform || "soundcloud",
+        sourceUrl,
+      };
+    }
+
     return {
-      embedSrc:
-        `https://w.soundcloud.com/player/?url=${encodeURIComponent(sourceUrl)}` +
-        "&color=%23111111&auto_play=false&hide_related=false&show_comments=false" +
-        "&show_user=true&show_reposts=false&show_teaser=false&visual=false",
+      embedSrc,
       frameClass: "source-player-frame is-soundcloud",
       kind: "soundcloud",
       label: "SoundCloud",

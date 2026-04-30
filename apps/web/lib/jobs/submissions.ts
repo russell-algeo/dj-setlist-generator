@@ -23,6 +23,10 @@ import {
   summarizeSetRunCounts,
 } from "@/lib/jobs/status";
 import { prepareArtistAliases } from "@/lib/jobs/artist-aliases";
+import {
+  resolveCanonicalSourceUrl,
+  resolveCanonicalSourceUrls,
+} from "@/lib/jobs/source-url-normalizer";
 
 const db = getDb();
 
@@ -139,9 +143,12 @@ export const syncSubmissionStatusFromRuns = async (submissionId: string) => {
 };
 
 export const createSubmission = async (actor: SessionActor, input: CreateSubmissionInput) => {
+  const normalizedSourceUrl = input.sourceUrl
+    ? await resolveCanonicalSourceUrl(input.sourceUrl)
+    : null;
   const normalizedUrls =
     input.mode === "curated_artist"
-      ? input.sourceUrls
+      ? await resolveCanonicalSourceUrls(input.sourceUrls)
       : [];
   const normalizedArtistAliases = input.mode === "artist" ? input.artistAliases : [];
 
@@ -179,7 +186,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
       status: "queued",
       artistName: input.artistName ?? null,
       artistAliases: normalizedArtistAliases,
-      sourceUrl: input.sourceUrl ?? null,
+      sourceUrl: normalizedSourceUrl,
       sourceUrls: normalizedUrls,
       createPlaylist: effectiveCreatePlaylist,
       maxSetsOverride: input.maxSetsOverride ?? null,
@@ -192,7 +199,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
     message: `Submission queued in ${input.mode} mode`,
     details: {
       mode: input.mode,
-      sourceUrl: input.sourceUrl ?? null,
+      sourceUrl: normalizedSourceUrl,
       sourceUrls: normalizedUrls,
       artistName: input.artistName ?? null,
       artistAliases: normalizedArtistAliases.length > 0 ? normalizedArtistAliases : undefined,
@@ -230,7 +237,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
         status: existingPublishedSetId ? "completed" : "queued",
         stage: existingPublishedSetId ? "deduped" : null,
         sourceUrl,
-        sourcePlatform: sourceUrl.includes("soundcloud.com")
+        sourcePlatform: sourceUrl.includes("soundcloud.com") || sourceUrl.includes("snd.sc")
           ? "soundcloud"
           : sourceUrl.includes("youtu")
             ? "youtube"
