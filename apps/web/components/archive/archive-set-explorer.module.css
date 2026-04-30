@@ -1295,7 +1295,7 @@
   left: 50%;
   bottom: 14px;
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: 120;
   width: min(720px, calc(100vw - 18px));
   border: 1px solid var(--line);
   background: rgb(14 14 14 / 97%);
