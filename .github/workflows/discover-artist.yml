@@ -111,7 +111,6 @@ jobs:
         run: |
           if [[ "${YOUTUBE_NETWORK_MODE}" == "warp" ]]; then
             echo "Using WARP proxy for yt-dlp traffic."
-            echo "HTTPS_PROXY=socks5h://127.0.0.1:9091" >> "${GITHUB_ENV}"
           else
             echo "Using direct runner egress for yt-dlp traffic."
           fi
@@ -119,13 +118,9 @@ jobs:
           YOUTUBE_NETWORK_MODE: ${{ github.event.inputs.youtube_network_mode }}
 
       - name: Run discovery job
+        env:
+          HTTPS_PROXY: ${{ github.event.inputs.youtube_network_mode == 'warp' && 'socks5h://127.0.0.1:9091' || '' }}
         run: python -m worker.jobs.discover_artist --submission-id "${{ github.event.inputs.submission_id }}"
-
-      - name: Clear WARP proxy env
-        if: ${{ always() }}
-        run: |
-          echo "HTTPS_PROXY=" >> "${GITHUB_ENV}"
-          echo "https_proxy=" >> "${GITHUB_ENV}"
 
       - name: Persist refreshed YouTube cookies
         if: ${{ success() && steps.youtube_auth.outputs.cookies_present == 'true' }}
