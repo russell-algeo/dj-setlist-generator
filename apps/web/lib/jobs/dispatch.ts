@@ -10,7 +10,7 @@ import {
   automaticRecoveryAttemptLimit,
   createWorkerEvent,
 } from "@/lib/jobs/internal";
-import { isTerminalSetRunStatus } from "@/lib/jobs/status";
+import { isActiveSubmissionStatus, isTerminalSetRunStatus } from "@/lib/jobs/status";
 import { syncSubmissionStatusFromRuns } from "@/lib/jobs/submissions";
 
 const db = getDb();
@@ -318,6 +318,81 @@ export const dispatchPendingWork = async () => {
   ]);
 
   return { artistDispatch, setDispatch };
+};
+
+export const finalizeArtistDiscoveryWorkflow = async (values: {
+  submissionId: string;
+  workflowRunId?: string;
+  workflowResult: string;
+}) => {
+  const [submission] = await db
+    .select()
+    .from(submissions)
+    .where(eq(submissions.id, values.submissionId))
+    .limit(1);
+
+  if (!submission) {
+    return { action: "missing_submission" as const };
+  }
+
+  const runRows = await db
+    .select({ id: setRuns.id, status: setRuns.status })
+    .from(setRuns)
+    .where(eq(setRuns.submissionId, values.submissionId));
+
+  if (runRows.length > 0) {
+    const status = await syncSubmissionStatusFromRuns(values.submissionId);
+    return {
+      action: "synced_from_runs" as const,
+      status,
+      dispatch: await dispatchPendingWork(),
+    };
+  }
+
+  if (values.workflowResult === "success") {
+    return {
+      action: "success_noop" as const,
+      dispatch: await dispatchPendingWork(),
+    };
+  }
+
+  if (!isActiveSubmissionStatus(submission.status)) {
+    return {
+      action: "already_terminal" as const,
+      status: submission.status,
+      dispatch: await dispatchPendingWork(),
+    };
+  }
+
+  const now = new Date();
+  const reason = values.workflowRunId
+    ? `Discover artist workflow ${values.workflowRunId} failed before discovery completed`
+    : "Discover artist workflow failed before discovery completed";
+
+  await db
+    .update(submissions)
+    .set({
+      status: "failed",
+      errorSummary: reason,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(submissions.id, values.submissionId));
+
+  await createWorkerEvent({
+    submissionId: values.submissionId,
+    eventType: "submission.discovery.failed",
+    message: reason,
+    details: {
+      workflowRunId: values.workflowRunId ?? null,
+      workflowResult: values.workflowResult,
+    },
+  });
+
+  return {
+    action: "marked_failed" as const,
+    dispatch: await dispatchPendingWork(),
+  };
 };
 
 export const finalizeSetRunWorkflow = async (values: {

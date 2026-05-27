@@ -23,6 +23,11 @@ on:
         options:
           - warp
           - direct
+      warp_image:
+        description: Docker image used for WARP proxy mode
+        required: false
+        default: monius/docker-warp-socks:v4
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -39,17 +44,6 @@ jobs:
       SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
       SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
       DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
-    services:
-      warp:
-        image: ghcr.io/mon-ius/docker-warp-socks:v5
-        ports:
-          - 9091:9091
-        options: >-
-          --health-cmd "curl -fsSx socks5h://127.0.0.1:9091 https://cloudflare.com/cdn-cgi/trace | grep -q warp=on"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-start-period 30s
-          --health-retries 6
     steps:
       - uses: actions/checkout@v4
 
@@ -83,18 +77,48 @@ jobs:
           YOUTUBE_USER_AGENT: ${{ secrets.YOUTUBE_USER_AGENT }}
         run: ./.github/scripts/prepare-youtube-auth.sh
 
-      - name: Log YouTube network mode
+      - name: Start WARP proxy
+        id: warp_proxy
+        if: ${{ github.event.inputs.youtube_network_mode == 'warp' }}
         run: |
-          echo "YouTube network mode: ${{ github.event.inputs.youtube_network_mode }}"
-          if [[ "${{ github.event.inputs.youtube_network_mode }}" == "warp" ]]; then
+          set -euo pipefail
+
+          docker rm -f set-list-warp >/dev/null 2>&1 || true
+          docker pull "${WARP_IMAGE}"
+          docker run \
+            --detach \
+            --name set-list-warp \
+            --publish 127.0.0.1:9091:9091 \
+            "${WARP_IMAGE}"
+
+          for delay in 2 4 8 16 32 32 32; do
+            if curl -fsSx socks5h://127.0.0.1:9091 https://cloudflare.com/cdn-cgi/trace | grep -q "warp=on"; then
+              echo "WARP proxy is healthy."
+              exit 0
+            fi
+
+            echo "WARP proxy is still starting; waiting ${delay}s."
+            sleep "${delay}"
+          done
+
+          docker logs set-list-warp || true
+          echo "WARP proxy did not become healthy."
+          exit 1
+        env:
+          WARP_IMAGE: ${{ github.event.inputs.warp_image || 'monius/docker-warp-socks:v4' }}
+
+      - name: Configure YouTube network mode
+        run: |
+          if [[ "${YOUTUBE_NETWORK_MODE}" == "warp" ]]; then
             echo "Using WARP proxy for yt-dlp traffic."
+            echo "HTTPS_PROXY=socks5h://127.0.0.1:9091" >> "${GITHUB_ENV}"
           else
             echo "Using direct runner egress for yt-dlp traffic."
           fi
+        env:
+          YOUTUBE_NETWORK_MODE: ${{ github.event.inputs.youtube_network_mode }}
 
       - name: Run discovery job
-        env:
-          HTTPS_PROXY: ${{ github.event.inputs.youtube_network_mode == 'warp' && 'socks5h://localhost:9091' || '' }}
         run: python -m worker.jobs.discover_artist --submission-id "${{ github.event.inputs.submission_id }}"
 
       - name: Persist refreshed YouTube cookies
@@ -103,3 +127,26 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           GH_REPO: ${{ github.repository }}
         run: ./.github/scripts/persist-youtube-cookies.sh
+
+      - name: Finalize discovery workflow
+        if: ${{ always() }}
+        run: |
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            -X POST \
+            "${APP_BASE_URL}/api/internal/finalize-discovery" \
+            -H "content-type: application/json" \
+            -H "x-internal-secret: ${INTERNAL_WORKER_SHARED_SECRET}" \
+            -d @- <<'JSON'
+          {
+            "submissionId": "${{ github.event.inputs.submission_id }}",
+            "workflowRunId": "${{ github.run_id }}",
+            "workflowResult": "${{ failure() && 'failure' || cancelled() && 'cancelled' || 'success' }}"
+          }
+          JSON
+
+      - name: Stop WARP proxy
+        if: ${{ always() && github.event.inputs.youtube_network_mode == 'warp' }}
+        run: docker rm -f set-list-warp >/dev/null 2>&1 || true

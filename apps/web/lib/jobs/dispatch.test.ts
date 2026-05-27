@@ -50,9 +50,24 @@ vi.mock("@/lib/jobs/submissions", () => ({
 }));
 
 vi.mock("@/lib/jobs/status", () => ({
+  isActiveSubmissionStatus: (status: string) => ["queued", "running", "cancelling"].includes(status),
   isTerminalSetRunStatus: (status: string) =>
     ["completed", "failed", "cancelled"].includes(status),
 }));
+
+const selectLimit = <T>(rows: T[]) => ({
+  from: vi.fn().mockReturnValue({
+    where: vi.fn().mockReturnValue({
+      limit: vi.fn().mockResolvedValue(rows),
+    }),
+  }),
+});
+
+const selectWhere = <T>(rows: T[]) => ({
+  from: vi.fn().mockReturnValue({
+    where: vi.fn().mockResolvedValue(rows),
+  }),
+});
 
 describe("dispatchAllQueuedSetRuns", () => {
   beforeEach(() => {
@@ -118,5 +133,50 @@ describe("dispatchAllQueuedSetRuns", () => {
     });
     expect(mockedDb.select).not.toHaveBeenCalled();
     expect(dispatchProcessSetWorkflow).not.toHaveBeenCalled();
+  }, 15_000);
+});
+
+describe("finalizeArtistDiscoveryWorkflow", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockedDb.execute.mockReset();
+    mockedDb.select.mockReset();
+    mockedDb.update.mockReset();
+    mockedDb.delete.mockReset();
+    dispatchProcessSetWorkflow.mockReset();
+    createWorkerEvent.mockReset();
+  });
+
+  it("marks an active submission failed when discovery workflow fails before creating runs", async () => {
+    mockedDb.select
+      .mockReturnValueOnce(selectLimit([{ id: "sub-1", status: "running" }]))
+      .mockReturnValueOnce(selectWhere([]));
+
+    mockedDb.update.mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
+
+    mockedDb.execute.mockResolvedValue({ rows: [] });
+
+    const { finalizeArtistDiscoveryWorkflow } = await import("./dispatch");
+    const result = await finalizeArtistDiscoveryWorkflow({
+      submissionId: "sub-1",
+      workflowRunId: "workflow-1",
+      workflowResult: "failure",
+    });
+
+    expect(result.action).toBe("marked_failed");
+    expect(mockedDb.update).toHaveBeenCalledTimes(1);
+    expect(createWorkerEvent).toHaveBeenCalledWith({
+      submissionId: "sub-1",
+      eventType: "submission.discovery.failed",
+      message: "Discover artist workflow workflow-1 failed before discovery completed",
+      details: {
+        workflowRunId: "workflow-1",
+        workflowResult: "failure",
+      },
+    });
   }, 15_000);
 });
