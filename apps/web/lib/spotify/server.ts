@@ -18,10 +18,24 @@ export type RefreshedSpotifyAccessToken = {
   spotifyUserId: string;
 };
 
+type SpotifyTokenRefreshDeps = {
+  db?: ReturnType<typeof getDb>;
+  decrypt?: (cipherText: string) => string;
+  fetchFn?: typeof fetch;
+  now?: () => Date;
+};
+
+const SPOTIFY_RECONNECT_REQUIRED_MESSAGE =
+  "Spotify connection needs to be reconnected. Connect Spotify again and retry the export.";
+
 export const refreshSpotifyAccessTokenForUser = async (
   targetUserId: string,
+  deps: SpotifyTokenRefreshDeps = {},
 ): Promise<RefreshedSpotifyAccessToken> => {
-  const db = getDb();
+  const db = deps.db ?? getDb();
+  const decrypt = deps.decrypt ?? decryptSecret;
+  const fetchFn = deps.fetchFn ?? fetch;
+  const now = deps.now ?? (() => new Date());
 
   if (!env.spotifyClientId || !env.spotifyClientSecret) {
     throw new SpotifyConfigurationError("Spotify OAuth is not configured");
@@ -37,7 +51,26 @@ export const refreshSpotifyAccessTokenForUser = async (
     throw new SpotifyConnectionError("No Spotify connection found");
   }
 
-  const tokenResponse = await fetch("https://accounts.spotify.com/api/token", {
+  let refreshToken: string;
+
+  try {
+    refreshToken = decrypt(connection.refreshTokenCiphertext);
+  } catch {
+    const timestamp = now();
+
+    await db
+      .update(spotifyConnections)
+      .set({
+        lastError: "Stored Spotify refresh token could not be decrypted. Reconnect Spotify.",
+        revokedAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .where(eq(spotifyConnections.userId, targetUserId));
+
+    throw new SpotifyConnectionError(SPOTIFY_RECONNECT_REQUIRED_MESSAGE);
+  }
+
+  const tokenResponse = await fetchFn("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
       authorization: `Basic ${Buffer.from(
@@ -47,15 +80,17 @@ export const refreshSpotifyAccessTokenForUser = async (
     },
     body: new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: decryptSecret(connection.refreshTokenCiphertext),
+      refresh_token: refreshToken,
     }),
   });
 
   if (!tokenResponse.ok) {
     const errorText = await tokenResponse.text().catch(() => "unknown error");
+    const timestamp = now();
+
     await db
       .update(spotifyConnections)
-      .set({ lastError: `${tokenResponse.status}: ${errorText}`, updatedAt: new Date() })
+      .set({ lastError: `${tokenResponse.status}: ${errorText}`, updatedAt: timestamp })
       .where(eq(spotifyConnections.userId, targetUserId));
     throw new SpotifyTokenRefreshError("Spotify token refresh failed");
   }
@@ -65,12 +100,14 @@ export const refreshSpotifyAccessTokenForUser = async (
     expires_in: number;
   };
 
+  const refreshedAt = now();
+
   await db
     .update(spotifyConnections)
     .set({
-      lastRefreshAt: new Date(),
+      lastRefreshAt: refreshedAt,
       lastError: null,
-      updatedAt: new Date(),
+      updatedAt: refreshedAt,
     })
     .where(eq(spotifyConnections.userId, targetUserId));
 
