@@ -723,6 +723,7 @@ type YouTubePlayer = {
 type SoundCloudWidgetFactory = ((element: HTMLIFrameElement) => SoundCloudWidget) & {
   Events: {
     FINISH: string;
+    LOAD_PROGRESS: string;
     PAUSE: string;
     PLAY: string;
     PLAY_PROGRESS: string;
@@ -734,6 +735,9 @@ type SoundCloudWidgetFactory = ((element: HTMLIFrameElement) => SoundCloudWidget
 type SoundCloudWidgetEvent =
   | {
     currentPosition?: number;
+    loadProgress?: number;
+    loadedProgress?: number;
+    relativePosition?: number;
   }
   | number
   | null
@@ -746,6 +750,7 @@ type SoundCloudWidget = {
   pause?: () => void;
   play?: () => void;
   seekTo?: (milliseconds: number) => void;
+  setVolume?: (volume: number) => void;
 };
 
 export function ArchiveSetExplorer({
@@ -795,6 +800,7 @@ export function ArchiveSetExplorer({
   const [timelineTooltip, setTimelineTooltip] = useState<TimelineTooltipState>(null);
   const [journeyTooltip, setJourneyTooltip] = useState<JourneyTooltipState>(null);
   const [hashHitIdx, setHashHitIdx] = useState<number | null>(null);
+  const [playerReady, setPlayerReady] = useState(false);
   const [ytEmbedBlocked, setYtEmbedBlocked] = useState(false);
   const [scEmbedBlocked, setScEmbedBlocked] = useState(false);
   const deferredQuery = useDeferredValue(query);
@@ -815,6 +821,10 @@ export function ArchiveSetExplorer({
   const seekLockUntilRef = useRef(0);
   const fallbackTickRef = useRef<number | null>(null);
   const playerPollRef = useRef<number | null>(null);
+  const soundCloudReadyTimerRef = useRef<number | null>(null);
+  const soundCloudWarmupTimerRef = useRef<number | null>(null);
+  const soundCloudWarmupActiveRef = useRef(false);
+  const soundCloudWarmupFinishingRef = useRef(false);
   const heroRailRafRef = useRef<number | null>(null);
   const heroRailLastTsRef = useRef(0);
   const prevTrackPressTsRef = useRef(0);
@@ -872,6 +882,7 @@ export function ArchiveSetExplorer({
     (activeSource.kind === "youtube" || activeSource.kind === "soundcloud") &&
     !ytEmbedBlocked &&
     !scEmbedBlocked;
+  const playbackControlsDisabled = showDock && !playerReady;
   const artistNames = detail.artists.map((artist) => artist.name).join(", ");
   const nowPlayingArtist = detail.artistName ?? (artistNames || "Set Signal Archive");
 
@@ -1038,12 +1049,37 @@ export function ArchiveSetExplorer({
     }
   };
 
-  const destroyPlayers = () => {
+  const clearSoundCloudReadyTimer = () => {
+    if (soundCloudReadyTimerRef.current != null) {
+      window.clearTimeout(soundCloudReadyTimerRef.current);
+      soundCloudReadyTimerRef.current = null;
+    }
+  };
+
+  const clearSoundCloudWarmupTimer = () => {
+    if (soundCloudWarmupTimerRef.current != null) {
+      window.clearTimeout(soundCloudWarmupTimerRef.current);
+      soundCloudWarmupTimerRef.current = null;
+    }
+  };
+
+  const setPlayerReadyState = (ready: boolean, updateReactState = true) => {
+    playerReadyRef.current = ready;
+    if (updateReactState) {
+      setPlayerReady(ready);
+    }
+  };
+
+  const destroyPlayers = (updateReactState = true) => {
     stopPlayerPoll();
     stopFallbackTick();
+    clearSoundCloudReadyTimer();
+    clearSoundCloudWarmupTimer();
+    soundCloudWarmupActiveRef.current = false;
+    soundCloudWarmupFinishingRef.current = false;
     pendingSeekRef.current = null;
     pendingAutoplayRef.current = false;
-    playerReadyRef.current = false;
+    setPlayerReadyState(false, updateReactState);
 
     if (ytPlayerRef.current?.destroy) {
       ytPlayerRef.current.destroy();
@@ -1077,6 +1113,30 @@ export function ArchiveSetExplorer({
       Number.isFinite(event.currentPosition)
     ) {
       return event.currentPosition / 1000;
+    }
+
+    return null;
+  };
+
+  const resolveSoundCloudLoadProgress = (event?: SoundCloudWidgetEvent) => {
+    if (!event || typeof event !== "object") {
+      return null;
+    }
+
+    if (
+      "loadProgress" in event &&
+      typeof event.loadProgress === "number" &&
+      Number.isFinite(event.loadProgress)
+    ) {
+      return event.loadProgress;
+    }
+
+    if (
+      "loadedProgress" in event &&
+      typeof event.loadedProgress === "number" &&
+      Number.isFinite(event.loadedProgress)
+    ) {
+      return event.loadedProgress;
     }
 
     return null;
@@ -1129,9 +1189,8 @@ export function ArchiveSetExplorer({
 
     if (activeSource.kind === "soundcloud" && scWidgetRef.current?.getPosition) {
       scWidgetRef.current.isPaused?.((paused) => {
-        const nextPlaying = !paused;
-        if (nextPlaying !== isPlayingRef.current) {
-          setIsPlaying(nextPlaying);
+        if (paused && isPlayingRef.current) {
+          setIsPlaying(false);
         }
       });
       scWidgetRef.current.getPosition((milliseconds: number) => {
@@ -1141,6 +1200,48 @@ export function ArchiveSetExplorer({
         }
       });
     }
+  };
+
+  const restoreSoundCloudAfterWarmup = (widget: SoundCloudWidget, onDone: () => void) => {
+    clearSoundCloudWarmupTimer();
+    soundCloudWarmupActiveRef.current = false;
+    soundCloudWarmupFinishingRef.current = false;
+    widget.setVolume?.(100);
+    playbackStartedRef.current = false;
+    setIsPlaying(false);
+    window.setTimeout(() => {
+      if (scWidgetRef.current === widget) {
+        onDone();
+      }
+    }, 120);
+  };
+
+  const finishSoundCloudWarmup = (widget: SoundCloudWidget) => {
+    if (!soundCloudWarmupActiveRef.current || soundCloudWarmupFinishingRef.current) {
+      return;
+    }
+    soundCloudWarmupFinishingRef.current = true;
+    widget.pause?.();
+  };
+
+  const startSoundCloudWarmup = (widget: SoundCloudWidget, onDone: () => void) => {
+    if (!widget.setVolume || !widget.play || !widget.pause) {
+      onDone();
+      return;
+    }
+
+    clearSoundCloudWarmupTimer();
+    soundCloudWarmupActiveRef.current = true;
+    soundCloudWarmupFinishingRef.current = false;
+    widget.setVolume(0);
+    widget.play();
+    soundCloudWarmupTimerRef.current = window.setTimeout(() => {
+      if (!soundCloudWarmupActiveRef.current || scWidgetRef.current !== widget) {
+        return;
+      }
+      widget.pause?.();
+      restoreSoundCloudAfterWarmup(widget, onDone);
+    }, 5200);
   };
 
   const startPlayerPoll = () => {
@@ -1209,9 +1310,6 @@ export function ArchiveSetExplorer({
         pendingSeekRef.current = safeSeconds;
         pendingAutoplayRef.current = autoplay;
       }
-      if (autoplay) {
-        setIsPlaying(true);
-      }
       return;
     }
 
@@ -1224,6 +1322,8 @@ export function ArchiveSetExplorer({
       if (scWidgetRef.current && playerReadyRef.current && scWidgetRef.current.seekTo) {
         scWidgetRef.current.seekTo(safeSeconds * 1000);
         if (autoplay && scWidgetRef.current.play) {
+          setIsPlaying(true);
+          startPlayerPoll();
           scWidgetRef.current.play();
         }
         if (!autoplay && scWidgetRef.current.pause) {
@@ -1232,9 +1332,6 @@ export function ArchiveSetExplorer({
       } else {
         pendingSeekRef.current = safeSeconds;
         pendingAutoplayRef.current = autoplay;
-      }
-      if (autoplay) {
-        setIsPlaying(true);
       }
       return;
     }
@@ -1294,7 +1391,6 @@ export function ArchiveSetExplorer({
         pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
       }
-      setIsPlaying(true);
       return;
     }
 
@@ -1308,12 +1404,13 @@ export function ArchiveSetExplorer({
         if (startAtSeconds > 0 && scWidgetRef.current.seekTo) {
           scWidgetRef.current.seekTo(startAtSeconds * 1000);
         }
+        setIsPlaying(true);
+        startPlayerPoll();
         scWidgetRef.current.play();
       } else {
         pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
       }
-      setIsPlaying(true);
       return;
     }
 
@@ -1343,24 +1440,18 @@ export function ArchiveSetExplorer({
       return;
     }
 
-    if (
-      activeSource.kind === "soundcloud" &&
-      scWidgetRef.current?.isPaused &&
-      playerReadyRef.current
-    ) {
-      scWidgetRef.current.isPaused((paused) => {
-        if (!paused) {
-          pausePlayer();
-          return;
-        }
+    if (activeSource.kind === "soundcloud" && scWidgetRef.current?.play && playerReadyRef.current) {
+      if (isPlayingRef.current) {
+        pausePlayer();
+        return;
+      }
 
-        if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
-          seekPlayer(0, false, true);
-          return;
-        }
+      if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
+        seekPlayer(0, false, true);
+        return;
+      }
 
-        playPlayer();
-      });
+      playPlayer();
       return;
     }
 
@@ -1535,7 +1626,7 @@ export function ArchiveSetExplorer({
                   }
                 },
                 onReady: () => {
-                  playerReadyRef.current = true;
+                  setPlayerReadyState(true);
                   startPlayerPoll();
                   pollPlayerTime();
                   flushPendingSeek();
@@ -1596,20 +1687,50 @@ export function ArchiveSetExplorer({
 
           const widget = playerWindow.SC.Widget(soundCloudFrameRef.current);
           scWidgetRef.current = widget;
-          const markSoundCloudReady = () => {
+          const enableSoundCloudControls = () => {
             if (cancelled || playerReadyRef.current) {
               return;
             }
-            playerReadyRef.current = true;
+            widget.setVolume?.(100);
+            clearSoundCloudReadyTimer();
+            setPlayerReadyState(true);
             startPlayerPoll();
             pollPlayerTime();
             flushPendingSeek();
           };
+          const scheduleSoundCloudControlsReady = () => {
+            if (cancelled || playerReadyRef.current || soundCloudReadyTimerRef.current != null) {
+              return;
+            }
+            const mobileWarmupMs = window.matchMedia(
+              "(max-width: 760px), (pointer: coarse)",
+            ).matches
+              ? 3200
+              : 900;
+            soundCloudReadyTimerRef.current = window.setTimeout(() => {
+              soundCloudReadyTimerRef.current = null;
+              enableSoundCloudControls();
+            }, mobileWarmupMs);
+          };
 
           widget.bind(playerWindow.SC.Widget.Events.READY, () => {
-            markSoundCloudReady();
+            startSoundCloudWarmup(widget, enableSoundCloudControls);
+          });
+          widget.bind(playerWindow.SC.Widget.Events.LOAD_PROGRESS, (event?: SoundCloudWidgetEvent) => {
+            if (soundCloudWarmupActiveRef.current) {
+              return;
+            }
+            const progress = resolveSoundCloudLoadProgress(event);
+            if (progress != null && progress > 0) {
+              enableSoundCloudControls();
+              return;
+            }
+            scheduleSoundCloudControlsReady();
           });
           widget.bind(playerWindow.SC.Widget.Events.PLAY, () => {
+            if (soundCloudWarmupActiveRef.current) {
+              return;
+            }
             playbackStartedRef.current = true;
             publishNowPlayingMetadata();
             setIsPlaying(true);
@@ -1617,6 +1738,10 @@ export function ArchiveSetExplorer({
             pollPlayerTime();
           });
           widget.bind(playerWindow.SC.Widget.Events.PAUSE, () => {
+            if (soundCloudWarmupActiveRef.current) {
+              restoreSoundCloudAfterWarmup(widget, enableSoundCloudControls);
+              return;
+            }
             setIsPlaying(false);
             pollPlayerTime();
           });
@@ -1635,6 +1760,16 @@ export function ArchiveSetExplorer({
           widget.bind(
             playerWindow.SC.Widget.Events.PLAY_PROGRESS,
             (event?: SoundCloudWidgetEvent) => {
+              if (soundCloudWarmupActiveRef.current) {
+                finishSoundCloudWarmup(widget);
+                return;
+              }
+              if (!playbackStartedRef.current) {
+                playbackStartedRef.current = true;
+                publishNowPlayingMetadata();
+              }
+              setIsPlaying(true);
+              startPlayerPoll();
               const seconds = resolveSoundCloudEventSeconds(event);
               if (seconds != null) {
                 updateFromPolledTime(seconds);
@@ -1643,17 +1778,6 @@ export function ArchiveSetExplorer({
               pollPlayerTime();
             },
           );
-          widget.getPosition(() => {
-            markSoundCloudReady();
-          });
-          window.setTimeout(() => {
-            if (cancelled || playerReadyRef.current || !widget.getPosition) {
-              return;
-            }
-            widget.getPosition(() => {
-              markSoundCloudReady();
-            });
-          }, 1200);
         })
         .catch(() => {
           if (!cancelled) {
@@ -1664,7 +1788,7 @@ export function ArchiveSetExplorer({
 
     return () => {
       cancelled = true;
-      destroyPlayers();
+      destroyPlayers(false);
       youtubeHost?.replaceChildren();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1737,7 +1861,7 @@ export function ArchiveSetExplorer({
   useEffect(() => {
     return () => {
       stopHeroRail();
-      destroyPlayers();
+      destroyPlayers(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1891,7 +2015,7 @@ export function ArchiveSetExplorer({
                 {activeSource.kind === "soundcloud" && !scEmbedBlocked ? (
                   <iframe
                     allow="autoplay"
-                    loading="lazy"
+                    loading="eager"
                     ref={soundCloudFrameRef}
                     src={activeSource.embedSrc}
                     title="Set source player"
@@ -2269,8 +2393,10 @@ export function ArchiveSetExplorer({
                                     "track-tool-btn",
                                     "js-track-play",
                                     isActive && isPlaying && "active",
+                                    playbackControlsDisabled && "is-loading",
                                   )}
                                   data-time={track.start.toFixed(3)}
+                                  disabled={playbackControlsDisabled}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     if (ytEmbedBlocked && activeSource.kind === "youtube") {
@@ -2292,6 +2418,8 @@ export function ArchiveSetExplorer({
                                   title={
                                     ytEmbedBlocked && activeSource.kind === "youtube"
                                       ? "Open source on YouTube at this timestamp"
+                                      : playbackControlsDisabled
+                                        ? "Player loading"
                                       : "Play / pause at this track"
                                   }
                                   type="button"
@@ -2553,9 +2681,14 @@ export function ArchiveSetExplorer({
                     {"\u23EE\uFE0E"}
                   </button>
                   <button
-                    className={joinClasses("dock-play-btn", isPlaying && "is-playing")}
+                    className={joinClasses(
+                      "dock-play-btn",
+                      isPlaying && "is-playing",
+                      playbackControlsDisabled && "is-loading",
+                    )}
+                    disabled={playbackControlsDisabled}
                     onClick={togglePlay}
-                    title="Play / pause"
+                    title={playbackControlsDisabled ? "Player loading" : "Play / pause"}
                     type="button"
                   >
                     {isPlaying ? "❚❚" : "▶"}

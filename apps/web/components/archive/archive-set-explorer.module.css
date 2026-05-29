@@ -1164,6 +1164,21 @@
   border-color: #fff;
 }
 
+.root :global(.js-track-play:disabled),
+.root :global(.js-track-play.is-loading) {
+  border-color: rgb(216 255 90 / 28%);
+  background: rgb(216 255 90 / 7%);
+  color: rgb(216 255 90 / 46%);
+  cursor: wait;
+  opacity: 1;
+}
+
+.root :global(.js-track-play:disabled:hover),
+.root :global(.js-track-play.is-loading:hover) {
+  border-color: rgb(216 255 90 / 34%);
+  color: rgb(216 255 90 / 52%);
+}
+
 .root :global(.track-tool-btn.embed-btn) {
   border-color: #1db954;
   color: #1db954;
@@ -1462,6 +1477,15 @@
 .root :global(.dock-play-btn.is-playing) {
   background: #101510;
   color: var(--lime);
+}
+
+.root :global(.dock-play-btn:disabled),
+.root :global(.dock-play-btn.is-loading) {
+  border-color: rgb(216 255 90 / 36%);
+  background: rgb(216 255 90 / 13%);
+  color: rgb(216 255 90 / 58%);
+  cursor: wait;
+  opacity: 1;
 }
 
 .root :global(.dock-actions) {
