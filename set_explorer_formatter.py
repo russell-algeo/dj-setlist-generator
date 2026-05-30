@@ -1707,11 +1707,13 @@ def render_set_explorer_html(
         f"<span>{esc(format_time(total_duration * pct / 100.0))}</span>" for pct in (0, 25, 50, 75, 100)
     )
 
+    title_raw = str(mix_info.get("title") or "").strip() or "Untitled Set"
     set_payload = {
         "duration": total_duration,
         "platform": platform,
         "embedId": embed_id,
         "sourceUrl": source_url,
+        "storageKey": source_url or title_raw or filename,
         "tracks": [
             {
                 "idx": r["position"],
@@ -1733,7 +1735,6 @@ def render_set_explorer_html(
         "journeyPoints": journey_points,
     }
 
-    title_raw = str(mix_info.get("title") or "").strip() or "Untitled Set"
     title = esc(title_raw)
     title_len = len(title_raw)
     if title_len >= 68:
@@ -2079,9 +2080,13 @@ def render_set_explorer_html(
   const PLAYER_PLATFORM = String(SET_DATA.platform || '').toLowerCase();
   const PLAYER_EMBED_ID = String(SET_DATA.embedId || '');
   const PLAYER_SOURCE_URL = String(SET_DATA.sourceUrl || '');
+  const PLAYBACK_STORAGE_KEY = `set-signal:playback:v1:${{String(SET_DATA.storageKey || PLAYER_SOURCE_URL || window.location.pathname)}}`;
+  const PLAYBACK_SAVE_INTERVAL_MS = 5000;
+  const PLAYBACK_SAVE_DELTA_SECONDS = 3;
   const byIdx = new Map(SET_DATA.tracks.map(t => [String(t.idx), t]));
   let currentPreviewAudio = null;
   let currentPreviewBtn = null;
+  let lastPlaybackSave = {{ time: -1, updatedAt: 0 }};
   let setHeroRailRaf = 0;
   let setHeroRailLastTs = 0;
   let setHeroResizeTimer = null;
@@ -2104,6 +2109,50 @@ def render_set_explorer_html(
     const s = seconds % 60;
     if (h > 0) return `${{h}}:${{String(m).padStart(2,'0')}}:${{String(s).padStart(2,'0')}}`;
     return `${{m}}:${{String(s).padStart(2,'0')}}`;
+  }}
+
+  function readStoredPlaybackPosition() {{
+    const duration = Math.max(0, SET_DATA.duration || 0);
+    if (!duration) return null;
+    try {{
+      const raw = window.localStorage.getItem(PLAYBACK_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const current = Number(parsed?.currentTime);
+      if (!Number.isFinite(current) || current < 1) return null;
+      return Math.max(0, Math.min(duration, current));
+    }} catch (_err) {{
+      return null;
+    }}
+  }}
+
+  function persistPlaybackPosition(seconds = STATE.currentTime, force = false) {{
+    const duration = Math.max(0, SET_DATA.duration || 0);
+    if (!duration || !Number.isFinite(Number(seconds))) return;
+    const safe = Math.max(0, Math.min(duration, Number(seconds)));
+    const now = Date.now();
+    if (
+      !force &&
+      now - lastPlaybackSave.updatedAt < PLAYBACK_SAVE_INTERVAL_MS &&
+      Math.abs(safe - lastPlaybackSave.time) < PLAYBACK_SAVE_DELTA_SECONDS
+    ) {{
+      return;
+    }}
+    try {{
+      window.localStorage.setItem(
+        PLAYBACK_STORAGE_KEY,
+        JSON.stringify({{
+          currentTime: safe,
+          duration,
+          isPlaying: !!STATE.isPlaying,
+          sourceUrl: PLAYER_SOURCE_URL || null,
+          updatedAt: now,
+        }})
+      );
+      lastPlaybackSave = {{ time: safe, updatedAt: now }};
+    }} catch (_err) {{
+      // Storage can be unavailable in private browsing or constrained WebViews.
+    }}
   }}
 
   function isInteractiveElement(el) {{
@@ -2278,14 +2327,30 @@ def render_set_explorer_html(
     const pct = Math.max(0, Math.min(100, (safeCurrent / duration) * 100));
     dockProgressFill.style.width = `${{pct}}%`;
     dockCurrentTime.textContent = fmtTime(safeCurrent);
+    syncMediaSessionPosition();
   }}
 
-  function updateFromTime(seconds, scroll = false) {{
+  function syncMediaSessionPosition() {{
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = STATE.isPlaying ? 'playing' : 'paused';
+    try {{
+      navigator.mediaSession.setPositionState({{
+        duration: Math.max(0, SET_DATA.duration || 0),
+        playbackRate: 1,
+        position: Math.max(0, Math.min(SET_DATA.duration || 0, STATE.currentTime || 0)),
+      }});
+    }} catch (_err) {{
+      // Position state support is uneven, especially around embedded players.
+    }}
+  }}
+
+  function updateFromTime(seconds, scroll = false, save = true) {{
     const duration = Math.max(0, SET_DATA.duration || 0);
     STATE.currentTime = Math.max(0, Math.min(duration, seconds || 0));
     const tr = findTrackByTime(STATE.currentTime);
     if (tr) setActiveTrack(tr.idx, scroll);
     updateProgress();
+    if (save) persistPlaybackPosition(STATE.currentTime);
   }}
 
   function applyFilters() {{
@@ -2696,6 +2761,7 @@ def render_set_explorer_html(
       dockPlay.setAttribute('aria-label', STATE.isPlaying ? 'Pause' : 'Play');
       dockPlay.classList.toggle('is-playing', STATE.isPlaying);
     }}
+    syncMediaSessionPosition();
     updatePlayButtons();
   }}
 
@@ -2741,9 +2807,10 @@ def render_set_explorer_html(
   function updateFromPolledTime(seconds) {{
     const duration = Math.max(0, SET_DATA.duration || 0);
     const safe = Math.max(0, Math.min(duration, seconds || 0));
+    if (Date.now() < seekLockUntil) return;
     STATE.currentTime = safe;
     updateProgress();
-    if (Date.now() < seekLockUntil) return;
+    persistPlaybackPosition(safe);
     const tr = findTrackByTime(safe);
     if (!tr) return;
     if (String(tr.idx) !== String(STATE.activeIdx || '')) {{
@@ -2764,6 +2831,31 @@ def render_set_explorer_html(
         if (Number.isFinite(seconds)) updateFromPolledTime(seconds);
       }});
     }}
+  }}
+
+  function persistLatestPlayerPosition(force = true) {{
+    if (Date.now() < seekLockUntil) {{
+      persistPlaybackPosition(STATE.currentTime, force);
+      return;
+    }}
+    if (PLAYER_PLATFORM === 'youtube' && ytPlayer && ytPlayer.getCurrentTime && playerReady) {{
+      const current = ytPlayer.getCurrentTime();
+      if (Number.isFinite(current)) {{
+        updateFromPolledTime(current);
+        persistPlaybackPosition(current, force);
+        return;
+      }}
+    }}
+    if (PLAYER_PLATFORM === 'soundcloud' && scWidget && scWidget.getPosition && playerReady) {{
+      scWidget.getPosition(ms => {{
+        const seconds = Number(ms) / 1000;
+        if (Number.isFinite(seconds)) {{
+          updateFromPolledTime(seconds);
+          persistPlaybackPosition(seconds, force);
+        }}
+      }});
+    }}
+    persistPlaybackPosition(STATE.currentTime, force);
   }}
 
   function startPlayerPoll() {{
@@ -2806,12 +2898,20 @@ def render_set_explorer_html(
   }}
 
   function flushPendingSeek() {{
-    if (pendingSeek === null) return;
+    if (pendingSeek === null) return false;
     const target = pendingSeek;
     const autoplay = pendingAutoplay;
     pendingSeek = null;
     pendingAutoplay = false;
     seekPlayer(target, false, autoplay);
+    return true;
+  }}
+
+  function restoreReadyPlayerPosition() {{
+    if (pendingSeek !== null) return;
+    const target = Number(STATE.currentTime || 0);
+    if (!Number.isFinite(target) || target < 1) return;
+    seekPlayer(target, false, false);
   }}
 
   function buildSourceLinkAt(seconds) {{
@@ -2873,7 +2973,8 @@ def render_set_explorer_html(
           events: {{
             onReady: () => {{
               playerReady = true;
-              flushPendingSeek();
+              const flushedPendingSeek = flushPendingSeek();
+              if (!flushedPendingSeek) restoreReadyPlayerPosition();
             }},
             onStateChange: (event) => {{
               const state = event?.data;
@@ -2889,6 +2990,7 @@ def render_set_explorer_html(
                 setPlaying(false);
                 stopPlayerPoll();
                 pollPlayerTime();
+                persistLatestPlayerPosition(true);
               }}
             }},
             onError: () => {{
@@ -2933,7 +3035,8 @@ def render_set_explorer_html(
           readyTimeout = null;
         }}
         playerReady = true;
-        flushPendingSeek();
+        const flushedPendingSeek = flushPendingSeek();
+        if (!flushedPendingSeek) restoreReadyPlayerPosition();
       }});
       scWidget.bind(window.SC.Widget.Events.PLAY, () => {{
         setPlaying(true);
@@ -2943,11 +3046,13 @@ def render_set_explorer_html(
         setPlaying(false);
         stopPlayerPoll();
         pollPlayerTime();
+        persistLatestPlayerPosition(true);
       }});
       scWidget.bind(window.SC.Widget.Events.FINISH, () => {{
         setPlaying(false);
         stopPlayerPoll();
         pollPlayerTime();
+        persistLatestPlayerPosition(true);
       }});
     }}).catch(() => {{
       playerReady = false;
@@ -3022,13 +3127,19 @@ def render_set_explorer_html(
   }}
 
   function playPlayer() {{
+    const startAt = Math.max(0, Math.min(SET_DATA.duration || 0, STATE.currentTime || 0));
     if (PLAYER_PLATFORM === 'youtube' && PLAYER_EMBED_ID) {{
       if (ytEmbedBlocked) {{
         setPlaying(false);
         return;
       }}
-      if (ytPlayer && playerReady && ytPlayer.playVideo) ytPlayer.playVideo();
-      else pendingAutoplay = true;
+      if (ytPlayer && playerReady && ytPlayer.playVideo) {{
+        if (startAt > 0 && ytPlayer.seekTo) ytPlayer.seekTo(startAt, true);
+        ytPlayer.playVideo();
+      }} else {{
+        pendingSeek = startAt;
+        pendingAutoplay = true;
+      }}
       setPlaying(true);
       return;
     }}
@@ -3037,8 +3148,13 @@ def render_set_explorer_html(
         setPlaying(false);
         return;
       }}
-      if (scWidget && playerReady && scWidget.play) scWidget.play();
-      else pendingAutoplay = true;
+      if (scWidget && playerReady && scWidget.play) {{
+        if (startAt > 0 && scWidget.seekTo) scWidget.seekTo(startAt * 1000);
+        scWidget.play();
+      }} else {{
+        pendingSeek = startAt;
+        pendingAutoplay = true;
+      }}
       setPlaying(true);
       return;
     }}
@@ -3049,14 +3165,17 @@ def render_set_explorer_html(
   function pausePlayer() {{
     if (PLAYER_PLATFORM === 'youtube' && ytPlayer && playerReady && ytPlayer.pauseVideo) {{
       ytPlayer.pauseVideo();
+      persistLatestPlayerPosition(true);
       return;
     }}
     if (PLAYER_PLATFORM === 'soundcloud' && scWidget && playerReady && scWidget.pause) {{
       scWidget.pause();
+      persistLatestPlayerPosition(true);
       return;
     }}
     setPlaying(false);
     stopFallbackTick();
+    persistPlaybackPosition(STATE.currentTime, true);
   }}
 
   function jumpTo(seconds, scroll = false, autoplay = true) {{
@@ -3096,6 +3215,35 @@ def render_set_explorer_html(
       jumpTo(0, false, true);
     }}
     prevTrackPressTs = now;
+  }}
+
+  function setMediaActionHandler(action, handler) {{
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setActionHandler) return;
+    try {{
+      navigator.mediaSession.setActionHandler(action, handler);
+    }} catch (_err) {{
+      // Browser support varies by action and platform.
+    }}
+  }}
+
+  function installMediaSessionHandlers() {{
+    setMediaActionHandler('play', () => playPlayer());
+    setMediaActionHandler('pause', () => {{
+      pausePlayer();
+      persistLatestPlayerPosition(true);
+    }});
+    setMediaActionHandler('seekbackward', event => {{
+      jumpTo((STATE.currentTime || 0) - (event?.seekOffset || 15), false, !!STATE.isPlaying);
+    }});
+    setMediaActionHandler('seekforward', event => {{
+      jumpTo((STATE.currentTime || 0) + (event?.seekOffset || 15), false, !!STATE.isPlaying);
+    }});
+    setMediaActionHandler('seekto', event => {{
+      if (typeof event?.seekTime !== 'number') return;
+      jumpTo(event.seekTime, false, !!STATE.isPlaying);
+    }});
+    setMediaActionHandler('previoustrack', () => prevTrack());
+    setMediaActionHandler('nexttrack', () => nextTrack());
   }}
 
   document.getElementById('dockPlay')?.addEventListener('click', togglePlay);
@@ -3146,9 +3294,17 @@ def render_set_explorer_html(
   }});
 
   document.addEventListener('visibilitychange', () => {{
-    if (document.hidden) stopSetHeroRail();
-    else startSetHeroRail();
+    if (document.hidden) {{
+      stopSetHeroRail();
+      persistLatestPlayerPosition(true);
+    }} else {{
+      startSetHeroRail();
+      pollPlayerTime();
+    }}
   }});
+
+  window.addEventListener('pagehide', () => persistLatestPlayerPosition(true));
+  window.addEventListener('beforeunload', () => persistLatestPlayerPosition(true));
 
   window.jumpTo = jumpTo;
 
@@ -3174,8 +3330,12 @@ def render_set_explorer_html(
   applyFilters();
   renderJourney();
   setJourneyOpen(false);
-  updateFromTime(0, false);
+  const restoredPlaybackTime = (window.location.hash || '').startsWith('#track-')
+    ? null
+    : readStoredPlaybackPosition();
+  updateFromTime(restoredPlaybackTime ?? 0, false, false);
   setPlaying(false);
+  installMediaSessionHandlers();
   initEmbeddedPlayer();
   fitHeroTitle();
   startSetHeroRail();

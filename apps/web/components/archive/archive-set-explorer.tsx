@@ -162,12 +162,63 @@ const JOURNEY_CODES: Record<JourneyMetric, string> = {
   energy: "NRG",
 };
 const TOOLTIP_OFFSET = 14;
+const PLAYBACK_STORAGE_PREFIX = "set-signal:playback:v1:";
+const PLAYBACK_SAVE_INTERVAL_MS = 5000;
+const PLAYBACK_SAVE_DELTA_SECONDS = 3;
+
+type StoredPlaybackPosition = {
+  currentTime: number;
+  duration: number;
+  isPlaying: boolean;
+  sourceUrl: string | null;
+  updatedAt: number;
+};
 
 const joinClasses = (...values: Array<string | false | null | undefined>) =>
   values.filter(Boolean).join(" ");
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+
+const buildPlaybackStorageKey = (setId: string) => `${PLAYBACK_STORAGE_PREFIX}${setId}`;
+
+const readStoredPlaybackPosition = (storageKey: string, duration: number) => {
+  if (typeof window === "undefined" || duration <= 0) {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<StoredPlaybackPosition>;
+    const currentTime = Number(parsed.currentTime);
+    if (!Number.isFinite(currentTime) || currentTime < 1) {
+      return null;
+    }
+
+    return clamp(currentTime, 0, Math.max(0, duration));
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredPlaybackPosition = (
+  storageKey: string,
+  position: StoredPlaybackPosition,
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(position));
+  } catch {
+    // Storage can be unavailable in private browsing or constrained WebViews.
+  }
+};
 
 const roundHalfEven = (value: number, precision = 0) => {
   const factor = 10 ** precision;
@@ -764,6 +815,7 @@ export function ArchiveSetExplorer({
 }) {
   const model = useMemo(() => buildSetModel(detail), [detail]);
   const sourceOptions = useMemo(() => buildSourceOptions(detail), [detail]);
+  const playbackStorageKey = useMemo(() => buildPlaybackStorageKey(detail.id), [detail.id]);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | null>(null);
   const activeSource = useMemo(() => {
     if (sourceOptions.length === 0) {
@@ -814,10 +866,12 @@ export function ArchiveSetExplorer({
   const currentTimeRef = useRef(currentTime);
   const isPlayingRef = useRef(isPlaying);
   const activeIdxRef = useRef<number | null>(activeIdx);
+  const lastPlaybackSaveRef = useRef({ time: -1, updatedAt: 0 });
   const playbackStartedRef = useRef(false);
   const playerReadyRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
   const pendingAutoplayRef = useRef(false);
+  const restoredPlaybackTimeRef = useRef<number | null>(null);
   const seekLockUntilRef = useRef(0);
   const fallbackTickRef = useRef<number | null>(null);
   const playerPollRef = useRef<number | null>(null);
@@ -1020,9 +1074,41 @@ export function ArchiveSetExplorer({
     }
   };
 
+  const persistPlaybackPositionForTime = (seconds: number, force = false) => {
+    const duration = Math.max(0, detail.duration);
+    if (duration <= 0 || !Number.isFinite(seconds)) {
+      return;
+    }
+
+    const safeSeconds = clamp(seconds, 0, duration);
+    const now = Date.now();
+    const lastSave = lastPlaybackSaveRef.current;
+    if (
+      !force &&
+      now - lastSave.updatedAt < PLAYBACK_SAVE_INTERVAL_MS &&
+      Math.abs(safeSeconds - lastSave.time) < PLAYBACK_SAVE_DELTA_SECONDS
+    ) {
+      return;
+    }
+
+    writeStoredPlaybackPosition(playbackStorageKey, {
+      currentTime: safeSeconds,
+      duration,
+      isPlaying: isPlayingRef.current,
+      sourceUrl: activeSource.sourceUrl ?? detail.sourceUrl,
+      updatedAt: now,
+    });
+    lastPlaybackSaveRef.current = {
+      time: safeSeconds,
+      updatedAt: now,
+    };
+  };
+
   const updateFromTime = (seconds: number, scroll: boolean) => {
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
+    currentTimeRef.current = safeSeconds;
     setCurrentTime(safeSeconds);
+    persistPlaybackPositionForTime(safeSeconds);
     if (!playbackStartedRef.current) {
       return;
     }
@@ -1147,10 +1233,12 @@ export function ArchiveSetExplorer({
     if (!playbackStartedRef.current) {
       return;
     }
-    setCurrentTime(safeSeconds);
     if (Date.now() < seekLockUntilRef.current) {
       return;
     }
+    currentTimeRef.current = safeSeconds;
+    setCurrentTime(safeSeconds);
+    persistPlaybackPositionForTime(safeSeconds);
     const track = findTrackByTime(safeSeconds);
     if (track && track.idx !== activeIdxRef.current) {
       setActiveIdx(track.idx);
@@ -1200,6 +1288,42 @@ export function ArchiveSetExplorer({
         }
       });
     }
+  };
+
+  const persistLatestPlayerPosition = (force = true) => {
+    if (Date.now() < seekLockUntilRef.current) {
+      persistPlaybackPositionForTime(currentTimeRef.current, force);
+      return;
+    }
+
+    if (
+      activeSource.kind === "youtube" &&
+      ytPlayerRef.current?.getCurrentTime &&
+      playerReadyRef.current
+    ) {
+      const seconds = ytPlayerRef.current.getCurrentTime();
+      if (Number.isFinite(seconds)) {
+        updateFromPolledTime(seconds);
+        persistPlaybackPositionForTime(seconds, force);
+        return;
+      }
+    }
+
+    if (
+      activeSource.kind === "soundcloud" &&
+      scWidgetRef.current?.getPosition &&
+      playerReadyRef.current
+    ) {
+      scWidgetRef.current.getPosition((milliseconds: number) => {
+        const seconds = Number(milliseconds) / 1000;
+        if (Number.isFinite(seconds)) {
+          updateFromPolledTime(seconds);
+          persistPlaybackPositionForTime(seconds, force);
+        }
+      });
+    }
+
+    persistPlaybackPositionForTime(currentTimeRef.current, force);
   };
 
   const restoreSoundCloudAfterWarmup = (widget: SoundCloudWidget, onDone: () => void) => {
@@ -1257,14 +1381,16 @@ export function ArchiveSetExplorer({
 
   const flushPendingSeek = () => {
     if (pendingSeekRef.current == null) {
-      return;
+      return false;
     }
 
     const target = pendingSeekRef.current;
     const autoplay = pendingAutoplayRef.current;
     pendingSeekRef.current = null;
     pendingAutoplayRef.current = false;
+    restoredPlaybackTimeRef.current = null;
     seekPlayer(target, false, autoplay);
+    return true;
   };
 
   const startFallbackProgress = () => {
@@ -1345,6 +1471,24 @@ export function ArchiveSetExplorer({
     }
   };
 
+  const restoreReadyPlayerPosition = () => {
+    if (pendingSeekRef.current != null) {
+      restoredPlaybackTimeRef.current = null;
+      return;
+    }
+
+    const restoredSeconds = restoredPlaybackTimeRef.current;
+    const currentSeconds = playbackStartedRef.current ? currentTimeRef.current : null;
+    const targetSeconds = restoredSeconds ?? currentSeconds;
+    restoredPlaybackTimeRef.current = null;
+
+    if (targetSeconds == null || targetSeconds < 1) {
+      return;
+    }
+
+    seekPlayer(targetSeconds, false, false);
+  };
+
   const jumpTo = (seconds: number, scroll: boolean, autoplay: boolean) => {
     seekPlayer(seconds, scroll, autoplay);
   };
@@ -1355,6 +1499,7 @@ export function ArchiveSetExplorer({
       stopFallbackTick();
       ytPlayerRef.current.pauseVideo();
       pollPlayerTime();
+      persistLatestPlayerPosition(true);
       return;
     }
 
@@ -1363,11 +1508,13 @@ export function ArchiveSetExplorer({
       stopFallbackTick();
       scWidgetRef.current.pause();
       pollPlayerTime();
+      persistLatestPlayerPosition(true);
       return;
     }
 
     setIsPlaying(false);
     stopFallbackTick();
+    persistPlaybackPositionForTime(currentTimeRef.current, true);
   };
 
   const playPlayer = () => {
@@ -1496,11 +1643,37 @@ export function ArchiveSetExplorer({
 
   useEffect(() => {
     playbackStartedRef.current = false;
+    restoredPlaybackTimeRef.current = null;
+    lastPlaybackSaveRef.current = { time: -1, updatedAt: 0 };
+    currentTimeRef.current = 0;
+    activeIdxRef.current = null;
+    isPlayingRef.current = false;
     setActiveIdx(null);
     setCurrentTime(0);
     setIsPlaying(false);
     setJourneyOpen(false);
-  }, [detail.id]);
+
+    const hasTrackHash =
+      typeof window !== "undefined" && window.location.hash.startsWith("#track-");
+    if (hasTrackHash) {
+      return;
+    }
+
+    const restoredSeconds = readStoredPlaybackPosition(playbackStorageKey, detail.duration);
+    if (restoredSeconds == null) {
+      return;
+    }
+
+    const restoredTrack = model.tracks.find(
+      (track) => restoredSeconds >= track.start && restoredSeconds < track.endResolved,
+    );
+    playbackStartedRef.current = true;
+    restoredPlaybackTimeRef.current = restoredSeconds;
+    currentTimeRef.current = restoredSeconds;
+    activeIdxRef.current = restoredTrack?.idx ?? null;
+    setCurrentTime(restoredSeconds);
+    setActiveIdx(restoredTrack?.idx ?? null);
+  }, [detail.id, detail.duration, model.tracks, playbackStorageKey]);
 
   useEffect(() => {
     fitHeroTitle();
@@ -1531,6 +1704,35 @@ export function ArchiveSetExplorer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id, model.heroCards.length, model.heroTitleMinSize]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const persistCurrentPosition = () => {
+      persistLatestPlayerPosition(true);
+    };
+    const handleVisibility = () => {
+      if (document.hidden) {
+        persistCurrentPosition();
+      } else {
+        pollPlayerTime();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", persistCurrentPosition);
+    window.addEventListener("beforeunload", persistCurrentPosition);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", persistCurrentPosition);
+      window.removeEventListener("beforeunload", persistCurrentPosition);
+      persistCurrentPosition();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id, activeSource.kind, activeSource.sourceUrl]);
 
   useLayoutEffect(() => {
     if (typeof window === "undefined") {
@@ -1627,9 +1829,12 @@ export function ArchiveSetExplorer({
                 },
                 onReady: () => {
                   setPlayerReadyState(true);
+                  const flushedPendingSeek = flushPendingSeek();
+                  if (!flushedPendingSeek) {
+                    restoreReadyPlayerPosition();
+                  }
                   startPlayerPoll();
                   pollPlayerTime();
-                  flushPendingSeek();
                 },
                 onStateChange: (event: { data?: number }) => {
                   const YT = playerWindow.YT;
@@ -1650,6 +1855,7 @@ export function ArchiveSetExplorer({
                   if (paused) {
                     setIsPlaying(false);
                     pollPlayerTime();
+                    persistLatestPlayerPosition(true);
                   }
                 },
               },
@@ -1694,9 +1900,12 @@ export function ArchiveSetExplorer({
             widget.setVolume?.(100);
             clearSoundCloudReadyTimer();
             setPlayerReadyState(true);
+            const flushedPendingSeek = flushPendingSeek();
+            if (!flushedPendingSeek) {
+              restoreReadyPlayerPosition();
+            }
             startPlayerPoll();
             pollPlayerTime();
-            flushPendingSeek();
           };
           const scheduleSoundCloudControlsReady = () => {
             if (cancelled || playerReadyRef.current || soundCloudReadyTimerRef.current != null) {
@@ -1744,10 +1953,12 @@ export function ArchiveSetExplorer({
             }
             setIsPlaying(false);
             pollPlayerTime();
+            persistLatestPlayerPosition(true);
           });
           widget.bind(playerWindow.SC.Widget.Events.FINISH, () => {
             setIsPlaying(false);
             pollPlayerTime();
+            persistLatestPlayerPosition(true);
           });
           widget.bind(playerWindow.SC.Widget.Events.SEEK, (event?: SoundCloudWidgetEvent) => {
             const seconds = resolveSoundCloudEventSeconds(event);
@@ -1839,6 +2050,60 @@ export function ArchiveSetExplorer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id, detail.title, nowPlayingArtist, activeSource.kind, activeSource.sourceUrl]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("mediaSession" in navigator)) {
+      return;
+    }
+
+    const setActionHandler = (
+      action: MediaSessionAction,
+      handler: MediaSessionActionHandler | null,
+    ) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Browser support varies by action and platform.
+      }
+    };
+
+    setActionHandler("play", () => {
+      playPlayer();
+    });
+    setActionHandler("pause", () => {
+      pausePlayer();
+      persistLatestPlayerPosition(true);
+    });
+    setActionHandler("seekbackward", (event) => {
+      jumpTo(currentTimeRef.current - (event.seekOffset ?? 15), false, isPlayingRef.current);
+    });
+    setActionHandler("seekforward", (event) => {
+      jumpTo(currentTimeRef.current + (event.seekOffset ?? 15), false, isPlayingRef.current);
+    });
+    setActionHandler("seekto", (event) => {
+      if (typeof event.seekTime !== "number") {
+        return;
+      }
+      jumpTo(event.seekTime, false, isPlayingRef.current);
+    });
+    setActionHandler("previoustrack", previousTrack);
+    setActionHandler("nexttrack", nextTrack);
+
+    return () => {
+      for (const action of [
+        "play",
+        "pause",
+        "seekbackward",
+        "seekforward",
+        "seekto",
+        "previoustrack",
+        "nexttrack",
+      ] as MediaSessionAction[]) {
+        setActionHandler(action, null);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id, activeSource.kind, activeSource.sourceUrl]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) {
