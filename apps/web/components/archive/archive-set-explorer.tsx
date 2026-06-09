@@ -8,6 +8,11 @@ import { buildArtistHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
+import {
+  mergeListenIntervals,
+  type ListenInterval,
+  type ListenProgressSummary,
+} from "@/lib/archive/listen-progress";
 import { buildSetSpotifyExportCounts } from "@/lib/archive/spotify-export";
 import type {
   ArchiveConfidence,
@@ -165,6 +170,9 @@ const TOOLTIP_OFFSET = 14;
 const PLAYBACK_STORAGE_PREFIX = "set-signal:playback:v1:";
 const PLAYBACK_SAVE_INTERVAL_MS = 5000;
 const PLAYBACK_SAVE_DELTA_SECONDS = 3;
+const LISTEN_PROGRESS_STORAGE_PREFIX = "set-signal:listen-progress-cache:v1:";
+const LISTEN_PROGRESS_SYNC_INTERVAL_MS = 5000;
+const LISTEN_PROGRESS_MIN_INTERVAL_SECONDS = 0.75;
 
 type StoredPlaybackPosition = {
   currentTime: number;
@@ -174,6 +182,18 @@ type StoredPlaybackPosition = {
   updatedAt: number;
 };
 
+type StoredListenProgress = {
+  duration: number;
+  intervals: ListenInterval[];
+  lastPosition: number;
+  sourceUrl: string | null;
+  updatedAt: number;
+};
+
+type ListenProgressResponse = {
+  progress?: ListenProgressSummary;
+};
+
 const joinClasses = (...values: Array<string | false | null | undefined>) =>
   values.filter(Boolean).join(" ");
 
@@ -181,6 +201,9 @@ const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
 const buildPlaybackStorageKey = (setId: string) => `${PLAYBACK_STORAGE_PREFIX}${setId}`;
+
+const buildListenProgressStorageKey = (setId: string) =>
+  `${LISTEN_PROGRESS_STORAGE_PREFIX}${setId}`;
 
 const readStoredPlaybackPosition = (storageKey: string, duration: number) => {
   if (typeof window === "undefined" || duration <= 0) {
@@ -215,6 +238,62 @@ const writeStoredPlaybackPosition = (
 
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(position));
+  } catch {
+    // Storage can be unavailable in private browsing or constrained WebViews.
+  }
+};
+
+const readStoredListenProgress = (storageKey: string, duration: number) => {
+  if (typeof window === "undefined" || duration <= 0) {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<StoredListenProgress>;
+    const intervals = mergeListenIntervals(parsed.intervals ?? [], duration);
+    if (intervals.length === 0) {
+      return null;
+    }
+
+    return {
+      duration,
+      intervals,
+      lastPosition: clamp(Number(parsed.lastPosition ?? 0), 0, duration),
+      sourceUrl: typeof parsed.sourceUrl === "string" ? parsed.sourceUrl : null,
+      updatedAt: Number(parsed.updatedAt ?? Date.now()),
+    } satisfies StoredListenProgress;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredListenProgress = (
+  storageKey: string,
+  progress: StoredListenProgress,
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(progress));
+  } catch {
+    // Local retry buffering is best-effort and should never affect playback.
+  }
+};
+
+const clearStoredListenProgress = (storageKey: string) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(storageKey);
   } catch {
     // Storage can be unavailable in private browsing or constrained WebViews.
   }
@@ -816,6 +895,7 @@ export function ArchiveSetExplorer({
   const model = useMemo(() => buildSetModel(detail), [detail]);
   const sourceOptions = useMemo(() => buildSourceOptions(detail), [detail]);
   const playbackStorageKey = useMemo(() => buildPlaybackStorageKey(detail.id), [detail.id]);
+  const listenProgressStorageKey = useMemo(() => buildListenProgressStorageKey(detail.id), [detail.id]);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | null>(null);
   const activeSource = useMemo(() => {
     if (sourceOptions.length === 0) {
@@ -867,6 +947,10 @@ export function ArchiveSetExplorer({
   const isPlayingRef = useRef(isPlaying);
   const activeIdxRef = useRef<number | null>(activeIdx);
   const lastPlaybackSaveRef = useRef({ time: -1, updatedAt: 0 });
+  const listenIntervalsRef = useRef<ListenInterval[]>([]);
+  const lastListenSampleRef = useRef<{ time: number; wallTime: number } | null>(null);
+  const lastListenSyncAtRef = useRef(0);
+  const listenSyncInFlightRef = useRef(false);
   const playbackStartedRef = useRef(false);
   const playerReadyRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
@@ -891,7 +975,24 @@ export function ArchiveSetExplorer({
 
   useEffect(() => {
     setSelectedSourceUrl(null);
+    listenIntervalsRef.current = [];
+    lastListenSampleRef.current = null;
+    lastListenSyncAtRef.current = 0;
   }, [detail.id]);
+
+  useEffect(() => {
+    const cached = readStoredListenProgress(listenProgressStorageKey, detail.duration);
+    if (!cached) {
+      return;
+    }
+
+    listenIntervalsRef.current = mergeListenIntervals(
+      [...listenIntervalsRef.current, ...cached.intervals],
+      detail.duration,
+    );
+    void syncListenProgress(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id, detail.duration, listenProgressStorageKey]);
 
   useEffect(() => {
     if (sourceOptions.length < 2 || typeof window === "undefined") {
@@ -914,7 +1015,47 @@ export function ArchiveSetExplorer({
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
+    if (isPlaying) {
+      lastListenSampleRef.current = {
+        time: currentTimeRef.current,
+        wallTime: Date.now(),
+      };
+      return;
+    }
+
+    lastListenSampleRef.current = null;
+    void syncListenProgress(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const flushListenProgress = () => {
+      lastListenSampleRef.current = null;
+      void syncListenProgress(true);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushListenProgress();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", flushListenProgress);
+    window.addEventListener("pagehide", flushListenProgress);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", flushListenProgress);
+      window.removeEventListener("pagehide", flushListenProgress);
+      flushListenProgress();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id]);
 
   useEffect(() => {
     activeIdxRef.current = activeIdx;
@@ -939,6 +1080,104 @@ export function ArchiveSetExplorer({
   const playbackControlsDisabled = showDock && !playerReady;
   const artistNames = detail.artists.map((artist) => artist.name).join(", ");
   const nowPlayingArtist = detail.artistName ?? (artistNames || "Set Signal Archive");
+
+  function persistListenProgressCache() {
+    if (listenIntervalsRef.current.length === 0 || detail.duration <= 0) {
+      return;
+    }
+
+    writeStoredListenProgress(listenProgressStorageKey, {
+      duration: detail.duration,
+      intervals: listenIntervalsRef.current,
+      lastPosition: currentTimeRef.current,
+      sourceUrl: activeSource.sourceUrl ?? detail.sourceUrl,
+      updatedAt: Date.now(),
+    });
+  }
+
+  async function syncListenProgress(force = false) {
+    if (listenSyncInFlightRef.current || listenIntervalsRef.current.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    if (!force && now - lastListenSyncAtRef.current < LISTEN_PROGRESS_SYNC_INTERVAL_MS) {
+      return;
+    }
+
+    lastListenSyncAtRef.current = now;
+    persistListenProgressCache();
+    listenSyncInFlightRef.current = true;
+
+    try {
+      const response = await fetch("/api/archive/listen-progress", {
+        body: JSON.stringify({
+          duration: detail.duration,
+          intervals: listenIntervalsRef.current,
+          lastPosition: currentTimeRef.current,
+          setId: detail.id,
+          sourceUrl: activeSource.sourceUrl ?? detail.sourceUrl,
+        }),
+        credentials: "same-origin",
+        headers: {
+          "content-type": "application/json",
+        },
+        keepalive: force,
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = (await response.json()) as ListenProgressResponse;
+      if (payload.progress?.intervals) {
+        listenIntervalsRef.current = mergeListenIntervals(
+          [...listenIntervalsRef.current, ...payload.progress.intervals],
+          detail.duration,
+        );
+      }
+      clearStoredListenProgress(listenProgressStorageKey);
+    } catch {
+      persistListenProgressCache();
+    } finally {
+      listenSyncInFlightRef.current = false;
+    }
+  }
+
+  function recordListenPlaybackSample(seconds: number) {
+    if (!isPlayingRef.current || detail.duration <= 0 || Date.now() < seekLockUntilRef.current) {
+      lastListenSampleRef.current = null;
+      return;
+    }
+
+    const safeSeconds = clamp(seconds, 0, detail.duration);
+    const now = Date.now();
+    const lastSample = lastListenSampleRef.current;
+
+    if (lastSample) {
+      const playbackDelta = safeSeconds - lastSample.time;
+      const wallDelta = (now - lastSample.wallTime) / 1000;
+      const maxExpectedDelta = Math.max(2, wallDelta * 1.5 + 1);
+
+      if (
+        playbackDelta >= LISTEN_PROGRESS_MIN_INTERVAL_SECONDS &&
+        playbackDelta <= maxExpectedDelta
+      ) {
+        listenIntervalsRef.current = mergeListenIntervals(
+          [...listenIntervalsRef.current, [lastSample.time, safeSeconds]],
+          detail.duration,
+        );
+        persistListenProgressCache();
+        void syncListenProgress(false);
+      }
+    }
+
+    lastListenSampleRef.current = {
+      time: safeSeconds,
+      wallTime: now,
+    };
+  }
 
   const publishNowPlayingMetadata = () => {
     if (typeof window === "undefined" || !("mediaSession" in navigator) || !("MediaMetadata" in window)) {
@@ -1108,6 +1347,7 @@ export function ArchiveSetExplorer({
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
     currentTimeRef.current = safeSeconds;
     setCurrentTime(safeSeconds);
+    recordListenPlaybackSample(safeSeconds);
     persistPlaybackPositionForTime(safeSeconds);
     if (!playbackStartedRef.current) {
       return;
@@ -1238,6 +1478,7 @@ export function ArchiveSetExplorer({
     }
     currentTimeRef.current = safeSeconds;
     setCurrentTime(safeSeconds);
+    recordListenPlaybackSample(safeSeconds);
     persistPlaybackPositionForTime(safeSeconds);
     const track = findTrackByTime(safeSeconds);
     if (track && track.idx !== activeIdxRef.current) {
@@ -1389,6 +1630,7 @@ export function ArchiveSetExplorer({
     pendingSeekRef.current = null;
     pendingAutoplayRef.current = false;
     restoredPlaybackTimeRef.current = null;
+    lastListenSampleRef.current = null;
     seekPlayer(target, false, autoplay);
     return true;
   };
@@ -1415,6 +1657,7 @@ export function ArchiveSetExplorer({
   const seekPlayer = (seconds: number, scroll: boolean, autoplay: boolean) => {
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
     playbackStartedRef.current = true;
+    lastListenSampleRef.current = null;
     updateFromTime(safeSeconds, scroll);
     seekLockUntilRef.current = Date.now() + 1500;
 

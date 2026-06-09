@@ -70,6 +70,13 @@ type SetCardModel = ArchiveArtistSet & {
   visibleTracks: ArchiveArtistSetTrackRef[];
 };
 
+type ListenProgressResponse = {
+  progress?: Array<{
+    listened?: boolean;
+    setId?: string;
+  }>;
+};
+
 type AtlasTrackModel = ArchiveArtistAtlasTrack & {
   previewAnchorHref: string;
   searchBlob: string;
@@ -638,6 +645,9 @@ export function ArchiveArtistExplorer({
   const [setPage, setSetPage] = useState(0);
   const [compareSelection, setCompareSelection] = useState<string[]>([]);
   const [expandedSetCards, setExpandedSetCards] = useState<string[]>([]);
+  const [listenedSetIds, setListenedSetIds] = useState<Set<string>>(
+    () => new Set(artist.sets.filter((setItem) => setItem.listenProgress?.listened).map((setItem) => setItem.id)),
+  );
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.location.hash) {
@@ -1142,6 +1152,7 @@ export function ArchiveArtistExplorer({
     currentSetPage * SETS_PAGE_SIZE,
     currentSetPage * SETS_PAGE_SIZE + SETS_PAGE_SIZE,
   );
+  const visibleSetIdsKey = visibleSetCards.map((setItem) => setItem.id).join(",");
   const compareCards = compareSelection
     .map(
       (setId) =>
@@ -1334,6 +1345,58 @@ export function ArchiveArtistExplorer({
   useEffect(() => {
     setSetPage((current) => Math.min(current, maxSetPage));
   }, [maxSetPage]);
+
+  useEffect(() => {
+    const setIds = visibleSetIdsKey.split(",").filter(Boolean);
+    if (setIds.length === 0) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    params.set("setIds", setIds.join(","));
+
+    fetch(`/api/archive/listen-progress?${params.toString()}`, {
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return null;
+        }
+
+        return (await response.json()) as ListenProgressResponse;
+      })
+      .then((payload) => {
+        if (!payload?.progress || controller.signal.aborted) {
+          return;
+        }
+
+        setListenedSetIds((current) => {
+          const next = new Set(current);
+          for (const progress of payload.progress ?? []) {
+            if (!progress.setId) {
+              continue;
+            }
+            if (progress.listened) {
+              next.add(progress.setId);
+            } else {
+              next.delete(progress.setId);
+            }
+          }
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [visibleSetIdsKey]);
 
   const jumpToSetExplorer = () => {
     document.getElementById("sets-section")?.scrollIntoView({
@@ -2263,6 +2326,7 @@ export function ArchiveArtistExplorer({
                       miniTimeline={miniSegments}
                       selected={isCompared}
                       setHref={setItem.previewHref}
+                      listened={listenedSetIds.has(setItem.id)}
                       sourceHref={setItem.sourceUrl}
                       title={setItem.title}
                       titleTarget="_blank"

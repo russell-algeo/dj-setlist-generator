@@ -308,6 +308,44 @@ export const setEntries = app.table(
   }),
 );
 
+export const userSetListenProgress = app.table(
+  "user_set_listen_progress",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    setId: uuid("set_id")
+      .notNull()
+      .references(() => sets.id, { onDelete: "cascade" }),
+    durationSeconds: numeric("duration_seconds", {
+      precision: 10,
+      scale: 2,
+    }).default("0").notNull(),
+    intervals: jsonb("intervals").default(sql`'[]'::jsonb`).notNull(),
+    coverageRatio: numeric("coverage_ratio", {
+      precision: 6,
+      scale: 5,
+    }).default("0").notNull(),
+    lastPositionSeconds: numeric("last_position_seconds", {
+      precision: 10,
+      scale: 2,
+    }).default("0").notNull(),
+    sourceUrl: text("source_url"),
+    listenedAt: timestamp("listened_at", { withTimezone: true }),
+    ...timestamps(),
+  },
+  (table) => ({
+    compoundPk: primaryKey({
+      columns: [table.userId, table.setId],
+    }),
+    setIdx: index("user_set_listen_progress_set_id_idx").on(table.setId),
+    userUpdatedIdx: index("user_set_listen_progress_user_updated_idx").on(
+      table.userId,
+      table.updatedAt,
+    ),
+  }),
+);
+
 export const submissions = ops.table(
   "submissions",
   {
