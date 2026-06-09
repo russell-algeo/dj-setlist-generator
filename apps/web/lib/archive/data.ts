@@ -712,6 +712,7 @@ const getArtistSummaryUncached = async (
       id: setRow.id,
       slug: setRow.slug,
       title: setRow.title,
+      listenProgress: null,
       sourceUrl: setRow.sourceUrl,
       thumbnailUrl: setImageUrlById.get(setRow.id) ?? null,
       duration: Number(setRow.durationSeconds ?? 0),

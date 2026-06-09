@@ -46,6 +46,7 @@ type ArchiveSetCardProps = {
   metaPills: string[];
   selected?: boolean;
   setHref: string;
+  listened?: boolean;
   sourceHref?: string | null;
   title: string;
   titleTarget?: "_blank" | "_self";
@@ -108,6 +109,7 @@ export function ArchiveSetCard({
   metaPills,
   selected = false,
   setHref,
+  listened = false,
   sourceHref,
   title,
   titleTarget,
@@ -168,7 +170,14 @@ export function ArchiveSetCard({
   }
 
   return (
-    <article className={joinClasses(styles.card, !imageUrl && styles.emptyThumbCard, selected && styles.selected)}>
+    <article
+      className={joinClasses(
+        styles.card,
+        !imageUrl && styles.emptyThumbCard,
+        selected && styles.selected,
+        listened && styles.listened,
+      )}
+    >
       <div className={joinClasses(styles.thumb, !imageUrl && styles.thumbEmpty)}>
         {imageUrl ? (
           <a className={styles.thumbLink} href={setHref} {...imageLinkProps}>
@@ -202,6 +211,7 @@ export function ArchiveSetCard({
               {pill}
             </span>
           ))}
+          {listened ? <span className={styles.listenedPill}>Listened</span> : null}
         </div>
         <div className={styles.actions}>{actionItems.map(renderAction)}</div>
         <div className={joinClasses(styles.tracklist, tracklistExpanded && styles.tracklistOpen)}>

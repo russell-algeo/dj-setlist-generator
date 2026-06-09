@@ -62,6 +62,12 @@ export type ArchiveSetSourceLink = {
   matchConfidence: number | null;
 };
 
+export type ArchiveSetListenProgress = {
+  coverageRatio: number;
+  listened: boolean;
+  listenedAt: string | null;
+};
+
 export type ArchiveSetDetail = {
   id: string;
   slug: string;
@@ -113,6 +119,7 @@ export type ArchiveArtistSet = {
   id: string;
   slug: string;
   title: string;
+  listenProgress: ArchiveSetListenProgress | null;
   sourceUrl: string | null;
   thumbnailUrl: string | null;
   duration: number;
