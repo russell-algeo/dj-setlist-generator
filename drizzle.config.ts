@@ -23,6 +23,10 @@ export default defineConfig({
   dialect: "postgresql",
   schema: path.join(rootDir, "drizzle", "schema.ts"),
   out: path.join(rootDir, "drizzle", "migrations"),
+  migrations: {
+    schema: "public",
+    table: "__drizzle_migrations",
+  },
   dbCredentials: {
     url,
   },
