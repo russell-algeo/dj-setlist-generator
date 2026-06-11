@@ -27,6 +27,7 @@ node_modules/
 .next/
 dist/
 coverage/
+test-results/
 apps/web/.next/
 apps/web/.next.stale*/
 apps/web/.env.local

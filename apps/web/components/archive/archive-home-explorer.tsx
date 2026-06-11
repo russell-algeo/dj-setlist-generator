@@ -1899,13 +1899,15 @@ export function ArchiveHomeExplorer({
               <div className="artist-stack">
                 <div className="control">
                   <label htmlFor="artistSearch">Search Artists</label>
-                  <input
-                    id="artistSearch"
-                    onChange={(event) => setArtistQuery(event.target.value)}
-                    placeholder="find artist cards"
-                    type="text"
-                    value={artistQuery}
-                  />
+                  <span className="mobile-search-shell mobile-search-shell-compact">
+                    <input
+                      id="artistSearch"
+                      onChange={(event) => setArtistQuery(event.target.value)}
+                      placeholder="find artist cards"
+                      type="text"
+                      value={artistQuery}
+                    />
+                  </span>
                 </div>
                 <div
                   className={joinClasses(
@@ -2362,13 +2364,15 @@ export function ArchiveHomeExplorer({
                 </div>
                 <div className="control">
                   <label htmlFor="networkSearch">Find Artist</label>
-                  <input
-                    id="networkSearch"
-                    onChange={(event) => setNetworkSearch(event.target.value)}
-                    placeholder="search artist nodes"
-                    type="text"
-                    value={networkSearch}
-                  />
+                  <span className="mobile-search-shell mobile-search-shell-compact">
+                    <input
+                      id="networkSearch"
+                      onChange={(event) => setNetworkSearch(event.target.value)}
+                      placeholder="search artist nodes"
+                      type="text"
+                      value={networkSearch}
+                    />
+                  </span>
                 </div>
                 <div className="network-clear-wrap">
                   <button
@@ -2729,16 +2733,18 @@ export function ArchiveHomeExplorer({
               <div className="controls-grid set-library-controls" style={{ marginBottom: 10, marginTop: 0 }}>
                 <div className="control">
                   <label htmlFor="setSearch">Search Sets</label>
-                  <input
-                    id="setSearch"
-                    onChange={(event) => {
-                      setSetQuery(event.target.value);
-                      setSetPage(1);
-                    }}
-                    placeholder="set title, artist, track"
-                    type="text"
-                    value={setQuery}
-                  />
+                  <span className="mobile-search-shell mobile-search-shell-compact">
+                    <input
+                      id="setSearch"
+                      onChange={(event) => {
+                        setSetQuery(event.target.value);
+                        setSetPage(1);
+                      }}
+                      placeholder="set title, artist, track"
+                      type="text"
+                      value={setQuery}
+                    />
+                  </span>
                 </div>
                 <div className="control">
                   <label htmlFor="setArtistFilter">Artist Filter</label>

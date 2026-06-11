@@ -171,6 +171,17 @@
   background: rgba(10, 10, 10, 0.98);
 }
 
+.mobileControlGroup {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.mobileControlGroupRight {
+  margin-left: auto;
+}
+
 @media (max-width: 480px) {
   .nav {
     display: none;
@@ -199,20 +210,44 @@
 
   .mobileMenuPanel {
     --archive-header-control-size: 10px;
-    --archive-header-control-letter-spacing: 0.04em;
+    --archive-header-control-letter-spacing: 0.045em;
 
     flex-direction: row;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    overflow: visible;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 7px;
+    overflow: hidden;
+    padding: 10px 12px;
   }
 
   .mobileMenuPanel > * {
     flex: 0 0 auto;
+    min-width: 0;
   }
 
-  .mobileMenuPanel > *:last-child {
-    margin-left: auto;
+  .mobileMenuPanel :global(button) {
+    box-sizing: border-box;
+    min-height: 32px;
+    border-radius: 7px;
+    font-size: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .mobileMenuPanel :global([class*="scope-toggle_toggle"]) {
+    min-height: 32px;
+  }
+
+  .mobileMenuPanel :global([class*="scope-toggle_option"]) {
+    padding-left: 9px;
+    padding-right: 9px;
+    font-size: 8.5px;
+  }
+
+  .mobileMenuPanel :global([class*="submit-panel_trigger"]),
+  .mobileMenuPanel :global([class*="auth-dropdown_trigger"]),
+  .mobileMenuPanel :global([class*="auth-dropdown_avatar"]) {
+    min-height: 32px;
   }
 }

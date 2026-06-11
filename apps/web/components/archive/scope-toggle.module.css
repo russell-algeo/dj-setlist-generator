@@ -59,6 +59,8 @@
   .toggle {
     align-self: flex-start;
     width: fit-content;
+    min-height: 28px;
+    border-radius: 7px;
   }
 
   .tooltip {

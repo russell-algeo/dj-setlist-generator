@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 
 import { AuthDropdown } from "@/components/archive/auth-dropdown";
+import { ArchiveGlobalSearch } from "@/components/archive/archive-global-search";
 import { ScopeToggle } from "@/components/archive/scope-toggle";
 import { SubmitPanel } from "@/components/archive/submit-panel";
 
@@ -14,6 +15,7 @@ type NavLink = { label: string; href: string };
 type ArchiveHeaderProps = {
   activeHref?: string;
   hideAuth?: boolean;
+  hideSearch?: boolean;
   hideScopeToggle?: boolean;
   hideSubmit?: boolean;
   navLinks: NavLink[];
@@ -22,12 +24,13 @@ type ArchiveHeaderProps = {
 export function ArchiveHeader({
   activeHref,
   hideAuth,
+  hideSearch,
   hideScopeToggle,
   hideSubmit,
   navLinks,
 }: ArchiveHeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const hasControls = !hideScopeToggle || !hideSubmit || !hideAuth;
+  const hasControls = !hideSearch || !hideScopeToggle || !hideSubmit || !hideAuth;
 
   return (
     <header className={styles.header}>
@@ -46,6 +49,7 @@ export function ArchiveHeader({
         </nav>
         {/* Desktop controls */}
         <div className={styles.topbarRight}>
+          {!hideSearch && <ArchiveGlobalSearch />}
           {!hideScopeToggle && <ScopeToggle />}
           {!hideScopeToggle && (!hideSubmit || !hideAuth) ? <div className={styles.divider} /> : null}
           {!hideSubmit && <SubmitPanel />}
@@ -75,9 +79,14 @@ export function ArchiveHeader({
       {/* Mobile controls panel — only rendered when open */}
       {mobileMenuOpen && (
         <div className={styles.mobileMenuPanel}>
-          {!hideScopeToggle && <ScopeToggle />}
-          {!hideSubmit && <SubmitPanel />}
-          {!hideAuth && <AuthDropdown />}
+          <div className={styles.mobileControlGroup}>
+            {!hideSearch && <ArchiveGlobalSearch />}
+            {!hideScopeToggle && <ScopeToggle />}
+          </div>
+          <div className={`${styles.mobileControlGroup} ${styles.mobileControlGroupRight}`}>
+            {!hideSubmit && <SubmitPanel />}
+            {!hideAuth && <AuthDropdown />}
+          </div>
         </div>
       )}
     </header>

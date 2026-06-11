@@ -1020,6 +1020,10 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       border-radius: 4px;
     }
 
+    .taxonomy-controls-bar .control input.taxonomy-fine-field {
+      font-size: 11px;
+    }
+
     .taxonomy-controls-row input,
     .taxonomy-controls-row select {
       height: 25px;
@@ -1055,7 +1059,7 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
 
     .taxonomy-controls-bar .taxonomy-fine-field::placeholder,
     .taxonomy-controls-row .taxonomy-fine-field::placeholder {
-      font-size: 10px;
+      font-size: inherit;
     }
 
     .taxonomy-controls-bar .taxonomy-select-field,
@@ -1111,6 +1115,10 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
       outline: none;
       border-color: var(--lime);
       box-shadow: 0 0 0 1px var(--lime);
+    }
+
+    .mobile-search-shell {
+      display: contents;
     }
 
     .rows {
@@ -1923,6 +1931,55 @@ export const ARCHIVE_HOME_EXPLORER_CSS = String.raw`:root {
     }
 
     @media (max-width: 480px) {
+      .mobile-search-shell {
+        width: 100%;
+        min-width: 0;
+        height: 26px;
+        min-height: 26px;
+        display: flex;
+        align-items: center;
+        overflow: hidden;
+        background: #171717;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0 7px;
+      }
+
+      .mobile-search-shell:focus-within {
+        border-color: var(--lime);
+        box-shadow: 0 0 0 1px var(--lime);
+      }
+
+      .mobile-search-shell > input,
+      .taxonomy-controls-bar .mobile-search-shell > input,
+      .taxonomy-controls-row .mobile-search-shell > input {
+        flex: 0 0 160%;
+        width: 160%;
+        height: auto !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        font-size: 16px !important;
+        line-height: 1;
+        transform: scale(0.625);
+        transform-origin: left center;
+      }
+
+      .taxonomy-controls-bar .mobile-search-shell > input.taxonomy-fine-field {
+        flex-basis: 145.45%;
+        width: 145.45%;
+        transform: scale(0.6875);
+      }
+
+      .mobile-search-shell > input:focus,
+      .taxonomy-controls-bar .mobile-search-shell > input:focus,
+      .taxonomy-controls-row .mobile-search-shell > input:focus {
+        border-color: transparent;
+        box-shadow: none;
+      }
+
       .topbar-right {
         flex-wrap: wrap;
         width: 100%;
