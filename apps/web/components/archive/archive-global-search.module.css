@@ -1,4 +1,6 @@
 .trigger {
+  position: relative;
+  z-index: 710;
   display: inline-flex;
   align-items: center;
   justify-content: center;
