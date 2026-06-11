@@ -228,6 +228,10 @@
   box-shadow: 0 0 0 1px var(--lime);
 }
 
+.root :global(.mobile-search-shell) {
+  display: contents;
+}
+
 .root :global(.input.compact-control),
 .root :global(select.compact-control) {
   min-height: var(--dark-control-height-dense);
@@ -1732,6 +1736,45 @@
 }
 
 @media (max-width: 480px) {
+  .root :global(.mobile-search-shell) {
+    width: 100%;
+    min-width: 0;
+    height: var(--dark-control-height-dense);
+    min-height: var(--dark-control-height-dense);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: var(--dark-radius-badge);
+    padding: 0 8px;
+  }
+
+  .root :global(.mobile-search-shell:focus-within) {
+    border-color: var(--lime);
+    box-shadow: 0 0 0 1px var(--lime);
+  }
+
+  .root :global(.mobile-search-shell > input) {
+    flex: 0 0 160%;
+    width: 160%;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 16px !important;
+    line-height: 1;
+    transform: scale(0.625);
+    transform-origin: left center;
+  }
+
+  .root :global(.mobile-search-shell > input:focus) {
+    border-color: transparent;
+    box-shadow: none;
+  }
+
   /* Reduce timeline bar to match set library mini-timeline height */
   .root :global(.timeline-bar) {
     height: 16px;

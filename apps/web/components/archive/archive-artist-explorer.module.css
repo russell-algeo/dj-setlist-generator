@@ -182,6 +182,10 @@
   box-shadow: 0 0 0 1px var(--lime);
 }
 
+.root :global(.mobile-search-shell) {
+  display: contents;
+}
+
 .root :global(.controls-grid) {
   display: grid;
   gap: 12px;
@@ -1482,6 +1486,10 @@
   border-radius: var(--dark-radius-badge);
 }
 
+.root :global(.taxonomy-controls-bar .control input.taxonomy-fine-field) {
+  font-size: 11px;
+}
+
 .root :global(.taxonomy-controls-bar .taxonomy-field),
 .root :global(.taxonomy-controls-row .taxonomy-field) {
   border: 1px solid var(--line);
@@ -1507,7 +1515,7 @@
 
 .root :global(.taxonomy-controls-bar .taxonomy-fine-field::placeholder),
 .root :global(.taxonomy-controls-row .taxonomy-fine-field::placeholder) {
-  font-size: 10px;
+  font-size: inherit;
 }
 
 .root :global(.taxonomy-controls-bar .taxonomy-select-field),
@@ -2264,6 +2272,59 @@
 }
 
 @media (width <= 480px) {
+  .root :global(.mobile-search-shell) {
+    width: 100%;
+    min-width: 0;
+    height: 26px;
+    min-height: 26px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: var(--dark-radius-badge);
+    padding: 0 8px;
+  }
+
+  .root :global(.recurring-search-shell) {
+    flex: 1 1 auto;
+  }
+
+  .root :global(.mobile-search-shell:focus-within) {
+    border-color: var(--lime);
+    box-shadow: 0 0 0 1px var(--lime);
+  }
+
+  .root :global(.mobile-search-shell > input),
+  .root :global(.taxonomy-controls-bar .mobile-search-shell > input),
+  .root :global(.taxonomy-controls-row .mobile-search-shell > input) {
+    flex: 0 0 160%;
+    width: 160%;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 16px !important;
+    line-height: 1;
+    transform: scale(0.625);
+    transform-origin: left center;
+  }
+
+  .root :global(.taxonomy-controls-bar .mobile-search-shell > input.taxonomy-fine-field) {
+    flex-basis: 145.45%;
+    width: 145.45%;
+    transform: scale(0.6875);
+  }
+
+  .root :global(.mobile-search-shell > input:focus),
+  .root :global(.taxonomy-controls-bar .mobile-search-shell > input:focus),
+  .root :global(.taxonomy-controls-row .mobile-search-shell > input:focus) {
+    border-color: transparent;
+    box-shadow: none;
+  }
+
   /* Change 7: recurring tracks — horizontal scroll with wide cards */
   .root :global(.recurring-grid) {
     grid-auto-flow: column;

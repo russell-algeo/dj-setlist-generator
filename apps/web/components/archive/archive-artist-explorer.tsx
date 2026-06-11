@@ -1525,19 +1525,21 @@ export function ArchiveArtistExplorer({
 
             <div className="recurring-controls">
               <div className="recurring-toolbar">
-                <input
-                  aria-label="Search recurring tracks"
-                  className={joinClasses("input", "recurring-search-input")}
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    startTransition(() => {
-                      setRecSearch(next);
-                    });
-                  }}
-                  placeholder="Search recurring tracks..."
-                  type="search"
-                  value={recSearch}
-                />
+                <span className="mobile-search-shell mobile-search-shell-compact recurring-search-shell">
+                  <input
+                    aria-label="Search recurring tracks"
+                    className={joinClasses("input", "recurring-search-input")}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      startTransition(() => {
+                        setRecSearch(next);
+                      });
+                    }}
+                    placeholder="Search recurring tracks..."
+                    type="search"
+                    value={recSearch}
+                  />
+                </span>
 
                 <div className="controls-row recurring-filter-row">
                   <div className="threshold-stepper">
@@ -1642,22 +1644,24 @@ export function ArchiveArtistExplorer({
                 <div className="controls-grid set-controls-inline">
                   <div className="control">
                     <label htmlFor="atlasSetSearch">Search Sets</label>
-                    <input
-                      className="input"
-                      id="atlasSetSearch"
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        startTransition(() => {
-                          setAtlasSetSearch(next);
-                          setAtlasPage(0);
-                          setAtlasEvidencePage(0);
-                          setAtlasActiveName(null);
-                        });
-                      }}
-                      placeholder="find set cards"
-                      type="text"
-                      value={atlasSetSearch}
-                    />
+                    <span className="mobile-search-shell mobile-search-shell-compact">
+                      <input
+                        className="input"
+                        id="atlasSetSearch"
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          startTransition(() => {
+                            setAtlasSetSearch(next);
+                            setAtlasPage(0);
+                            setAtlasEvidencePage(0);
+                            setAtlasActiveName(null);
+                          });
+                        }}
+                        placeholder="find set cards"
+                        type="text"
+                        value={atlasSetSearch}
+                      />
+                    </span>
                   </div>
                 </div>
 
@@ -2204,21 +2208,23 @@ export function ArchiveArtistExplorer({
             <div className="set-panel">
               <div className="controls-grid set-controls-inline set-explorer-controls">
                 <div className="control">
-                  <input
-                    aria-label="Search sets"
-                    className="input"
-                    id="setSearch"
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      startTransition(() => {
-                        setSetPage(0);
-                        setSetSearch(next);
-                      });
-                    }}
-                    placeholder="set title, track"
-                    type="text"
-                    value={setSearch}
-                  />
+                  <span className="mobile-search-shell mobile-search-shell-compact">
+                    <input
+                      aria-label="Search sets"
+                      className="input"
+                      id="setSearch"
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        startTransition(() => {
+                          setSetPage(0);
+                          setSetSearch(next);
+                        });
+                      }}
+                      placeholder="set title, track"
+                      type="text"
+                      value={setSearch}
+                    />
+                  </span>
                 </div>
                 <div className="control">
                   <select

@@ -2816,17 +2816,19 @@ export function ArchiveSetExplorer({
                 <div className="track-explorer-panel">
                   <div className="track-head">
                     <div className="controls track-atlas-controls">
-                      <input
-                        className="input compact-control"
-                        id="trackSearchInput"
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          startTransition(() => setQuery(nextValue));
-                        }}
-                        placeholder="Search by artist or title..."
-                        type="search"
-                        value={query}
-                      />
+                      <span className="mobile-search-shell mobile-search-shell-compact">
+                        <input
+                          className="input compact-control"
+                          id="trackSearchInput"
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            startTransition(() => setQuery(nextValue));
+                          }}
+                          placeholder="Search by artist or title..."
+                          type="search"
+                          value={query}
+                        />
+                      </span>
                       <div className="controls-row">
                         <button
                           className={joinClasses("btn", confidenceFilter === "all" && "active")}

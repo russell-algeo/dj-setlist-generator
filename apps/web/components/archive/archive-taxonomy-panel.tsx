@@ -110,15 +110,17 @@ export function ArchiveTaxonomyPanel({
 
       <div className="taxonomy-controls-bar">
         <div className="control taxonomy-search-control">
-          <input
-            aria-label={search.ariaLabel}
-            className="taxonomy-field taxonomy-fine-field"
-            id={search.id}
-            onChange={(event) => search.onChange(event.target.value)}
-            placeholder={search.placeholder}
-            type={search.type ?? "text"}
-            value={search.value}
-          />
+          <span className="mobile-search-shell mobile-search-shell-compact">
+            <input
+              aria-label={search.ariaLabel}
+              className="taxonomy-field taxonomy-fine-field"
+              id={search.id}
+              onChange={(event) => search.onChange(event.target.value)}
+              placeholder={search.placeholder}
+              type={search.type ?? "text"}
+              value={search.value}
+            />
+          </span>
         </div>
         <div className="taxonomy-controls-row">
           {threshold ? (
