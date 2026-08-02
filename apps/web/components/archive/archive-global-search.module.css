@@ -1,6 +1,5 @@
 .trigger {
   position: relative;
-  z-index: 710;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -15,6 +14,10 @@
   cursor: pointer;
   padding: 0;
   transition: border-color var(--dark-transition-fast), background var(--dark-transition-fast);
+}
+
+.trigger.open {
+  z-index: 710;
 }
 
 .trigger:hover,
