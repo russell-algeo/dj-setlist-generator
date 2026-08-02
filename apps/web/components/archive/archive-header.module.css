@@ -217,7 +217,8 @@
     justify-content: flex-start;
     flex-wrap: nowrap;
     gap: 7px;
-    overflow: hidden;
+    /* Auth and submit menus are positioned below their triggers. */
+    overflow: visible;
     padding: 10px 12px;
   }
 
