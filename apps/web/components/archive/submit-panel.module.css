@@ -163,6 +163,10 @@
   resize: none;
 }
 
+.compactTextareaFrame {
+  display: contents;
+}
+
 .artistFieldTheme {
   --artist-suggest-bg: #0f0f0f;
   --artist-suggest-border: #2a2a2a;
@@ -249,13 +253,50 @@
     max-height: calc(100dvh - var(--topbar-height));
   }
 
+  /* Mobile Safari requires 16px form text to avoid focus zoom. Scale the
+     control itself back to the floating form's compact 11px/44px geometry. */
   .input,
   .textarea {
     font-size: 16px;
+    width: 145.455%;
+    min-height: 64px;
+    padding: 16px 17.455px;
+    margin-bottom: 0;
+    border-radius: 11.636px;
+    transform: scale(0.6875);
+    transform-origin: left top;
+  }
+
+  .compactInputFrame,
+  .compactAliasFields :global([class*="artist-alias-fields_inputWrap"]) {
+    height: var(--dark-control-height-lg);
+  }
+
+  .compactInputFrame {
+    margin-bottom: 6px;
+  }
+
+  .compactTextareaFrame {
+    display: block;
+    height: 96px;
+    margin-bottom: 6px;
+  }
+
+  .textarea {
+    min-height: 139.636px;
   }
 
   .modes {
     grid-template-columns: 1fr;
+  }
+
+  .mode {
+    padding: 14px;
+  }
+
+  .modeDesc {
+    line-height: 1.4;
+    margin-bottom: 10px;
   }
 
   .cancelBtn {

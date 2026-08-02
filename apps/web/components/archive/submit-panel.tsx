@@ -56,7 +56,7 @@ function ArtistForm({
   return (
     <>
       <ArtistNameField
-        className={styles.artistFieldTheme}
+        className={`${styles.artistFieldTheme} ${styles.compactInputFrame}`}
         existingArtistHelperText={'If the artist you are looking for has already been submitted, use "Curated Artist" mode to add new sets to their existing page.'}
         inputClassName={styles.input}
         onSuggestionSelect={(artist) => onExistingArtistSelect(artist.name)}
@@ -65,7 +65,7 @@ function ArtistForm({
         value={name}
       />
       <ArtistAliasFields
-        className={styles.artistAliasTheme}
+        className={`${styles.artistAliasTheme} ${styles.compactAliasFields}`}
         inputClassName={styles.input}
         onChange={setArtistAliases}
         values={artistAliases}
@@ -124,20 +124,22 @@ function CuratedForm({
   return (
     <>
       <ArtistNameField
-        className={styles.artistFieldTheme}
+        className={`${styles.artistFieldTheme} ${styles.compactInputFrame}`}
         existingArtistHelperText="Select an existing artist to add additional sets to their existing page"
         inputClassName={styles.input}
         onValueChange={setName}
         placeholder="Artist name"
         value={name}
       />
-      <textarea
-        className={styles.textarea}
-        ref={textareaRef}
-        placeholder="Paste URLs, one per line"
-        value={urls}
-        onChange={(e) => setUrls(e.target.value)}
-      />
+      <div className={styles.compactTextareaFrame}>
+        <textarea
+          className={styles.textarea}
+          ref={textareaRef}
+          placeholder="Paste URLs, one per line"
+          value={urls}
+          onChange={(e) => setUrls(e.target.value)}
+        />
+      </div>
       <div className={styles.btnRow}>
         <button
           className={styles.submitBtn}
