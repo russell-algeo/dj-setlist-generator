@@ -7,11 +7,11 @@ on:
         required: false
         type: string
       deployment_target:
-        description: Read-only Production configuration verification
+        description: Read-only environment configuration verification
         required: false
         default: production
         type: choice
-        options: [production]
+        options: [production, development]
 permissions:
   contents: read
 jobs:
@@ -24,36 +24,42 @@ jobs:
           python-version: '3.11'
       - name: Install PostgreSQL client
         run: python -m pip install 'psycopg[binary]==3.2.10'
-      - name: Verify Production worker routing without writes
+      - name: Verify worker routing without writes
         env:
-          ROUTING_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL_DIRECT }}
-          ROUTING_APP_URL: ${{ secrets.PRODUCTION_APP_BASE_URL }}
+          ROUTING_DATABASE_URL: ${{ github.event.inputs.deployment_target == 'development' && secrets.DEVELOPMENT_DATABASE_URL_DIRECT || secrets.PRODUCTION_DATABASE_URL_DIRECT }}
+          ROUTING_APP_URL: ${{ github.event.inputs.deployment_target == 'development' && secrets.DEVELOPMENT_APP_BASE_URL || secrets.PRODUCTION_APP_BASE_URL }}
+          ROUTING_TARGET: ${{ github.event.inputs.deployment_target }}
         run: |
           python - <<'PY'
           import hashlib, os, sys
           from urllib.parse import urlparse, unquote
           import psycopg
           expected = '785749638bd84ae1fa8181525c5a88fed2a946b09074b0147d34ebcc61f00c15'
+          development = os.environ.get('ROUTING_TARGET') == 'development'
+          if development:
+              expected = '612d02e6afa3376bf717cc9f14699ec26995f50121640f70b086e6d4dabcf910'
+          expected_role = 'set_list_dev_worker' if development else 'set_list_worker'
+          expected_app = 'https://dj-setlist-generator-listened-preview.vercel.app' if development else 'https://dj-setlist-generator.vercel.app'
           raw = os.environ.get('ROUTING_DATABASE_URL', '')
           try:
               url = urlparse(raw)
               identity = '|'.join([(url.hostname or '').replace('-pooler.', '.'), unquote(url.path.lstrip('/')), unquote(url.username or '')])
               identity_ok = hashlib.sha256(identity.encode()).hexdigest() == expected
-              app_ok = os.environ.get('ROUTING_APP_URL', '').rstrip('/') == 'https://dj-setlist-generator.vercel.app'
-              print(f'Expected Production database endpoint/database/role: {identity_ok}')
-              print(f'Expected Production application URL: {app_ok}')
+              app_ok = os.environ.get('ROUTING_APP_URL', '').rstrip('/') == expected_app
+              print(f'Expected selected-environment database endpoint/database/role: {identity_ok}')
+              print(f'Expected selected-environment application URL: {app_ok}')
               if not identity_ok or not app_ok:
                   sys.exit(1)
               with psycopg.connect(raw, connect_timeout=15, options='-c default_transaction_read_only=on -c statement_timeout=10000') as conn:
                   with conn.cursor() as cur:
                       cur.execute("SELECT current_database(), current_user, current_setting('transaction_read_only'), has_table_privilege(current_user,'app.sets','SELECT'), has_table_privilege(current_user,'ops.set_runs','UPDATE')")
                       database, role, readonly, archive_read, worker_update = cur.fetchone()
-                      actual_ok = database == 'neondb' and role == 'set_list_worker' and readonly == 'on' and archive_read and worker_update
+                      actual_ok = database == 'neondb' and role == expected_role and readonly == 'on' and archive_read and worker_update
                       print(f'Read-only connection and expected worker permissions: {bool(actual_ok)}')
                       if not actual_ok:
                           sys.exit(1)
                   conn.rollback()
-              print('PASS: Production worker configuration verified; no data written.')
+              print('PASS: Selected worker configuration verified; no data written.')
           except Exception as error:
               print(f'FAIL: bounded configuration check ({type(error).__name__}); credential-bearing details suppressed.')
               sys.exit(1)
