@@ -44,6 +44,7 @@ import type {
   ArchiveSetTrack,
 } from "@/lib/archive/types";
 import { pickFirstImageUrl } from "@/lib/archive/artist-visuals";
+import { resolveArchiveTrackLinks } from "@/lib/archive/track-links";
 import {
   resolveSetVisualImageUrl,
 } from "@/lib/archive/set-images";
@@ -128,6 +129,13 @@ const mapSetTrack = (row: {
 }): ArchiveSetTrack => {
   const entryMetadata = asRecord(row.entryMetadata);
   const trackMetadata = asRecord(row.trackMetadata);
+  const links = resolveArchiveTrackLinks({
+    entryMetadata,
+    trackMetadata,
+    spotifyUrl: row.trackSpotifyUrl,
+    youtubeUrl: row.trackYoutubeUrl,
+    discogsUrl: row.trackDiscogsUrl,
+  });
   const merged = {
     ...trackMetadata,
     ...entryMetadata,
@@ -170,14 +178,12 @@ const mapSetTrack = (row: {
       getString(merged.endTimeFormatted) ??
       (row.endTimeSeconds != null ? formatDuration(row.endTimeSeconds) : null),
     conf: confidence,
-    albumArt:
-      getString(merged.spotify_album_art) ??
-      getString(merged.albumArt) ??
-      null,
-    previewUrl:
-      getString(merged.spotify_preview_url) ??
-      getString(merged.previewUrl) ??
-      null,
+    albumArt: links.linkStatus.spotify === "unverified"
+      ? null
+      : getString(merged.spotify_album_art) ?? getString(merged.albumArt),
+    previewUrl: links.linkStatus.spotify === "unverified"
+      ? null
+      : getString(merged.spotify_preview_url) ?? getString(merged.previewUrl),
     bpm: getNumber(merged.bpm),
     energy: getNumber(merged.energy),
     dance: getNumber(merged.danceability) ?? getNumber(merged.dance),
@@ -186,9 +192,7 @@ const mapSetTrack = (row: {
     detailGenres,
     label: getString(merged.discogs_label),
     labelUrl: getString(merged.discogs_label_url),
-    spotifyUrl: row.trackSpotifyUrl ?? getString(merged.spotify_url),
-    youtubeUrl: row.trackYoutubeUrl ?? getString(merged.youtube_url),
-    discogsUrl: row.trackDiscogsUrl ?? getString(merged.discogs_url),
+    ...links,
     detectionCount: Number(row.detectionCount ?? 0),
     clusterDensity: getNumber(row.clusterDensity),
     clusterSpan: row.clusterSpan,

@@ -8,6 +8,7 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qs
 from config import Config
 from setlist_builder import CONFIDENCE_ICONS
+from platform_matching import usable_platform_url
 
 
 def format_time(seconds: float) -> str:
@@ -90,7 +91,9 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
         'cluster_density': track.cluster_density,
         'cluster_span': track.cluster_span,
         'source_deep_link': make_source_url(source_url, track.start_time),
-        'spotify_url': meta.get('spotify_url'),
+        'spotify_url': usable_platform_url(meta, 'spotify'),
+        'link_matching_version': meta.get('link_matching_version'),
+        'platform_matches': meta.get('platform_matches'),
         'spotify_album_art': meta.get('spotify_album_art'),
         'spotify_preview_url': meta.get('spotify_preview_url'),
         'spotify_artist_id': meta.get('spotify_artist_id'),
@@ -107,7 +110,7 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
         'key': meta.get('key'),
         'energy': meta.get('energy'),
         'danceability': meta.get('danceability'),
-        'youtube_url': meta.get('youtube_url'),
+        'youtube_url': usable_platform_url(meta, 'youtube'),
         'discogs_url': meta.get('discogs_url'),
         'discogs_genres': meta.get('discogs_genres', []),
         'discogs_styles': meta.get('discogs_styles', []),

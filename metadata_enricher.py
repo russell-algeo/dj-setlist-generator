@@ -12,6 +12,7 @@ from config import Config
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotify_matching import select_spotify_candidate
+from platform_matching import LINK_MATCHING_VERSION, match_evidence, select_youtube_candidate
 
 
 def _make_discogs_session() -> requests.Session:
@@ -165,9 +166,9 @@ def _platform_search(platform_name: str):
     """Decorator that wraps a search method with standard error handling."""
     def decorator(fn):
         @functools.wraps(fn)
-        def wrapper(self, title: str, artist: str) -> Optional[str]:
+        def wrapper(self, title: str, artist: str, **kwargs):
             try:
-                return fn(self, title, artist)
+                return fn(self, title, artist, **kwargs)
             except Exception as e:
                 print(f"    [{platform_name}] Search error: {e}")
                 return None
@@ -244,6 +245,11 @@ class MetadataEnricher:
             Dictionary with platform links and rich metadata
         """
         enriched = {
+            'link_matching_version': LINK_MATCHING_VERSION,
+            'platform_matches': {
+                'spotify': {'status': 'unverified' if self.spotify_enabled else 'disabled'},
+                'youtube': {'status': 'unverified' if self.youtube_enabled else 'disabled'},
+            },
             'spotify_url': None,
             'spotify_album_art': None,
             'spotify_preview_url': None,
@@ -291,6 +297,7 @@ class MetadataEnricher:
                 discogs_data=discogs_data,
             )
             if spotify_data:
+                enriched['platform_matches']['spotify'] = spotify_data['match']
                 enriched['spotify_url'] = spotify_data['url']
                 enriched['spotify_album_art'] = spotify_data.get('album_art_url')
                 enriched['spotify_preview_url'] = spotify_data.get('preview_url')
@@ -307,7 +314,10 @@ class MetadataEnricher:
 
         # YouTube
         if self.youtube_enabled:
-            enriched['youtube_url'] = self._search_youtube(track.title, track.artist)
+            youtube_data = self._search_youtube(track.title, track.artist, discogs_data=discogs_data)
+            if youtube_data:
+                enriched['youtube_url'] = youtube_data['url']
+                enriched['platform_matches']['youtube'] = youtube_data['match']
 
         return enriched
 
@@ -588,9 +598,13 @@ class MetadataEnricher:
 
         try:
             # 1. ISRC lookup — exact match, immune to artist name discrepancies
-            if isrc:
-                isrc_results = self.spotify.search(q=f'isrc:{isrc}', type='track', limit=1)
+            normalized_isrc = re.sub(r'[^A-Z0-9]', '', (isrc or '').upper())
+            if re.fullmatch(r'[A-Z]{2}[A-Z0-9]{3}[0-9]{7}', normalized_isrc):
+                isrc_results = self.spotify.search(q=f'isrc:{normalized_isrc}', type='track', limit=5)
                 isrc_items = (isrc_results or {}).get('tracks', {}).get('items', [])
+                isrc_items = [item for item in isrc_items
+                              if re.sub(r'[^A-Z0-9]', '', str((item.get('external_ids') or {}).get('isrc') or '').upper())
+                              == normalized_isrc]
                 if isrc_items:
                     print(f"[Spotify] ✓ ISRC match ({isrc}): '{isrc_items[0]['artists'][0]['name']} - {isrc_items[0]['name']}'")
                     best = isrc_items[0]
@@ -603,6 +617,8 @@ class MetadataEnricher:
                         'artist_id': primary_artist.get('id'),
                         'artist_name': primary_artist.get('name'),
                         'artist_url': (primary_artist.get('external_urls') or {}).get('spotify'),
+                        'match': {**match_evidence(best, 'isrc'), 'isrc': normalized_isrc,
+                                  'url': best['external_urls']['spotify']},
                     }
 
             def spotify_data_from_item(item: dict) -> dict:
@@ -658,7 +674,12 @@ class MetadataEnricher:
                 print(f"[Spotify] ✗ No match for: '{query}', skipping")
                 return None
 
-            return spotify_data_from_item(match.item)
+            evidence = {**match_evidence(match.item, match.reason),
+                        'score': match.score, 'url': match.item['external_urls']['spotify']}
+            if 'discogs_artist' in match.reason and discogs_data:
+                evidence['corroboration'] = {'provider': 'discogs', 'url': discogs_data.get('url'),
+                                             'title': discogs_data.get('title')}
+            return {**spotify_data_from_item(match.item), 'match': evidence}
         except Exception as e:
             print(f"    [Spotify] Search error: {e}")
             return None
@@ -853,23 +874,20 @@ class MetadataEnricher:
             return None
 
     @_platform_search("YouTube")
-    def _search_youtube(self, title: str, artist: str) -> Optional[str]:
-        """Search YouTube using yt-dlp (no API key needed)."""
+    def _search_youtube(self, title: str, artist: str, *, discogs_data=None) -> Optional[dict]:
+        """Search several videos and retain only an artist/title-validated link."""
         query = f"{artist} {title}".strip()
 
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': True,
-            'default_search': 'ytsearch1',
+            'default_search': 'ytsearch5',
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(f"ytsearch1:{query}", download=False)
-
-            if result and 'entries' in result and result['entries']:
-                video_id = result['entries'][0]['id']
-                return f"https://www.youtube.com/watch?v={video_id}"
+            result = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            return select_youtube_candidate(artist, title, (result or {}).get('entries'), discogs_data=discogs_data)
 
         return None
 

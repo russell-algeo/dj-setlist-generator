@@ -14,6 +14,7 @@ import {
   type ListenProgressSummary,
 } from "@/lib/archive/listen-progress";
 import { buildSetSpotifyExportCounts } from "@/lib/archive/spotify-export";
+import { selectPrimaryTrackLink } from "@/lib/archive/track-links";
 import type {
   ArchiveConfidence,
   ArchiveJourneyPoint,
@@ -2865,14 +2866,10 @@ export function ArchiveSetExplorer({
                             : track.conf === "LOW"
                               ? "conf-low"
                               : "conf-uncertain";
-                      const showSpotifyButton = !track.isUnknownTrack && Boolean(track.spotifyTrackId);
-                      const showYouTubeButton =
-                        !track.isUnknownTrack && !showSpotifyButton && Boolean(track.directYouTubeUrl);
-                      const showDiscogsButton =
-                        !track.isUnknownTrack &&
-                        !showSpotifyButton &&
-                        !showYouTubeButton &&
-                        Boolean(track.directDiscogsUrl);
+                      const primaryLink = selectPrimaryTrackLink(track);
+                      const showSpotifyButton = primaryLink === "spotify";
+                      const showYouTubeButton = primaryLink === "youtube";
+                      const showDiscogsButton = primaryLink === "discogs";
 
                       return (
                         <article
