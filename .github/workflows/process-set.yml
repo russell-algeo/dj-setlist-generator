@@ -35,12 +35,16 @@ on:
         type: string
 
 concurrency:
-  group: process-set-${{ github.event.inputs.set_run_id }}
+  group: process-set-${{ github.ref }}-${{ github.event.inputs.deployment_target }}-${{ github.event.inputs.set_run_id }}
   cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   bootstrap:
@@ -52,9 +56,12 @@ jobs:
       effective_slot_count: ${{ steps.scheduler.outputs.effective_slot_count }}
       effective_lease_size: ${{ steps.scheduler.outputs.effective_lease_size }}
     env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      DATABASE_URL_DIRECT: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_DATABASE_URL_DIRECT' || 'DEVELOPMENT_DATABASE_URL_DIRECT'] }}
+      APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
+      WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
       ENABLE_CHECKPOINTS: "false"
       FFMPEG_PORTABLE_DIR: ".runtime/ffmpeg"
       CONCURRENT_RECOGNITIONS: "2"
@@ -64,6 +71,9 @@ jobs:
       QUOTA_COOLDOWN_DURATION: "60"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check callback isolation
+        run: python3 -m worker.callbacks --check
 
       - uses: actions/setup-python@v5
         with:
@@ -92,6 +102,7 @@ jobs:
         run: python -m pip install -r requirements-bootstrap.txt
 
       - name: Prepare YouTube auth
+        if: ${{ github.event.inputs.deployment_target == 'production' }}
         id: youtube_auth
         env:
           YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
@@ -102,7 +113,7 @@ jobs:
         run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
 
       - name: Persist refreshed YouTube cookies
-        if: ${{ success() && steps.youtube_auth.outputs.cookies_present == 'true' }}
+        if: ${{ success() && github.event.inputs.deployment_target == 'production' && steps.youtube_auth.outputs.cookies_present == 'true' }}
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           GH_REPO: ${{ github.repository }}
@@ -164,9 +175,12 @@ jobs:
       matrix:
         slot_index: ${{ fromJSON(needs.bootstrap.outputs.slot_matrix) }}
     env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      DATABASE_URL_DIRECT: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_DATABASE_URL_DIRECT' || 'DEVELOPMENT_DATABASE_URL_DIRECT'] }}
+      APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
+      WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
       ENABLE_CHECKPOINTS: "false"
       FFMPEG_PORTABLE_DIR: ".runtime/ffmpeg"
       CONCURRENT_RECOGNITIONS: "2"
@@ -176,6 +190,9 @@ jobs:
       QUOTA_COOLDOWN_DURATION: "60"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check callback isolation
+        run: python3 -m worker.callbacks --check
 
       - name: Download prepared runtime
         uses: actions/download-artifact@v4
@@ -206,9 +223,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      DATABASE_URL_DIRECT: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_DATABASE_URL_DIRECT' || 'DEVELOPMENT_DATABASE_URL_DIRECT'] }}
+      APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
+      WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
       SET_LIST_ACTIVE_SET_RUN_ID: ${{ github.event.inputs.set_run_id }}
       SET_LIST_RESUME_MODE: ${{ github.event.inputs.resume_mode }}
       SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
@@ -221,6 +241,9 @@ jobs:
       ENABLE_CHECKPOINTS: "false"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check callback isolation
+        run: python3 -m worker.callbacks --check
 
       - uses: actions/setup-python@v5
         with:
@@ -243,20 +266,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
+      WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Finalize run and dispatch next work
         run: |
-          curl \
-            --fail \
-            --show-error \
-            --silent \
-            -X POST \
-            "${APP_BASE_URL}/api/internal/finalize-set-run" \
-            -H "content-type: application/json" \
-            -H "x-internal-secret: ${INTERNAL_WORKER_SHARED_SECRET}" \
-            -d @- <<'JSON'
+          python3 -m worker.callbacks /api/internal/finalize-set-run <<'JSON'
           {
             "setRunId": "${{ github.event.inputs.set_run_id }}",
             "workflowRunId": "${{ github.run_id }}",

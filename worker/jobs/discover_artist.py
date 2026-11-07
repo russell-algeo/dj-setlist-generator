@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import requests
 
 from checkpoint_manager import ArtistManager
 from config import Config
 from source_url_normalizer import resolve_canonical_source_url
+from worker.callbacks import post_callback
 from worker.config import get_settings
 from worker.db import execute, fetch_one, finalize_submission_from_runs, insert_worker_event, json_value, mark_submission
 from worker.providers.ytdlp import DjSetDiscoverer
@@ -18,9 +18,9 @@ def _dispatch_pending() -> None:
     if not settings.api_base_url or not settings.internal_secret:
         return
 
-    requests.post(
-        f"{settings.api_base_url}/api/internal/dispatch-pending",
-        headers={"x-internal-secret": settings.internal_secret},
+    post_callback(
+        settings,
+        "/api/internal/dispatch-pending",
         timeout=30,
     ).raise_for_status()
 

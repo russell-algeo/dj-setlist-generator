@@ -10,6 +10,7 @@ import socket
 from psycopg.errors import ForeignKeyViolation
 
 from config import Config
+from worker.callbacks import post_callback
 from worker.config import get_settings
 from worker.db import (
     claim_next_lease,
@@ -42,29 +43,25 @@ class PublishSetRunPartialError(RuntimeError):
 
 
 def _dispatch_pending() -> None:
-    import requests
-
     settings = get_settings()
     if not settings.api_base_url or not settings.internal_secret:
         return
 
-    requests.post(
-        f"{settings.api_base_url}/api/internal/dispatch-pending",
-        headers={"x-internal-secret": settings.internal_secret},
+    post_callback(
+        settings,
+        "/api/internal/dispatch-pending",
         timeout=30,
     ).raise_for_status()
 
 
 def _revalidate(paths: list[str], tags: list[str] | None = None) -> None:
-    import requests
-
     settings = get_settings()
     if not settings.api_base_url or not settings.internal_secret:
         return
 
-    requests.post(
-        f"{settings.api_base_url}/api/internal/revalidate",
-        headers={"x-internal-secret": settings.internal_secret},
+    post_callback(
+        settings,
+        "/api/internal/revalidate",
         json={"paths": paths, "tags": tags or []},
         timeout=30,
     ).raise_for_status()
@@ -75,15 +72,13 @@ def _publish_set_run_payload(
     set_run_id: str,
     payload: dict[str, object],
 ) -> dict[str, object]:
-    import requests
-
     settings = get_settings()
     if not settings.api_base_url or not settings.internal_secret:
         raise RuntimeError("APP_BASE_URL and INTERNAL_WORKER_SHARED_SECRET are required for publish")
 
-    response = requests.post(
-        f"{settings.api_base_url}/api/internal/publish-set-run",
-        headers={"x-internal-secret": settings.internal_secret},
+    response = post_callback(
+        settings,
+        "/api/internal/publish-set-run",
         json={
             "setRunId": set_run_id,
             "payload": payload,
