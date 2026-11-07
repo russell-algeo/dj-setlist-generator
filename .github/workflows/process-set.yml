@@ -67,8 +67,10 @@ jobs:
                       parsed = urlparse(dsn)
                       assert (parsed.hostname or '').replace('-pooler.', '.') == 'ep-autumn-bar-a4f9xp8v.us-east-1.aws.neon.tech'
                       assert unquote(parsed.username or '') == expected_role and parsed.path == '/neondb'
-                      with psycopg.connect(dsn, connect_timeout=15, options='-c default_transaction_read_only=on -c statement_timeout=10000') as conn:
+                      with psycopg.connect(dsn, connect_timeout=15) as conn:
                           with conn.cursor() as cur:
+                              cur.execute("SET TRANSACTION READ ONLY")
+                              cur.execute("SET LOCAL statement_timeout = 10000")
                               cur.execute("SELECT current_database(), current_user, current_setting('transaction_read_only')")
                               assert cur.fetchone() == ('neondb', expected_role, 'on')
                           conn.rollback()
