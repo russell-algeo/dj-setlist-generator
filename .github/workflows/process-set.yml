@@ -29,6 +29,8 @@ jobs:
           ROUTING_DATABASE_URL: ${{ github.event.inputs.deployment_target == 'development' && secrets.DEVELOPMENT_DATABASE_URL_DIRECT || secrets.PRODUCTION_DATABASE_URL_DIRECT }}
           ROUTING_APP_URL: ${{ github.event.inputs.deployment_target == 'development' && secrets.DEVELOPMENT_APP_BASE_URL || secrets.PRODUCTION_APP_BASE_URL }}
           ROUTING_TARGET: ${{ github.event.inputs.deployment_target }}
+          DEVELOPMENT_APP_URL: ${{ secrets.DEVELOPMENT_DATABASE_URL_POOLED }}
+          DEVELOPMENT_MIGRATIONS_URL: ${{ secrets.DEVELOPMENT_DATABASE_URL_MIGRATIONS }}
         run: |
           python - <<'PY'
           import hashlib, os, sys
@@ -59,6 +61,18 @@ jobs:
                       if not actual_ok:
                           sys.exit(1)
                   conn.rollback()
+              if development:
+                  for env_key, expected_role in [('DEVELOPMENT_APP_URL', 'set_list_dev_app'), ('DEVELOPMENT_MIGRATIONS_URL', 'set_list_dev_migrator')]:
+                      dsn = os.environ.get(env_key, '')
+                      parsed = urlparse(dsn)
+                      assert (parsed.hostname or '').replace('-pooler.', '.') == 'ep-autumn-bar-a4f9xp8v.us-east-1.aws.neon.tech'
+                      assert unquote(parsed.username or '') == expected_role and parsed.path == '/neondb'
+                      with psycopg.connect(dsn, connect_timeout=15, options='-c default_transaction_read_only=on -c statement_timeout=10000') as conn:
+                          with conn.cursor() as cur:
+                              cur.execute("SELECT current_database(), current_user, current_setting('transaction_read_only')")
+                              assert cur.fetchone() == ('neondb', expected_role, 'on')
+                          conn.rollback()
+                      print(f'Additional development role identity verified read-only: {expected_role}')
               print('PASS: Selected worker configuration verified; no data written.')
           except Exception as error:
               print(f'FAIL: bounded configuration check ({type(error).__name__}); credential-bearing details suppressed.')
