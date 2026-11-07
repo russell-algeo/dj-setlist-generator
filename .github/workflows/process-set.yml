@@ -1,267 +1,60 @@
-name: process-set
-
+name: worker-routing-preflight
 on:
   workflow_dispatch:
     inputs:
       set_run_id:
-        description: Set run UUID to process
-        required: true
-        type: string
-      resume_mode:
-        description: Whether to run the full pipeline or only the publish/finalize tail
+        description: Unused compatibility input; no set is processed
         required: false
-        default: full
-        type: choice
-        options:
-          - full
-          - publish_only
+        type: string
       deployment_target:
-        description: Secrets target for this dispatch
+        description: Read-only Production configuration verification
         required: false
-        default: development
+        default: production
         type: choice
-        options:
-          - development
-          - production
-      recognition_slot_count:
-        description: Number of recognition slots to fan out across, or auto
-        required: false
-        default: "auto"
-        type: string
-      lease_size:
-        description: Number of segments bundled into each lease, or auto
-        required: false
-        default: "auto"
-        type: string
-
-concurrency:
-  group: process-set-${{ github.event.inputs.set_run_id }}
-  cancel-in-progress: true
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  PIP_DISABLE_PIP_VERSION_CHECK: "1"
-
+        options: [production]
+permissions:
+  contents: read
 jobs:
-  bootstrap:
-    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    outputs:
-      slot_matrix: ${{ steps.scheduler.outputs.slot_matrix }}
-      effective_slot_count: ${{ steps.scheduler.outputs.effective_slot_count }}
-      effective_lease_size: ${{ steps.scheduler.outputs.effective_lease_size }}
-    env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
-      ENABLE_CHECKPOINTS: "false"
-      FFMPEG_PORTABLE_DIR: ".runtime/ffmpeg"
-      CONCURRENT_RECOGNITIONS: "2"
-      RECOGNITION_SLOT_COUNT_REQUESTED: ${{ github.event.inputs.recognition_slot_count }}
-      LEASE_SIZE_REQUESTED: ${{ github.event.inputs.lease_size }}
-      BATCH_SIZE: "10"
-      QUOTA_COOLDOWN_DURATION: "60"
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-bootstrap.txt
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Verify yt-dlp JS runtime
+          python-version: '3.11'
+      - name: Install PostgreSQL client
+        run: python -m pip install 'psycopg[binary]==3.2.10'
+      - name: Verify Production worker routing without writes
+        env:
+          ROUTING_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL_DIRECT }}
+          ROUTING_APP_URL: ${{ secrets.PRODUCTION_APP_BASE_URL }}
         run: |
-          deno --version
           python - <<'PY'
-          import shutil
-
-          print(f"deno={shutil.which('deno') or 'missing'}")
-          print(f"node={shutil.which('node') or 'missing'}")
+          import hashlib, os, sys
+          from urllib.parse import urlparse, unquote
+          import psycopg
+          expected = '785749638bd84ae1fa8181525c5a88fed2a946b09074b0147d34ebcc61f00c15'
+          raw = os.environ.get('ROUTING_DATABASE_URL', '')
+          try:
+              url = urlparse(raw)
+              identity = '|'.join([(url.hostname or '').replace('-pooler.', '.'), unquote(url.path.lstrip('/')), unquote(url.username or '')])
+              identity_ok = hashlib.sha256(identity.encode()).hexdigest() == expected
+              app_ok = os.environ.get('ROUTING_APP_URL', '').rstrip('/') == 'https://dj-setlist-generator.vercel.app'
+              print(f'Expected Production database endpoint/database/role: {identity_ok}')
+              print(f'Expected Production application URL: {app_ok}')
+              if not identity_ok or not app_ok:
+                  sys.exit(1)
+              with psycopg.connect(raw, connect_timeout=15, options='-c default_transaction_read_only=on -c statement_timeout=10000') as conn:
+                  with conn.cursor() as cur:
+                      cur.execute("SELECT current_database(), current_user, current_setting('transaction_read_only'), has_table_privilege(current_user,'app.sets','SELECT'), has_table_privilege(current_user,'ops.set_runs','UPDATE')")
+                      database, role, readonly, archive_read, worker_update = cur.fetchone()
+                      actual_ok = database == 'neondb' and role == 'set_list_worker' and readonly == 'on' and archive_read and worker_update
+                      print(f'Read-only connection and expected worker permissions: {bool(actual_ok)}')
+                      if not actual_ok:
+                          sys.exit(1)
+                  conn.rollback()
+              print('PASS: Production worker configuration verified; no data written.')
+          except Exception as error:
+              print(f'FAIL: bounded configuration check ({type(error).__name__}); credential-bearing details suppressed.')
+              sys.exit(1)
           PY
-
-      - name: Ensure ffmpeg
-        run: ./.github/scripts/ensure-ffmpeg.sh
-
-      - name: Install Python dependencies
-        run: python -m pip install -r requirements-bootstrap.txt
-
-      - name: Prepare YouTube auth
-        id: youtube_auth
-        env:
-          YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
-          YOUTUBE_USER_AGENT: ${{ secrets.YOUTUBE_USER_AGENT }}
-        run: ./.github/scripts/prepare-youtube-auth.sh
-
-      - name: Bootstrap set run
-        run: python -m worker.jobs.process_set --phase bootstrap --set-run-id "${{ github.event.inputs.set_run_id }}"
-
-      - name: Persist refreshed YouTube cookies
-        if: ${{ success() && steps.youtube_auth.outputs.cookies_present == 'true' }}
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          GH_REPO: ${{ github.repository }}
-        run: ./.github/scripts/persist-youtube-cookies.sh
-
-      - id: scheduler
-        name: Emit scheduler outputs
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          import os
-          from psycopg import connect
-          from psycopg.rows import dict_row
-
-          with connect(os.environ["DATABASE_URL_DIRECT"], autocommit=True, row_factory=dict_row) as conn, conn.cursor() as cur:
-              cur.execute(
-                  """
-                  select
-                    source_metadata->>'recognition_slot_count' as recognition_slot_count,
-                    source_metadata->>'lease_size' as lease_size
-                  from ops.set_runs
-                  where id = %s
-                  """,
-                  (os.environ["SET_RUN_ID"],),
-              )
-              row = cur.fetchone()
-
-          if not row:
-              raise SystemExit("Failed to load scheduler outputs from ops.set_runs")
-
-          slot_count = max(1, int(row["recognition_slot_count"]))
-          lease_size = max(1, int(row["lease_size"]))
-          print(f"effective_slot_count={slot_count}")
-          print(f"effective_lease_size={lease_size}")
-          print(f"slot_matrix={json.dumps(list(range(slot_count)))}")
-          PY
-        env:
-          SET_RUN_ID: ${{ github.event.inputs.set_run_id }}
-
-      - name: Upload prepared audio
-        uses: actions/upload-artifact@v4
-        with:
-          name: set-runtime-${{ github.event.inputs.set_run_id }}
-          path: |
-            assets
-            .runtime/ffmpeg
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  recognize:
-    needs:
-      - bootstrap
-    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        slot_index: ${{ fromJSON(needs.bootstrap.outputs.slot_matrix) }}
-    env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
-      ENABLE_CHECKPOINTS: "false"
-      FFMPEG_PORTABLE_DIR: ".runtime/ffmpeg"
-      CONCURRENT_RECOGNITIONS: "2"
-      RECOGNITION_SLOT_COUNT: ${{ needs.bootstrap.outputs.effective_slot_count }}
-      LEASE_SIZE: ${{ needs.bootstrap.outputs.effective_lease_size }}
-      BATCH_SIZE: "10"
-      QUOTA_COOLDOWN_DURATION: "60"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download prepared runtime
-        uses: actions/download-artifact@v4
-        with:
-          name: set-runtime-${{ github.event.inputs.set_run_id }}
-          path: .
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-recognize.txt
-
-      - name: Ensure ffmpeg
-        run: ./.github/scripts/ensure-ffmpeg.sh
-
-      - name: Install Python dependencies
-        run: python -m pip install -r requirements-recognize.txt
-
-      - name: Recognize lease slot
-        run: python -m worker.jobs.process_set --phase recognize --set-run-id "${{ github.event.inputs.set_run_id }}" --slot-index "${{ matrix.slot_index }}"
-
-  publish:
-    if: ${{ always() && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
-    needs:
-      - bootstrap
-      - recognize
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
-      SET_LIST_ACTIVE_SET_RUN_ID: ${{ github.event.inputs.set_run_id }}
-      SET_LIST_RESUME_MODE: ${{ github.event.inputs.resume_mode }}
-      SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
-      SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
-      SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
-      DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
-      DISCOGS_CONSUMER_KEY: ${{ secrets.DISCOGS_CONSUMER_KEY }}
-      DISCOGS_CONSUMER_SECRET: ${{ secrets.DISCOGS_CONSUMER_SECRET }}
-      ENABLE_DISCOGS: "true"
-      ENABLE_CHECKPOINTS: "false"
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-publish.txt
-
-      - name: Install Python dependencies
-        run: python -m pip install -r requirements-publish.txt
-
-      - name: Publish set run
-        run: python -m worker.jobs.process_set --phase publish --set-run-id "${{ github.event.inputs.set_run_id }}"
-
-  finalize:
-    if: ${{ always() }}
-    needs:
-      - bootstrap
-      - recognize
-      - publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
-    steps:
-      - name: Finalize run and dispatch next work
-        run: |
-          curl \
-            --fail \
-            --show-error \
-            --silent \
-            -X POST \
-            "${APP_BASE_URL}/api/internal/finalize-set-run" \
-            -H "content-type: application/json" \
-            -H "x-internal-secret: ${INTERNAL_WORKER_SHARED_SECRET}" \
-            -d @- <<'JSON'
-          {
-            "setRunId": "${{ github.event.inputs.set_run_id }}",
-            "workflowRunId": "${{ github.run_id }}",
-            "bootstrapResult": "${{ needs.bootstrap.result }}",
-            "recognizeResult": "${{ needs.recognize.result }}",
-            "publishResult": "${{ needs.publish.result }}"
-          }
-          JSON
