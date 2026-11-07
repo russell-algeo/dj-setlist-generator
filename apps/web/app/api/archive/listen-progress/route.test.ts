@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getRequestActor = vi.fn();
 const listUserSetListenProgress = vi.fn();
+const setUserSetListened = vi.fn();
 const upsertUserSetListenProgress = vi.fn();
 
 vi.mock("@/lib/auth/session", () => ({
@@ -10,6 +11,7 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/archive/listen-progress.server", () => ({
   listUserSetListenProgress,
+  setUserSetListened,
   upsertUserSetListenProgress,
 }));
 
@@ -17,6 +19,7 @@ describe("/api/archive/listen-progress", () => {
   beforeEach(() => {
     getRequestActor.mockReset();
     listUserSetListenProgress.mockReset();
+    setUserSetListened.mockReset();
     upsertUserSetListenProgress.mockReset();
   });
 
@@ -105,5 +108,65 @@ describe("/api/archive/listen-progress", () => {
       setId: "4e1b45fc-1a38-4bfd-8831-5b7e98fb2c99",
       sourceUrl: "https://www.youtube.com/watch?v=demo",
     });
+  });
+});
+
+const markerSetId = "4e1b45fc-1a38-4bfd-8831-5b7e98fb2c99";
+const markerRequest = (body: unknown) => new Request("http://localhost/api/archive/listen-progress", {
+  body: JSON.stringify(body), headers: { "content-type": "application/json" }, method: "PATCH",
+});
+
+describe("PATCH /api/archive/listen-progress", () => {
+  beforeEach(() => {
+    getRequestActor.mockReset();
+    setUserSetListened.mockReset();
+  });
+
+  it("requires authentication before changing any marker", async () => {
+    getRequestActor.mockResolvedValue(null);
+    const { PATCH } = await import("./route");
+    const response = await PATCH(markerRequest({ setId: markerSetId, listened: true }));
+    expect(response.status).toBe(401);
+    expect(setUserSetListened).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("saves listened=%s for the authenticated user", async (listened) => {
+    getRequestActor.mockResolvedValue({ userId: "user-123" });
+    const progress = { setId: markerSetId, listened, intervals: [], coverageRatio: listened ? 1 : 0, listenedAt: null };
+    setUserSetListened.mockResolvedValue(progress);
+    const { PATCH } = await import("./route");
+    const response = await PATCH(markerRequest({ setId: markerSetId, listened, userId: "someone-else" }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ progress });
+    expect(setUserSetListened).toHaveBeenCalledWith("user-123", markerSetId, listened);
+  });
+
+  it.each([
+    {}, { setId: "invalid", listened: true }, { setId: markerSetId },
+    { setId: markerSetId, listened: "false" }, { setId: markerSetId, listened: null },
+  ])("rejects invalid marker payload %j", async (body) => {
+    getRequestActor.mockResolvedValue({ userId: "user-123" });
+    const { PATCH } = await import("./route");
+    expect((await PATCH(markerRequest(body))).status).toBe(400);
+    expect(setUserSetListened).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed JSON", async () => {
+    getRequestActor.mockResolvedValue({ userId: "user-123" });
+    const { PATCH } = await import("./route");
+    const response = await PATCH(new Request("http://localhost/api/archive/listen-progress", {
+      body: "{", headers: { "content-type": "application/json" }, method: "PATCH",
+    }));
+    expect(response.status).toBe(400);
+    expect(setUserSetListened).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a set that no longer exists", async () => {
+    getRequestActor.mockResolvedValue({ userId: "user-123" });
+    setUserSetListened.mockResolvedValue(null);
+    const { PATCH } = await import("./route");
+    const response = await PATCH(markerRequest({ setId: markerSetId, listened: true }));
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Set not found" });
   });
 });

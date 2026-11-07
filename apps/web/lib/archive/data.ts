@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
+import { getArchiveCacheNamespace } from "@/lib/db/cache-namespace.server";
 import {
   artists,
   setArtists,
@@ -472,7 +473,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
 export const getArchiveSetDetailBySlug = async (slug: string) =>
   unstable_cache(
     async () => getArchiveSetDetailUncached(slug),
-    ["archive-set-detail-v2", slug],
+    [getArchiveCacheNamespace(), "archive-set-detail-v2", slug],
     { tags: [ARCHIVE_TAGS.set(slug)] },
   )();
 
@@ -847,7 +848,7 @@ const getArtistSummaryUncached = async (
 export const getArchiveArtistIdentityBySlug = async (slug: string) =>
   unstable_cache(
     async () => getArtistIdentityUncached(slug),
-    ["archive-artist-identity-v1", slug],
+    [getArchiveCacheNamespace(), "archive-artist-identity-v1", slug],
     { tags: [ARCHIVE_TAGS.artist(slug)] },
   )();
 
@@ -876,7 +877,7 @@ const getArchiveArtistSummaryCacheRecord = async (
         artist,
       } satisfies ArchiveArtistSummaryCacheRecord;
     },
-    ["archive-artist-summary-v4", slug],
+    [getArchiveCacheNamespace(), "archive-artist-summary-v4", slug],
     { tags: [ARCHIVE_TAGS.artist(slug)] },
   )();
 
@@ -1142,14 +1143,14 @@ export const getArchiveHomeSummary = async ({
         pageSize,
         query,
       }),
-    ["archive-home-summary", String(page), String(pageSize), query],
+    [getArchiveCacheNamespace(), "archive-home-summary", String(page), String(pageSize), query],
     { tags: [ARCHIVE_TAGS.home, ARCHIVE_TAGS.lists] },
   )();
 
 export const getArchiveHomeConnections = async () =>
   unstable_cache(
     async () => getHomeConnectionsUncached(),
-    ["archive-home-connections"],
+    [getArchiveCacheNamespace(), "archive-home-connections"],
     { tags: [ARCHIVE_TAGS.home, ARCHIVE_TAGS.connections] },
   )();
 

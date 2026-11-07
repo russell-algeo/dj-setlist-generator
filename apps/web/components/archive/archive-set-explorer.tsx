@@ -192,6 +192,7 @@ type StoredListenProgress = {
 };
 
 type ListenProgressResponse = {
+  error?: string;
   progress?: ListenProgressSummary;
 };
 
@@ -886,10 +887,12 @@ type SoundCloudWidget = {
 
 export function ArchiveSetExplorer({
   detail,
+  initialListened,
   initialQuery,
   management,
 }: {
   detail: ArchiveSetDetail;
+  initialListened: boolean | null;
   initialQuery: string;
   management: SetManagement;
 }) {
@@ -925,6 +928,7 @@ export function ArchiveSetExplorer({
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [listened, setListened] = useState(initialListened);
   const [journeyOpen, setJourneyOpen] = useState(false);
   const [activeMetrics, setActiveMetrics] = useState<JourneyMetric[]>(["bpm", "energy", "dance"]);
   const [openDetailIdxs, setOpenDetailIdxs] = useState<number[]>([]);
@@ -951,7 +955,8 @@ export function ArchiveSetExplorer({
   const listenIntervalsRef = useRef<ListenInterval[]>([]);
   const lastListenSampleRef = useRef<{ time: number; wallTime: number } | null>(null);
   const lastListenSyncAtRef = useRef(0);
-  const listenSyncInFlightRef = useRef(false);
+  const listenSyncInFlightRef = useRef<Promise<void> | null>(null);
+  const listenMarkerPendingRef = useRef(false);
   const playbackStartedRef = useRef(false);
   const playerReadyRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
@@ -973,6 +978,10 @@ export function ArchiveSetExplorer({
   useEffect(() => {
     setQuery(initialQuery);
   }, [initialQuery]);
+
+  useEffect(() => {
+    setListened(initialListened);
+  }, [detail.id, initialListened]);
 
   useEffect(() => {
     setSelectedSourceUrl(null);
@@ -1097,7 +1106,7 @@ export function ArchiveSetExplorer({
   }
 
   async function syncListenProgress(force = false) {
-    if (listenSyncInFlightRef.current || listenIntervalsRef.current.length === 0) {
+    if (listenMarkerPendingRef.current || listenSyncInFlightRef.current || listenIntervalsRef.current.length === 0) {
       return;
     }
 
@@ -1108,46 +1117,78 @@ export function ArchiveSetExplorer({
 
     lastListenSyncAtRef.current = now;
     persistListenProgressCache();
-    listenSyncInFlightRef.current = true;
+    const sync = (async () => {
+      try {
+        const response = await fetch("/api/archive/listen-progress", {
+          body: JSON.stringify({
+            duration: detail.duration,
+            intervals: listenIntervalsRef.current,
+            lastPosition: currentTimeRef.current,
+            setId: detail.id,
+            sourceUrl: activeSource.sourceUrl ?? detail.sourceUrl,
+          }),
+          credentials: "same-origin",
+          headers: {
+            "content-type": "application/json",
+          },
+          keepalive: force,
+          method: "POST",
+        });
 
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as ListenProgressResponse;
+        if (payload.progress) {
+          listenIntervalsRef.current = mergeListenIntervals(
+            [...listenIntervalsRef.current, ...payload.progress.intervals],
+            detail.duration,
+          );
+          setListened(payload.progress.listened);
+        }
+        clearStoredListenProgress(listenProgressStorageKey);
+      } catch {
+        persistListenProgressCache();
+      } finally {
+        listenSyncInFlightRef.current = null;
+      }
+    })();
+    listenSyncInFlightRef.current = sync;
+    await sync;
+  }
+
+  async function toggleListened() {
+    if (listened === null || listenMarkerPendingRef.current) {
+      return;
+    }
+
+    listenMarkerPendingRef.current = true;
     try {
+      // Finish any older playback save before replacing its coverage.
+      await listenSyncInFlightRef.current;
       const response = await fetch("/api/archive/listen-progress", {
-        body: JSON.stringify({
-          duration: detail.duration,
-          intervals: listenIntervalsRef.current,
-          lastPosition: currentTimeRef.current,
-          setId: detail.id,
-          sourceUrl: activeSource.sourceUrl ?? detail.sourceUrl,
-        }),
+        body: JSON.stringify({ listened: !listened, setId: detail.id }),
         credentials: "same-origin",
-        headers: {
-          "content-type": "application/json",
-        },
-        keepalive: force,
-        method: "POST",
+        headers: { "content-type": "application/json" },
+        method: "PATCH",
       });
-
-      if (!response.ok) {
-        return;
-      }
-
       const payload = (await response.json()) as ListenProgressResponse;
-      if (payload.progress?.intervals) {
-        listenIntervalsRef.current = mergeListenIntervals(
-          [...listenIntervalsRef.current, ...payload.progress.intervals],
-          detail.duration,
-        );
+      if (!response.ok || !payload.progress) {
+        throw new Error(payload.error ?? "Unable to update listened marker.");
       }
+
+      listenIntervalsRef.current = mergeListenIntervals(payload.progress.intervals, detail.duration);
+      lastListenSampleRef.current = null;
       clearStoredListenProgress(listenProgressStorageKey);
-    } catch {
-      persistListenProgressCache();
+      setListened(payload.progress.listened);
     } finally {
-      listenSyncInFlightRef.current = false;
+      listenMarkerPendingRef.current = false;
     }
   }
 
   function recordListenPlaybackSample(seconds: number) {
-    if (!isPlayingRef.current || detail.duration <= 0 || Date.now() < seekLockUntilRef.current) {
+    if (listenMarkerPendingRef.current || !isPlayingRef.current || detail.duration <= 0 || Date.now() < seekLockUntilRef.current) {
       lastListenSampleRef.current = null;
       return;
     }
@@ -2479,10 +2520,15 @@ export function ArchiveSetExplorer({
             </div>
 
             <div className="cluster-row">
-              {management.canDeleteSet && management.deleteImpact ? (
+              {listened !== null || (management.canDeleteSet && management.deleteImpact) ? (
                 <ArchiveDeleteControl
+                  additionalAction={listened !== null ? {
+                    label: listened ? "Remove Listened Marker" : "Mark Listened",
+                    onSelect: toggleListened,
+                  } : undefined}
+                  canDelete={management.canDeleteSet && Boolean(management.deleteImpact)}
                   entityType="set"
-                  impact={management.deleteImpact}
+                  impact={management.deleteImpact ?? ""}
                   leadingNode={management.submittedByViewer ? <SubmittedByYouBadge /> : undefined}
                   redirectHref={deleteRedirectHref}
                   slug={detail.slug}

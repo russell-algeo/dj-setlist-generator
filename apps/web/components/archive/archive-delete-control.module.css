@@ -179,7 +179,9 @@
 }
 
 .cancel:disabled,
-.delete:disabled {
+.delete:disabled,
+.trigger:disabled,
+.menuItem:disabled {
   cursor: wait;
   opacity: 0.65;
 }

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ArchiveSetPage } from "@/components/archive/archive-pages";
 import { getArchiveSetManagementBySlug } from "@/lib/archive/deletions";
+import { listUserSetListenProgress } from "@/lib/archive/listen-progress.server";
 import { buildArchiveMetadata } from "@/lib/archive/metadata";
 import { getSessionActor } from "@/lib/auth/session";
 
@@ -35,5 +36,13 @@ export default async function SetDetailPage({ params, searchParams }: SetDetailP
     getArchiveSetManagementBySlug(slug, actor),
   ]);
   if (!detail) notFound();
-  return <ArchiveSetPage detail={detail} management={management} query={queryParams.q?.trim() ?? ""} />;
+  const [progress] = actor ? await listUserSetListenProgress(actor.userId, [detail.id]) : [];
+  return (
+    <ArchiveSetPage
+      detail={detail}
+      initialListened={actor ? progress?.listened ?? false : null}
+      management={management}
+      query={queryParams.q?.trim() ?? ""}
+    />
+  );
 }

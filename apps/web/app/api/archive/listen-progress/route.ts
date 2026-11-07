@@ -4,12 +4,18 @@ import { ZodError, z } from "zod";
 import { parseListenIntervals } from "@/lib/archive/listen-progress";
 import {
   listUserSetListenProgress,
+  setUserSetListened,
   upsertUserSetListenProgress,
 } from "@/lib/archive/listen-progress.server";
 import { getRequestActor } from "@/lib/auth/session";
 import { readRequestBody } from "@/lib/http/request-body";
 
 const uuidSchema = z.string().uuid();
+
+const setListenedSchema = z.object({
+  listened: z.boolean(),
+  setId: uuidSchema,
+});
 
 const upsertProgressSchema = z.object({
   duration: z.coerce.number().finite().positive(),
@@ -83,6 +89,29 @@ export async function POST(request: Request) {
         { error: error.issues[0]?.message ?? "Invalid listen progress payload" },
         { status: 400 },
       );
+    }
+
+    throw error;
+  }
+}
+
+export async function PATCH(request: Request) {
+  const actor = await getRequestActor(request);
+  if (!actor) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  }
+
+  try {
+    const input = setListenedSchema.parse(await readRequestBody(request));
+    const progress = await setUserSetListened(actor.userId, input.setId, input.listened);
+    if (!progress) {
+      return NextResponse.json({ error: "Set not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ progress });
+  } catch (error) {
+    if (error instanceof ZodError || error instanceof SyntaxError) {
+      return NextResponse.json({ error: "Invalid listened marker payload" }, { status: 400 });
     }
 
     throw error;
