@@ -11,7 +11,7 @@ import {
   type ListenProgressSummary,
 } from "@/lib/archive/listen-progress";
 import { getDb, type AppDb } from "@/lib/db/client";
-import { userSetListenProgress } from "@/lib/db/schema";
+import { sets, userSetListenProgress } from "@/lib/db/schema";
 
 export type UpsertListenProgressInput = {
   duration: number;
@@ -69,6 +69,57 @@ export const listUserSetListenProgress = async (
     );
 
   return rows.map(rowToSummary);
+};
+
+export const setUserSetListened = async (
+  userId: string,
+  setId: string,
+  listened: boolean,
+  deps: { db?: AppDb; now?: Date } = {},
+): Promise<ListenProgressSummary | null> => {
+  const db = deps.db ?? getDb();
+  const now = deps.now ?? new Date();
+  const [setRecord] = await db
+    .select({ durationSeconds: sets.durationSeconds, sourceUrl: sets.sourceUrl })
+    .from(sets)
+    .where(eq(sets.id, setId))
+    .limit(1);
+
+  if (!setRecord) {
+    return null;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(userSetListenProgress)
+    .where(and(eq(userSetListenProgress.userId, userId), eq(userSetListenProgress.setId, setId)))
+    .limit(1);
+
+  // A manual marker also works for sources whose duration/player is unavailable.
+  const duration = Math.max(toNumber(setRecord.durationSeconds), toNumber(existing?.durationSeconds), 1);
+  const intervals: ListenInterval[] = listened ? [[0, duration]] : [];
+  const values = {
+    coverageRatio: listened ? "1.00000" : "0.00000",
+    durationSeconds: toNumericString(duration, 2),
+    intervals,
+    lastPositionSeconds: existing?.lastPositionSeconds ?? "0.00",
+    listenedAt: listened ? existing?.listenedAt ?? now : null,
+    setId,
+    sourceUrl: existing?.sourceUrl ?? setRecord.sourceUrl,
+    updatedAt: now,
+    userId,
+  };
+
+  const [saved] = await db
+    .insert(userSetListenProgress)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [userSetListenProgress.userId, userSetListenProgress.setId],
+      set: values,
+    })
+    .returning();
+
+  return rowToSummary(saved);
 };
 
 export const upsertUserSetListenProgress = async (

@@ -228,6 +228,12 @@ CLEANUP_CHECKPOINTS=true      # Delete checkpoint files after completion
 - Matching prefers `shazam_track_id`; if no ID rule matches, it falls back to normalized `artist` + `title`.
 - Checkpoints remain raw: Shazam hits still get saved there, and suppression only affects setlist building and downstream outputs.
 
+### Enriched link matching
+
+Spotify matching retains initials and short title words, requires the complete title (or an explicit version suffix), and requires artist identity evidence. Genre overlap alone does not confirm a recording. ISRC lookups verify the identifier returned by Spotify. YouTube search results are checked against artist/title metadata; a different artist credit requires a Discogs release that corroborates the track title. Search failures and rejected candidates remain unverified, rather than proving catalog absence.
+
+New output carries `link_matching_version: 2` and `platform_matches` with the matched provider title, artists, URL, and matching reason. Set pages prefer confirmed Spotify, then confirmed YouTube, before historical links. An explicit per-set rejection cannot be replaced by a stale canonical track URL. Historical records without this evidence remain legacy records; deploying this code or regenerating HTML does not revalidate them. The existing `backfill_enrichment.py` fills metadata for stored URLs and does **not** rematch them. Repair existing links only through a separately reviewed, targeted re-enrichment or correction, including dependent Spotify artwork/audio features and archive cache refreshes.
+
 ## Output
 
 The tool generates three files per set in the `output/` directory:

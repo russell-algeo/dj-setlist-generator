@@ -25,12 +25,14 @@ export function ArchiveArtistPage({
 
 export function ArchiveSetPage({
   detail,
+  initialListened,
   management,
   query,
 }: {
   detail: ArchiveSetDetail;
+  initialListened: boolean | null;
   management: ArchiveSetManagement;
   query: string;
 }) {
-  return <ArchiveSetExplorer detail={detail} initialQuery={query} management={management} />;
+  return <ArchiveSetExplorer detail={detail} initialListened={initialListened} initialQuery={query} management={management} />;
 }

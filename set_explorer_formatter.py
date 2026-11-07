@@ -21,6 +21,7 @@ from detail_explorer_common import (
     youtube_search_url,
 )
 from output_formatter import format_time, serialize_track
+from platform_matching import primary_track_platform
 
 
 def _detect_platform(source_url: str) -> tuple[str, str]:
@@ -1632,14 +1633,15 @@ def render_set_explorer_html(
         has_direct_discogs = bool(direct_discogs_url)
 
         primary_action_html = ""
+        primary_platform = primary_track_platform(row)
         if not is_unknown_track:
-            if has_embed:
+            if has_embed and primary_platform == "spotify":
                 primary_action_html = (
                     f'<button class="btn track-tool-btn embed-btn js-spotify-embed" data-track-id="{esc(row["spotify_track_id"])}">Spotify</button>'
                 )
-            elif has_direct_youtube:
+            elif has_direct_youtube and primary_platform == "youtube":
                 primary_action_html = action_link_html("youtube", direct_youtube_url, "YouTube", True)
-            elif has_direct_discogs:
+            elif has_direct_discogs and primary_platform == "discogs":
                 primary_action_html = action_link_html("discogs", direct_discogs_url, "Discogs", True)
 
         track_actions_html = (

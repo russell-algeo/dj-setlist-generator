@@ -148,7 +148,7 @@ class TestSpotifyMatching(unittest.TestCase):
 
         self.assertIsNone(match)
 
-    def test_genre_overlap_can_validate_title_only_when_artist_alias_is_unknown(self):
+    def test_genre_overlap_cannot_validate_an_unknown_artist_alias(self):
         match = select_spotify_candidate(
             "Unknown Shazam Alias",
             "Deep Channel",
@@ -161,8 +161,69 @@ class TestSpotifyMatching(unittest.TestCase):
             },
         )
 
+        self.assertIsNone(match)
+
+    def test_so_right_rejects_northern_collective(self):
+        wrong = {"artist": "Northern Collective", "title": "Right in Front of Me, Was You"}
+        self.assertIsNone(select_spotify_candidate("S.I. Collective", "So Right", [wrong], [wrong]))
+
+    def test_initials_are_identity_even_when_title_is_exact(self):
+        self.assertIsNone(select_spotify_candidate("S.I. Collective", "So Right", [
+            {"artist": "Northern Collective", "title": "So Right"}]))
+
+    def test_short_artist_credit_is_not_a_substring_or_reordered_name(self):
+        for expected, observed in [("Hammer", "Velvet Hammer"), ("Northern Collective", "Collective Northern")]:
+            with self.subTest(expected=expected):
+                self.assertIsNone(select_spotify_candidate(expected, "Love Somebody", [
+                    {"artist": observed, "title": "Love Somebody"}]))
+
+    def test_partial_artist_identity_and_ambiguous_aliases_are_rejected(self):
+        self.assertIsNone(select_spotify_candidate("Big City Collective", "So Right", [
+            {"artist": "Other City Collective", "title": "So Right"}]))
+        self.assertIsNone(select_spotify_candidate("James T Cotton", "So Right", [
+            {"artist": "James T Cotton", "title": "So Right"},
+            {"artist": "JTC", "title": "So Right"}]))
+
+    def test_duplicate_album_listings_are_not_ambiguous(self):
+        candidate = {"artist": "Bicep", "title": "Glue"}
+        self.assertIsNotNone(select_spotify_candidate("Bicep", "Glue", [candidate, dict(candidate)]))
+
+    def test_complete_title_is_required_even_for_the_right_artist(self):
+        for title in ["Right in Front of Me, Was You", "Right So", "So Wrong", "So Right Now"]:
+            with self.subTest(title=title):
+                self.assertIsNone(select_spotify_candidate("S.I. Collective", "So Right", [
+                    {"artist": "S.I. Collective", "title": title}]))
+
+    def test_punctuation_and_short_artist_names_are_preserved(self):
+        for artist, candidate in [("S.I. Collective", "SI Collective"), ("DJ EZ", "DJ EZ"), ("M", "M")]:
+            with self.subTest(artist=artist):
+                self.assertIsNotNone(select_spotify_candidate(artist, "So Right", [{"artist": candidate, "title": "So Right"}]))
+
+    def test_complete_artist_credit_cannot_be_assembled_from_collaborators(self):
+        self.assertIsNone(select_spotify_candidate("James Cotton", "So Right", [{
+            "artists": [{"name": "James Brown"}, {"name": "Cotton Eye Joe"}], "name": "So Right"}]))
+
+    def test_explicit_collaboration_credits_match_separate_spotify_artists(self):
+        self.assertIsNotNone(select_spotify_candidate("KREAM & Millean.", "So Right", [{
+            "artists": [{"name": "KREAM"}, {"name": "Millean."}], "name": "So Right"}]))
+
+    def test_corroborated_us_collective_is_valid_if_spotify_has_it(self):
+        correct = {"artist": "U.S. Collective", "title": "So Right"}
+        discogs = {"title": "U.S. Collective - Midnight Luv / So Right", "styles": ["Deep House"]}
+        match = select_spotify_candidate("S.I. Collective", "So Right", [], [correct], discogs_data=discogs)
         self.assertIsNotNone(match)
-        self.assertEqual(match.item["artist"], "Studio Alias")
+        self.assertEqual(match.item, correct)
+
+    def test_unrelated_discogs_release_cannot_establish_alias(self):
+        self.assertIsNone(select_spotify_candidate("S.I. Collective", "So Right", [], [
+            {"artist": "Northern Collective", "title": "So Right"}],
+            discogs_data={"title": "Northern Collective - Different Song"}))
+
+    def test_original_preferred_over_version_but_requested_remix_not_dropped(self):
+        original = {"artist": "Bicep", "title": "Glue"}
+        remix = {"artist": "Bicep", "title": "Glue - DJ Qu Remix"}
+        self.assertEqual(select_spotify_candidate("Bicep", "Glue", [remix, original]).item, original)
+        self.assertIsNone(select_spotify_candidate("Bicep", "Glue (DJ Qu Remix)", [original]))
 
 
 if __name__ == "__main__":

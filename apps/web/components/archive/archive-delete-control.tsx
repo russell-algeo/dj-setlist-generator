@@ -14,6 +14,8 @@ type DeleteResponse = {
 };
 
 type ArchiveDeleteControlProps = {
+  additionalAction?: { label: string; onSelect: () => Promise<void> };
+  canDelete?: boolean;
   entityType: DeleteEntityType;
   impact: string;
   leadingNode?: ReactNode;
@@ -37,6 +39,8 @@ export function SubmittedByYouBadge({ className }: SubmittedByYouBadgeProps) {
 }
 
 export function ArchiveDeleteControl({
+  additionalAction,
+  canDelete = true,
   entityType,
   impact,
   leadingNode,
@@ -143,6 +147,24 @@ export function ArchiveDeleteControl({
     }
   };
 
+  const submitAdditionalAction = async () => {
+    if (!additionalAction || busy) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await additionalAction.onSelect();
+      close(true);
+      router.refresh();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to update set.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <span className={styles.root} onClick={(event) => event.stopPropagation()}>
       {leadingNode ? <span className={styles.leading}>{leadingNode}</span> : null}
@@ -151,6 +173,7 @@ export function ArchiveDeleteControl({
           aria-expanded={open}
           aria-label={`More actions for ${title}`}
           className={styles.trigger}
+          disabled={busy}
           onClick={(event) => {
             event.preventDefault();
             setOpen((current) => !current);
@@ -168,16 +191,36 @@ export function ArchiveDeleteControl({
             style={{ "--delete-popover-shift": `${popoverShift}px` } as CSSProperties}
           >
             {!confirming ? (
-              <button
-                className={styles.menuItem}
-                onClick={(event) => {
-                  event.preventDefault();
-                  setConfirming(true);
-                }}
-                type="button"
-              >
-                {labelFor(entityType)}
-              </button>
+              <>
+                {additionalAction ? (
+                  <button
+                    aria-busy={busy}
+                    className={styles.menuItem}
+                    disabled={busy}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void submitAdditionalAction();
+                    }}
+                    type="button"
+                  >
+                    {busy ? "Saving..." : additionalAction.label}
+                  </button>
+                ) : null}
+                {canDelete ? (
+                  <button
+                    className={styles.menuItem}
+                    disabled={busy}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setConfirming(true);
+                    }}
+                    type="button"
+                  >
+                    {labelFor(entityType)}
+                  </button>
+                ) : null}
+                {error ? <span className={styles.error} role="alert">{error}</span> : null}
+              </>
             ) : (
               <span className={styles.confirmPanel}>
                 <span className={styles.confirmTitle}>{labelFor(entityType)}</span>

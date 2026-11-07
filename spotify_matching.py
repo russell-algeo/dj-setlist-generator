@@ -8,7 +8,7 @@ import unicodedata
 from typing import Any
 
 
-ARTIST_RATIO_THRESHOLD = 0.6
+ARTIST_RATIO_THRESHOLD = 1.0
 VERSION_TERMS = {
     "club",
     "dub",
@@ -176,19 +176,25 @@ def genre_overlap(expected_genres: list[str] | None, provider_genres: list[str] 
 
 def title_only_eligible(expected_title: str, observed_title: str) -> tuple[bool, float]:
     """Return whether a title-only candidate is close enough to consider."""
+    if len(normalize_text(expected_title).split()) < 2:
+        return False, 0.0
+    return title_match_score(expected_title, observed_title)
+
+
+def title_match_score(expected_title: str, observed_title: str) -> tuple[bool, float]:
+    """Keep the whole title (including short words); allow explicit version suffixes."""
     expected_norm = normalize_text(expected_title)
     observed_norm = normalize_text(observed_title)
-    expected_words = comparable_words(expected_title)
-    observed_words = comparable_words(observed_title)
-    if len(expected_words) < 2:
+    if not expected_norm:
         return False, 0.0
     if expected_norm and expected_norm == observed_norm:
         return True, 2.0
-    if not expected_words.issubset(observed_words):
-        return False, 0.0
-    extra_words = observed_words - expected_words
-    if extra_words and extra_words & VERSION_TERMS:
-        return True, 1.0
+    # A shared word or a title embedded in a different song is not identity.
+    # Only strip a delimited suffix that actually describes a mix/version.
+    for suffix in re.finditer(r"\s*(?:\(|\[|\s[-–—]\s)\s*", observed_title):
+        base = observed_title[:suffix.start()]
+        if normalize_text(base) == expected_norm and comparable_words(observed_title[suffix.end():]) & VERSION_TERMS:
+            return True, 1.0
     return False, 0.0
 
 
@@ -212,7 +218,15 @@ def has_discogs_artist_evidence(discogs_data: dict[str, Any] | None, item: dict[
     discogs_artist = compact_text(discogs_artist_text(discogs_data))
     if not discogs_artist:
         return False
-    return any(compact_text(name) and compact_text(name) in discogs_artist for name in candidate_artist_names(item))
+    # Match a complete artist credit, not a substring such as "Collective".
+    credits = re.split(r"\s+(?:/|&|feat\.?|featuring)\s+", discogs_artist_text(discogs_data), flags=re.I)
+    return any(compact_text(name) == compact_text(credit) for name in candidate_artist_names(item) for credit in credits)
+
+
+def discogs_corroborates_title(expected_title: str, discogs_data: dict[str, Any] | None) -> bool:
+    """A search result for a different release cannot establish an alias."""
+    titles = re.split(r"\s*/\s*", discogs_release_title(discogs_data).partition(" - ")[2])
+    return any(title_match_score(expected_title, title)[0] for title in titles)
 
 
 def score_artist_title_candidates(
@@ -220,25 +234,36 @@ def score_artist_title_candidates(
     expected_title: str,
     candidates: list[dict[str, Any]],
 ) -> list[CandidateMatch]:
-    """Score candidates using artist+title word overlap with artist ratio enforcement."""
-    expected_artist_words = comparable_words(expected_artist)
-    expected_title_words = comparable_words(expected_title)
-    if not expected_artist_words or not expected_title_words:
+    """Score complete artist credits and titles, preserving short identity words."""
+    expected_artist_credit = re.sub(r"^the ", "", normalize_text(expected_artist))
+    if not expected_artist_credit or not normalize_text(expected_title):
         return []
 
     scored: list[CandidateMatch] = []
     for item in candidates:
-        observed_artist_words = comparable_words(candidate_artist_text(item))
-        observed_title_words = comparable_words(candidate_title(item))
-        artist_matches = len(expected_artist_words & observed_artist_words)
-        title_matches = len(expected_title_words & observed_title_words)
-        if artist_matches <= 0 or title_matches <= 0:
+        title_eligible, title_score = title_match_score(expected_title, candidate_title(item))
+        if not title_eligible:
             continue
-        artist_ratio = artist_matches / len(expected_artist_words)
+        # Evaluate each credited artist individually; unrelated collaborators
+        # must not combine into the expected artist's name.
+        # A complete short name embedded in another name is still a different
+        # identity (for example Hammer versus Velvet Hammer).
+        artist_ratio = float(any(
+            re.sub(r"^the ", "", normalize_text(name)) == expected_artist_credit
+            for name in candidate_artist_names(item)
+        ))
+        if has_expected_artist_evidence(expected_artist, item):
+            artist_ratio = 1.0
+        # Explicit collaboration credits may correspond to separate Spotify
+        # artists. Only split named separators, never arbitrary name words.
+        expected_credits = re.split(r"\s+(?:&|and|x|feat\.?|featuring)\s+|,\s*", expected_artist, flags=re.I)
+        if len(expected_credits) > 1 and all(
+            has_expected_artist_evidence(credit, item) for credit in expected_credits
+        ):
+            artist_ratio = 1.0
         if artist_ratio < ARTIST_RATIO_THRESHOLD:
             continue
-        title_ratio = title_matches / len(expected_title_words)
-        score = (artist_ratio * 4.0) + (title_ratio * 3.0)
+        score = (artist_ratio * 4.0) + title_score
         scored.append(CandidateMatch(item=item, score=score, reason="artist_title", strong_artist_evidence=True))
 
     return sorted(scored, key=lambda match: match.score, reverse=True)
@@ -262,7 +287,8 @@ def score_title_only_candidates(
         score = title_score
         reasons: list[str] = []
         expected_artist_evidence = has_expected_artist_evidence(expected_artist, item)
-        discogs_artist_evidence = has_discogs_artist_evidence(discogs_data, item)
+        discogs_artist_evidence = (discogs_corroborates_title(expected_title, discogs_data)
+                                  and has_discogs_artist_evidence(discogs_data, item))
 
         if expected_artist_evidence:
             score += 4.0
@@ -277,7 +303,9 @@ def score_title_only_candidates(
             score += 2.0 + min(overlap, 1.0)
             reasons.append("genre_overlap")
 
-        has_corrob = expected_artist_evidence or discogs_artist_evidence or overlap > 0
+        # Genre agreement helps rank a corroborated identity; it cannot prove
+        # that two unrelated artists with the same title are the same track.
+        has_corrob = expected_artist_evidence or discogs_artist_evidence
         if not has_corrob:
             continue
 
@@ -309,7 +337,7 @@ def select_spotify_candidate(
     """Select the best Spotify candidate, including a guarded title-only fallback."""
     primary_matches = score_artist_title_candidates(expected_artist, expected_title, primary_candidates)
     if primary_matches:
-        return primary_matches[0]
+        return select_unambiguous_match(primary_matches)
 
     fallback_matches = score_title_only_candidates(
         expected_artist,
@@ -320,9 +348,19 @@ def select_spotify_candidate(
     if not fallback_matches:
         return None
 
-    best = fallback_matches[0]
-    if len(fallback_matches) > 1:
-        runner_up = fallback_matches[1]
-        if best.score - runner_up.score < 0.5 and not best.strong_artist_evidence:
+    return select_unambiguous_match(fallback_matches)
+
+
+def select_unambiguous_match(matches: list[CandidateMatch]) -> CandidateMatch | None:
+    """Equivalent album listings are OK; equally supported identities are not."""
+    if not matches:
+        return None
+    best = matches[0]
+    best_identity = (compact_text(candidate_artist_text(best.item)), normalize_text(candidate_title(best.item)))
+    for runner_up in matches[1:]:
+        if best.score - runner_up.score >= 0.5:
+            break
+        identity = (compact_text(candidate_artist_text(runner_up.item)), normalize_text(candidate_title(runner_up.item)))
+        if identity != best_identity:
             return None
     return best

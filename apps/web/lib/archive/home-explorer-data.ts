@@ -41,6 +41,7 @@ import {
   normalizeArchiveConfidence,
 } from "@/lib/archive/utils";
 import { getDb } from "@/lib/db/client";
+import { getArchiveCacheNamespace } from "@/lib/db/cache-namespace.server";
 import { artists, setArtists, setEntries, setRuns, sets, tracks } from "@/lib/db/schema";
 
 const HOME_TAGS = {
@@ -542,7 +543,7 @@ const getHomeArtistCardsUncached = async () => {
 
 const getHomeArtistCards = unstable_cache(
   async () => getHomeArtistCardsUncached(),
-  ["archive-home-artist-cards-v1"],
+  [getArchiveCacheNamespace(), "archive-home-artist-cards-v1"],
   { tags: [HOME_TAGS.home, HOME_TAGS.atlas, HOME_TAGS.lists] },
 );
 
@@ -623,7 +624,7 @@ const getHomeGlobalStatsUncached = async () => {
 
 const getHomeGlobalStats = unstable_cache(
   async () => getHomeGlobalStatsUncached(),
-  ["archive-home-global-stats-v1"],
+  [getArchiveCacheNamespace(), "archive-home-global-stats-v1"],
   { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
 );
 
@@ -736,7 +737,7 @@ const getHeroSetCandidatesUncached = async () => {
 
 const getHeroSetCandidates = unstable_cache(
   async () => getHeroSetCandidatesUncached(),
-  ["archive-home-hero-candidates-v1"],
+  [getArchiveCacheNamespace(), "archive-home-hero-candidates-v1"],
   { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
 );
 
@@ -774,7 +775,7 @@ const getArchiveHomeNetworkPayloadUncached = async (): Promise<ArchiveHomeNetwor
 
 export const getArchiveHomeNetworkPayload = unstable_cache(
   async () => getArchiveHomeNetworkPayloadUncached(),
-  ["archive-home-network-v1"],
+  [getArchiveCacheNamespace(), "archive-home-network-v1"],
   { tags: [HOME_TAGS.home, HOME_TAGS.network] },
 );
 
@@ -911,7 +912,7 @@ export const getArchiveHomeAtlasPayload = async ({
         compareMode,
         selectedArtistSlugs,
       }),
-    ["archive-home-atlas-v1", compareMode, selectionKey],
+    [getArchiveCacheNamespace(), "archive-home-atlas-v1", compareMode, selectionKey],
     { tags: [HOME_TAGS.home, HOME_TAGS.atlas] },
   )();
 };
@@ -1033,7 +1034,7 @@ export const getArchiveHomePairPayload = async ({
         artistASlug,
         artistBSlug,
       }),
-    ["archive-home-pair-v1", lookupKey],
+    [getArchiveCacheNamespace(), "archive-home-pair-v1", lookupKey],
     { tags: [HOME_TAGS.home, HOME_TAGS.pair] },
   )();
 };
@@ -1167,7 +1168,7 @@ export const getArchiveHomeSetLibraryPayload = async ({
         query,
         sort,
       }),
-    ["archive-home-set-library-v2", String(PAGE_SIZE), artistFilter, String(page), query, sort],
+    [getArchiveCacheNamespace(), "archive-home-set-library-v2", String(PAGE_SIZE), artistFilter, String(page), query, sort],
     { tags: [HOME_TAGS.home, HOME_TAGS.lists] },
   )()
   );
@@ -1221,7 +1222,7 @@ const getArchiveHomeSetTracklistPayloadUncached = async (
 export const getArchiveHomeSetTracklistPayload = async (slug: string) =>
   unstable_cache(
     async () => getArchiveHomeSetTracklistPayloadUncached(slug),
-    ["archive-home-set-tracklist-v1", slug],
+    [getArchiveCacheNamespace(), "archive-home-set-tracklist-v1", slug],
     { tags: [HOME_TAGS.home, HOME_TAGS.lists, HOME_TAGS.setTracklist(slug)] },
   )();
 

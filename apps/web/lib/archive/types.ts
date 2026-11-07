@@ -1,11 +1,13 @@
 export type ArchiveConfidence = "HIGH" | "MEDIUM" | "LOW" | "UNCERTAIN";
 export type SpotifyExportConfidenceFilter = "all" | "HIGH" | "MEDIUM" | "LOW";
+export type ArchiveLinkStatus = "confirmed" | "legacy" | "unverified";
 
 export type ArchiveEntityResolution =
   | { entityType: "artist"; entityId: string; slug: string }
   | { entityType: "set"; entityId: string; slug: string };
 
 export type ArchiveSetTrack = {
+  linkStatus?: Partial<Record<"spotify" | "youtube" | "discogs", ArchiveLinkStatus>>;
   idx: number;
   artist: string;
   title: string;
