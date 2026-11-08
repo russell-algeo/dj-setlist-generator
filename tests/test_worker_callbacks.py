@@ -124,6 +124,13 @@ class CallbackTests(unittest.TestCase):
         self.assertEqual(req.get_header('X-internal-secret'), 'development-test-secret')
         self.assertIsNone(_NoRedirects().redirect_request(None, None, 302, '', {}, 'https://elsewhere.test'))
 
+    def test_cli_failure_is_nonzero_and_does_not_expose_response(self):
+        for path in ['/api/internal/scheduler', '/api/internal/finalize-discovery', '/api/internal/finalize-set-run']:
+            with self.subTest(path=path), patch('worker.callbacks.get_settings', return_value=settings()), patch('worker.callbacks._open', side_effect=HTTPError('https://private.test', 503, 'secret-body', {}, None)), patch('sys.argv', ['callbacks', path]), patch('sys.stdin', io.StringIO('{}')):
+                with self.assertRaises(SystemExit) as error:
+                    main()
+                self.assertEqual(str(error.exception), 'Internal callback failed (HTTP 503)')
+
     def test_cli_check_performs_no_network_calls(self):
         with patch('worker.callbacks.get_settings', return_value=settings()), patch('worker.callbacks._open') as request, patch('sys.argv', ['callbacks', '--check']):
             main()

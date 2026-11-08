@@ -34,10 +34,12 @@ env:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   discover:
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

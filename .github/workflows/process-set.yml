@@ -44,7 +44,6 @@ env:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   bootstrap:
@@ -216,6 +215,9 @@ jobs:
         run: python -m worker.jobs.process_set --phase recognize --set-run-id "${{ github.event.inputs.set_run_id }}" --slot-index "${{ matrix.slot_index }}"
 
   publish:
+    permissions:
+      contents: read
+      id-token: write
     if: ${{ always() && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
     needs:
       - bootstrap
@@ -258,6 +260,9 @@ jobs:
         run: python -m worker.jobs.process_set --phase publish --set-run-id "${{ github.event.inputs.set_run_id }}"
 
   finalize:
+    permissions:
+      contents: read
+      id-token: write
     if: ${{ always() }}
     needs:
       - bootstrap
