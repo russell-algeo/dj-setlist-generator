@@ -1,130 +1,171 @@
-# Vercel Deployment Runbook
+# Deployment, Preview validation, and recovery
 
-This document describes the checked-in DJ Setlist Generator deployment contract. It records durable architecture, configuration names, and verification steps. Current deployment state belongs to Vercel, GitHub Actions, Neon, and the live repository.
+This is the operational runbook for the existing `russell-algeo/dj-setlist-generator` repository and Vercel project `dj-setlist-generator`. Read `AGENTS.md` before changing source or committing. This document is not authorization to deploy, change access, migrate data, or incur charges. Use the current task's authorization and applicable confirmation rules.
 
-## Architecture
+## Release state and evidence
 
-The deployed product is intentionally split across three systems:
+Branch heads and Vercel aliases were rechecked on **2026-11-08 UTC**. Tests below were performed on **2026-11-07 UTC**. Recheck live state before another release; these identifiers are a recovery reference, not a moving "latest" pointer.
 
-| System | Responsibility |
+| Environment | Source | Vercel deployment | Result |
+| --- | --- | --- | --- |
+| Production | `remote-deployment`, `faaedec434c0854fda7fa0f5dfb4a1cb67efecae` | `dpl_A9rsRehPLkzvk8kRuMX65YTwFuvq` | READY; reviewed PR #28, matching fixes, manual listened markers and database-specific archive caches already released |
+| Preview | `codex/preview-worker-isolation`, `76c5e994e7b044e8e0f7b3a4d42f1c9d901df509` | `dpl_HLExpWtjnfwAc8X68QwwrfoS8iJH` | READY; development worker safeguards and protected callbacks verified |
+
+- [Production](https://dj-setlist-generator.vercel.app)
+- [Stable Preview](https://dj-setlist-generator-listened-preview.vercel.app)
+- [Completed Preview workflow](https://github.com/russell-algeo/dj-setlist-generator/actions/runs/42421827559)
+- [Preview submission](https://dj-setlist-generator-listened-preview.vercel.app/submissions/854fa1d8-c8f9-4226-8cf1-69cdae2a029d)
+- [Published Preview result](https://dj-setlist-generator-listened-preview.vercel.app/sets/never-be-like-you-feat-kai-28202150)
+
+**The Preview worker patch is not released to Production.** Its implementation is on the Preview branch above. A copy of this runbook on the production branch describes that candidate; it does not imply that `worker/isolation.py`, the new callback helper, or workflow guards are present in the production source yet.
+
+| Verification | Observed result and limit |
 | --- | --- |
-| Vercel project `dj-setlist-generator` | Next.js web application, authentication, archive/search UI, API/control plane, internal worker callbacks, and cache revalidation |
-| Neon | Application data, operations tables, queued submissions, set-run leases, recognition results, and published archive data |
-| GitHub Actions | Long-running media discovery, audio preparation, FFmpeg, segment recognition, enrichment, and publication work |
+| Worker tests at `76c5e99` | 104 Python tests passed, including 12 callback and 7 database-isolation tests; actionlint 1.7.12 passed for all three workflows with external shellcheck/pyflakes disabled; diff check passed |
+| Released PR #28 | 103 web tests, 85 Python tests, TypeScript, production build and lint passed (four existing lint warnings); these are prior release results, not a new web-suite run on every later SHA |
+| Preview process-set E2E | Normal app intake, anonymous SoundCloud download, bootstrap, one recognition slot, publish and finalize succeeded at the exact Preview SHA; final protected callback HTTP 200 |
+| Recognition quality | 235-second source, 15 segment results, 9 recognized, 6 Shazam rate-limit failures; one expected Flume track published. Pipeline success is not 100% segment recognition |
+| Persistence and browser | Development submission/run completed, one archive entry persisted, result survived reload, queue drained to zero; playlist creation was false; Production cookie preparation/persistence skipped |
+| Google authentication | Real Preview sign-in, repeated sign-in and authenticated reload passed |
+| Spotify authentication | User completed existing-account login; returned Preview session displayed Connected before and after reload. Read-only counts verified one Spotify account with refresh token, one active encrypted connection and an active session joined to it; no token values read |
+| Not yet live-tested for the worker patch | Artist discovery, manual development scheduler, forced failure/cancellation finalization, long-running token renewal, anonymous YouTube processing, multiple simultaneous sets/slots, Spotify playlist writes, production worker execution, and rollback drill |
 
-Vercel does not run the media-recognition pipeline. Its role is intentionally short-running: accept user work, persist/dispatch state, expose status, and accept authenticated callbacks from Actions.
+Local sanitized evidence on Hal is in `/Users/hal/Documents/Codex/2026-11-06/task-3/live-check/`: `preview-worker-completion.json`, `preview-e2e-github-result.json`, `preview-e2e-current.json`, `preview-e2e-callback-log.txt`, `preview-media-completed.png`, `preview-spotify-completion.json`, and `preview-spotify-connected.png`. These are local audit artifacts, not files expected in a fresh clone. Do not commit credentials, browser sessions, downloaded media, or raw diagnostic logs.
 
-### Runtime flow
+## Architecture and environment map
 
-1. The Vercel Next.js app accepts a set or artist submission and writes operational state to Neon.
-2. The app dispatches `process-set.yml` or `discover-artist.yml` through the GitHub Actions API. The dispatch includes a derived `deployment_target`.
-3. GitHub Actions selects the matching development or production database and app URL secret.
-4. `process-set.yml` runs four stages: bootstrap, matrix recognition, publish, and finalize. It uses short-lived artifacts to hand prepared media/runtime files from bootstrap to recognition slots.
-5. `discover-artist.yml` performs discovery, creates/deduplicates queued set runs, then asks the app to dispatch pending work.
-6. Actions and workers call Vercel internal routes with `x-internal-secret`; these routes publish results, finalize workflow state, dispatch pending work, and revalidate public pages.
-7. `scheduler.yml` runs every 15 minutes and calls the Vercel internal scheduler. Scheduled invocations target production; manually dispatched invocations can select development or production.
+Vercel runs the Next.js control plane; GitHub Actions runs media work; Neon stores application, authentication and operation state. Production and Preview share one repository and existing Actions dispatch control. They have separate database branches and callback credentials.
 
-## Verified Vercel topology
+| Component | Production | Preview / development |
+| --- | --- | --- |
+| Web and dispatched worker ref | `remote-deployment` | `codex/preview-worker-isolation` |
+| `APP_BASE_URL` | `https://dj-setlist-generator.vercel.app` | `https://dj-setlist-generator-listened-preview.vercel.app` |
+| App dispatch target | `APP_ENVIRONMENT=production` | Explicit `APP_ENVIRONMENT=development` yields `deployment_target=development` |
+| Neon project/database | `late-haze-65748644` / `neondb` | Same project/database name, independent branch |
+| Neon branch | `production`, `br-blue-field-a412pexb` | `development`, `br-flat-cake-a4nsqzd6` |
+| Direct endpoint | `ep-rough-dust-a4q90lxc.us-east-1.aws.neon.tech` | `ep-autumn-bar-a4f9xp8v.us-east-1.aws.neon.tech` |
+| Roles (app / worker / migrations) | `set_list_app` / `set_list_worker` / `set_list_migrator` | `set_list_dev_app` / `set_list_dev_worker` / `set_list_dev_migrator` |
+| GitHub database and URL secrets | `PRODUCTION_DATABASE_URL_*`, `PRODUCTION_APP_BASE_URL` | `DEVELOPMENT_DATABASE_URL_*`, `DEVELOPMENT_APP_BASE_URL` |
+| GitHub callback secret | `INTERNAL_WORKER_SHARED_SECRET` | `DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET` |
+| Vercel callback variable | `INTERNAL_WORKER_SHARED_SECRET` in Production | Same variable name in Preview, different development value |
+| OAuth clients / metadata providers | Existing Google and Spotify clients; Spotify/Discogs provider credentials | Shared clients/providers, separate callback URLs and development auth records |
+| Scheduler | Default-branch cron every 15 minutes, production target | No unattended Preview cron; manual development check only |
 
-| Property | Value |
+`*_DATABASE_URL_*` above denotes the existing `POOLED`, `DIRECT`, and `MIGRATIONS` names. Vercel uses `DATABASE_URL`, `DATABASE_URL_DIRECT`, and `DATABASE_URL_MIGRATIONS` in each target environment. The web app uses the app role; Actions runtime uses only the direct worker role; migration credentials are for explicitly planned maintenance. Pooled endpoints append `-pooler` to the endpoint name. The development worker guard intentionally accepts the direct host only.
+
+The branch names were changed without moving live data. Development is the historical root and production its independently writable child; neither branch name nor lineage is permission to reset/copy data. Do not merge, reset, or replace Neon production as part of a source-code release. The former separate temporary Preview project was retired. Local web development currently uses real isolated Neon development credentials; PGlite was evaluated but is not integrated.
+
+### Runtime and local setup
+
+- Vercel root: **`apps/web`**, Next.js; repository package manager: **pnpm 10.8.0**.
+- `.nvmrc`: **24.15.0**; root and web `package.json` engines: **24.x**.
+- Vercel project API still reports a **20.x default**. The production build log explicitly confirms that package engines override it to **24.x**. Do not interpret the old project default as the effective build runtime. Inspect each build; do not change the project setting as a documentation fix. See [Vercel Node version precedence](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions).
+- Media workflows use **Python 3.11** and install their phase-specific requirements. Deno/FFmpeg are prepared by the workflow.
+- From the repository root, use the pinned runtime, `pnpm install --frozen-lockfile`, then `pnpm --filter web dev`. Use an ignored private local environment file containing development-only credentials; do not copy Production values into it. Confirm the resolved database target before writes.
+- When CLI deployment/linking is needed, run Vercel from `apps/web` and verify the existing project/team. Root `deploy:*` wrappers currently invoke Vercel from the repository root; do not use them as a shortcut. Do not copy another checkout's `.vercel` metadata or authorize a new CLI identity merely because the browser is already signed in.
+
+Current `/sets`, `/artists`, and archive pages are rendered from normalized Neon rows and database-scoped caches. Local `output/` JSON/HTML is a separate CLI artifact, not automatically deployed. The old `archive:stage` package script is absent; do not follow the former static-HTML staging instructions. Imports/backfills are separately scoped data mutations and must include the relevant materialized-view/cache refresh.
+
+## Submission and callback flow
+
+1. An authenticated user submits through Preview UI or `POST /api/jobs`. A single hand-picked source uses `mode=curated_artist`, `artistName`, and `sourceUrls`; default `createPlaylist=false` avoids Spotify writes.
+2. The app writes ownership, submission and set-run state to its Neon branch, then dispatches the existing workflow on `GITHUB_WORKFLOW_REF`. `APP_ENVIRONMENT` takes precedence over `VERCEL_ENV`; only `production` selects production secrets. Never leave Preview's ref unset: code falls back to `remote-deployment`.
+3. GitHub checks out the dispatched commit and selects target-specific database, app URL and callback secret. A branch can move after the web build, so compare Vercel's source SHA with every workflow `headSha`; stop for drift rather than assuming matching branch names prove matching code.
+4. Bootstrap checks routing, downloads public audio and creates recognition leases. Artifacts pass audio to recognition slots (one-day retention). Recognition persists segment results; publication enriches and sends the payload to the app.
+5. Preview callbacks send both `x-internal-secret` and a newly minted `x-vercel-trusted-oidc-idp-token`. Vercel validates OIDC trust; the app validates its separate development secret. Publishing, revalidation, dispatch and finalization must all target the same Preview origin. Redirects are refused.
+6. The app persists the archive result, refreshes the archive, and reconciles submission/run state. Inspect `/submissions/<id>`, then `/sets/<slug>` and reload. Workflow success alone is insufficient.
+
+Direct `process-set.yml`/`discover-artist.yml` dispatch is not user intake: their IDs must already exist in the correct app database. Do not rerun historical development-target jobs from before the split; they originally used live data, but development secrets now point elsewhere. GitHub reruns preserve the original SHA/ref, not necessarily the historical external configuration ([GitHub rerun behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs?tool=cli)). Recover through the correct app and reconcile the exact run IDs.
+
+### Guards and shared trust
+
+The Preview patch checks the exact development worker host, role, `neondb`, port and SSL settings, rejects connection overrides and production/migrator fallbacks, and checks the exact Preview callback origin before media work. Missing development callback credentials never select the production callback secret. `process-set` concurrency includes branch, deployment target and run UUID; discovery and scheduler do not gain such a group from this patch.
+
+Development skips Production YouTube-cookie preparation and persistence. The persistence script also requires `WORKER_DEPLOYMENT_TARGET=production`. Do not import Production cookies to work around anonymous-provider rejection.
+
+This is an accidental-misrouting defense, **not isolation from hostile workflow code**. Repository-scoped Production secrets remain available to trusted development code; shared Actions access can cancel production runs. Provider credentials, OAuth client revocation, quotas, runner/storage allowances and possible provider/IP throttling are shared. Keep the Free-only constraint, bounded work and short retention; verify current allowances before tests. Do not add paid services, bigger runners or overage.
+
+### Existing protected Preview configuration
+
+These three rules are already saved. Inspect and preserve them; do not add duplicates:
+
+| Claim / destination | Value |
 | --- | --- |
-| Vercel project | `dj-setlist-generator` |
-| Vercel root directory | `apps/web` |
-| Framework | Next.js |
-| Node runtime | `20.x` |
-| Production alias | `https://dj-setlist-generator.vercel.app` |
-| Region observed in production bundle | `iad1` |
+| Provider / issuer | GitHub Actions / `https://token.actions.githubusercontent.com` |
+| Audience | `https://github.com/russell-algeo` |
+| Repository | `russell-algeo/dj-setlist-generator` |
+| Branch | `codex/preview-worker-isolation` |
+| Workflow names (three separate rules) | `process-set`, `discover-artist`, `scheduler` — YAML `name`, not filenames |
+| Vercel environment | Preview only |
 
-The repository’s default integration branch is `remote-deployment`. The production Vercel alias was verified as a `Ready` deployment built from the matching Git branch alias.
+Keep the existing project self-access rule and Vercel Authentication. Workflows need `contents: read` and `id-token: write`. A new worker branch needs an explicitly scoped trust update before its callbacks will work; changing the web/ref alone is insufficient. New credentials/trust changes require their own applicable authorization.
 
-## Vercel environment contract
+The existing Google and Spotify clients have the exact stable-Preview destinations `/api/auth/callback/google` and `/api/auth/callback/spotify`. Both real sign-in flows and reload persistence passed. Do not create replacement clients or repeat redirect writes. Browser Vercel access, provider login and app login are separate sessions; an authenticated CLI/service callback does not prove an authenticated user flow. Preserve deployment protection and use existing authorized access; involve the user when provider login/consent is needed. Playlist creation remains a real external write and was not part of the completed test.
 
-Never retrieve, print, commit, or copy environment values into this repository. Inspect variable names/scopes with the Vercel CLI, and change values only with explicit approval.
+## Checklist: validate a new Preview candidate
 
-### Required categories
+- [ ] Record branch, exact commit/tree, diff, current production/Preview deployment IDs, environment mapping, database migration state and pending/active run IDs. Keep secret values out of the record. Freeze the candidate while testing.
+- [ ] Review database/callback origin guards, secret selection, cookie conditions, concurrency and workflow permissions. Check current Free-plan/capacity constraints. Plan any schema changes separately and maintain backward compatibility with running workers.
+- [ ] Run relevant local checks from the root in the configured environment:
 
-- **Application/database:** `APP_ENVIRONMENT`, `APP_BASE_URL`, `DATABASE_URL`, `DATABASE_URL_DIRECT`, `DATABASE_URL_MIGRATIONS`
-- **Authentication/session security:** `AUTH_SECRET`, `TOKEN_ENCRYPTION_KEY`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, optional `NEXTAUTH_URL`
-- **Spotify integration:** `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`
-- **Vercel-to-GitHub dispatch:** `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_DISPATCH_TOKEN`, `GITHUB_WORKFLOW_PROCESS_SET`, `GITHUB_WORKFLOW_DISCOVER_ARTIST`, `GITHUB_WORKFLOW_REF`
-- **Vercel-to-worker authentication:** `INTERNAL_WORKER_SHARED_SECRET`
-- **Administration and capacity:** `INITIAL_ADMIN_EMAIL`, optional `PROCESS_SET_MAX_ACTIVE_RUNS` (defaults to 10 in code)
+  ```bash
+  python3 -m unittest discover -s tests
+  actionlint .github/workflows/process-set.yml .github/workflows/discover-artist.yml .github/workflows/scheduler.yml
+  pnpm --filter web test
+  pnpm --filter web exec tsc --noEmit
+  pnpm --filter web lint
+  pnpm --filter web build
+  git diff --check
+  ```
 
-The application treats `APP_ENVIRONMENT=production` as the production dispatch target. Any other value, including Vercel preview, maps to the development dispatch target. `NEXTAUTH_URL` falls back to `APP_BASE_URL` when absent.
+  Use the project's Python environment and requirements. Record actual results, versions and omitted checks; do not relabel the earlier actionlint run as including shellcheck/pyflakes. Build with development credentials only. Documentation-only edits need link/command/diff checks, not another media job.
+- [ ] Within the approved deployment scope, build the exact branch with **Preview** configuration. Environment edits affect a new deployment, not an existing immutable one. Confirm READY/source SHA, then assign only the stable Preview alias. Preserve Production.
+- [ ] Check Preview's database/role, `APP_BASE_URL`, `APP_ENVIRONMENT`, explicit `GITHUB_WORKFLOW_REF`, callback secret presence and exact trust. Verify access through Vercel protection, app Google/Spotify sign-in, and authenticated reload without printing tokens.
+- [ ] Ensure the development queue is understood and empty for a one-job test. Submit one short anonymous public URL through normal app intake with playlist creation false and notifications off. Record submission/run IDs and duration. Capacity defaults are not a one-job guarantee: the web default is 10 active runs and slot selection is automatic. The completed 235-second test naturally selected one slot; verify actual slot/counts and use reviewed development-only limits if another source would exceed the intended budget.
+- [ ] Confirm workflow `headSha` equals the frozen candidate, development routing, preflight success and skipped Production cookie steps. Follow bootstrap, recognition, publish, revalidation and finalize. Capture provider failures separately from pipeline state.
+- [ ] Verify the resulting development rows, completed submission/run, final callback status, archive page and reload; ensure the queue drained. Record any external side effects and remove only explicitly disposable fixtures when cleanup is approved.
+- [ ] Before releasing changes to those paths, add bounded discovery, development scheduler and controlled failure/cancellation tests. Exercise long-running renewal or multi-slot behavior when the change depends on it. These remain unverified by the initial process-set test; obtain an explicit risk decision if any required scenario is deferred.
 
-### GitHub Actions secrets
+## Checklist: release the reviewed source to Production
 
-The worker cannot use Vercel environment values directly. GitHub repository secrets must independently provide the correct target values:
+This promotes **source code and its compatible configuration**, not development data. Do not assign the Production alias directly to a development-backed build. Vercel's supported Preview-to-Production promotion rebuilds with Production variables; merely assigning an alias is not that operation ([Vercel promotion behavior](https://vercel.com/docs/deployments/promoting-a-deployment)). Prefer the repository's reviewed integration path below.
 
-- development and production pooled/direct/migration Neon URLs;
-- development and production public app URLs;
-- `INTERNAL_WORKER_SHARED_SECRET`;
-- Spotify and Discogs credentials needed by worker enrichment/playlists;
-- YouTube authentication material where enabled.
+- [ ] Recheck live heads, rules and release authorization. `remote-deployment` currently requires a PR and one approving review. Get approval on the final candidate and resolve required checks; do not bypass protection or treat conversation approval as a recorded GitHub review.
+- [ ] Rebase/merge against the current integration head and validate the resulting tree. If conflicts or source changes alter the tested candidate, rerun affected checks and Preview tests. Record the final merge SHA/tree and rollback baseline.
+- [ ] Inventory active Production and development jobs. Agree a release window and compatibility plan. Do not rotate credentials/change DB or callback routing beneath active jobs. If the change requires stopping dispatch, use a reviewed reversible intake/dispatch pause; do not disable the shared workflows globally as a Preview-only measure.
+- [ ] Review release triggers before merging: a merge can immediately build the Production web app, new workflow dispatches use the updated branch, and scheduled Actions execute the default-branch scheduler. These do not change atomically. Drain affected work or provide an explicit compatible rollout; do not merge first and investigate the gap later.
+- [ ] Verify existing Production `APP_ENVIRONMENT=production`, app origin, production database roles and `GITHUB_WORKFLOW_REF=remote-deployment`. Keep its callback credential, endpoints, OAuth destinations and data unchanged for this worker patch. Stage any separately authorized migration against the correct branch/role with recovery evidence; never copy/reset Neon development into Production.
+- [ ] Merge through the required PR gate within the approved release window. Let the existing Git integration build the merged source with Production configuration; inspect the resulting READY deployment and Production alias. Do not deploy twice if the Git-triggered build already succeeded. A controlled manual release must still use the reviewed source and Production environment.
+- [ ] Verify deployment SHA/tree, app environment/database routing, existing archive/search/sign-in, manual listened mark/remove/reload and error logs. Run one approved bounded normal Production submission when worker behavior changed, check its workflow head/production target and all callbacks, then observe the scheduled production path. A read-only smoke check alone does not validate media work.
+- [ ] Record results, remaining limitations, current source/deployment IDs and recovery owner in the release record/Vault. Resume any paused intake only after routing and callbacks are confirmed. Retain Preview separately; do not delete its branch or trust just because source was merged.
 
-Keep the Vercel app URL and GitHub Actions target aligned. A production Vercel request that dispatches Actions against a development app/database—or the inverse—creates an inconsistent control plane.
+## Checklist: rollback and incident recovery
 
-## Local CLI setup
+A Vercel rollback restores web deployment/configuration captured by that build. It does **not** revert Neon rows/migrations, GitHub branch workflow code, repository secrets, scheduled behavior or already-running jobs. Choose web, worker, configuration and data recovery independently, then verify them together.
 
-Only `apps/web` is a Vercel deployment root:
+### Preview
 
-```bash
-cd apps/web
-vercel link
-```
+1. Stop new Preview intake and inventory pending/active development IDs. Disable only Preview dispatch using a reviewed mechanism. If using an empty Preview `GITHUB_DISPATCH_TOKEN`, build/serve a new Preview deployment for it to take effect; preserve callbacks so existing jobs can finish. Empty dispatch configuration can still leave claimed rows to reconcile, so it is not a complete queue pause. Do not revoke the shared GitHub token or disable shared workflows.
+2. Drain current jobs, or cancel only the identified development jobs with explicit recovery handling. Preserve evidence and reconcile their database status through the app; do not leave leased/claimed rows silently stuck.
+3. Select a previously verified **development-backed** deployment and compatible worker ref, or rebuild a corrected source with development configuration. Recheck SHA/ref, role/origin, callback credential and exact trust. The old PR #28 Preview and temporary holding builds predate this callback isolation; they are not proven worker rollback targets. Do not revive builds that captured the inherited cross-branch owner credential.
+4. Restore only the Preview alias/configuration. Rebuild when environment changes are required. Keep the currently validated stable alias for callbacks until active jobs have drained; coordinate any alias change with their expected app behavior.
+5. Remove newly added development-only secrets/trust only when specifically authorized and no job depends on them. Do not revoke shared providers or delete/reset the development branch as routine rollback. Verify a bounded recovery and drain state before reopening intake.
 
-Confirm that the link targets the existing `dj-setlist-generator` project before accepting. Linking creates ignored `.vercel/project.json` metadata only; it does not deploy, modify remote settings, or pull environment values.
+### Production
 
-Do **not** run `vercel` from the repository root. The root package scripts currently call `vercel deploy` directly, but the README correctly warns that a root invocation can create or target an unintended project. Until those scripts are corrected, invoke the CLI from `apps/web` explicitly.
+1. Record the incident and exact affected IDs; pause new work through an approved, scoped mechanism if necessary. Preserve live content and auth data.
+2. For a web regression, choose the last compatible deployment that actually served Production and use Vercel's rollback operation. Inspect its captured database/app configuration and migration compatibility first. Do not use a Preview build as a substitute.
+3. For a worker regression, restore reviewed good workflow/code on `remote-deployment` through a revert PR and required review. A web rollback leaves the branch and cron unchanged. A separately authorized temporary dispatch-ref pin must reference verified production-capable code; it does not move the default-branch scheduled workflow. Account for both paths and active jobs.
+4. Recover schema/content only from a separately reviewed backup/guarded rollback plan. Never reset Production from development or assume deploying old code reverses a migration. Restore secrets only through the approved credential process, without exposing values.
+5. Check Production alias/source, database role and endpoint, dispatch ref, scheduler source, active-job outcomes, app behavior and callback status. Reconcile failed jobs through the Production app; do not rerun pre-split development-target jobs. Document deviations and the source/deployment now serving users.
 
-## Build and validation
-
-Before a deployment-sensitive change:
-
-```bash
-pnpm --filter web lint
-pnpm --filter web test
-pnpm --filter web build
-python3 -m unittest discover -s tests -q
-python3 -m compileall worker
-python3 -m worker.cli --help
-```
-
-Use focused checks first when a change affects only the web app or worker, then run the full relevant set when a change crosses Vercel, Neon, or workflow boundaries.
-
-### Archive-content deployment rule
-
-The Next.js application serves checked-in generated pages from `apps/web/public`, not the git-ignored `output/` directory. After regenerating archive HTML:
-
-```bash
-python3 backfill_html.py --master
-APP_BASE_URL=https://dj-setlist-generator.vercel.app pnpm --filter web archive:stage
-```
-
-Review the resulting `apps/web/public` diff before committing. A Git-triggered Vercel build cannot include generated files left only in `output/`.
-
-### End-to-end non-production check
-
-1. Identify the preview app alias and verify its Vercel environment has the required preview values.
-2. Verify its `APP_ENVIRONMENT` yields the expected development workflow target.
-3. Confirm the matching GitHub Actions development secrets point to the same non-production Neon/app topology.
-4. Sign in and confirm `/artists`, `/sets`, and the dashboard load.
-5. Submit one safe test URL or artist request.
-6. Verify the Vercel app dispatches `process-set.yml` or `discover-artist.yml`.
-7. Verify the workflow updates Neon, calls the authenticated internal endpoints, and the Vercel UI shows the final state.
-8. Verify Spotify only after the callback URL for that exact public alias has been registered.
-
-## Deployment safety
+## Deployment authorization
 
 - Preview deployments, Vercel environment changes, production deployments, aliases/domains, database migrations, workflow dispatches that process external media, and public actions require Russell’s approval immediately before the action.
 - Do not use `--prod`, `--yes`, `--force`, or inline environment values to bypass that approval.
 - Do not use Vercel Cron for worker orchestration; GitHub Actions owns the 15-minute scheduler and long-running pipeline.
 - Do not pull remote environment values into local files without explicit approval of the destination and secret-handling risk.
 
-## Live-state audit notes
+## Documentation maintenance
 
-Last audited from the Vercel CLI on 2026-08-10:
-
-- The production alias was `Ready`; the deployed Next.js bundle reported 80+ output items in `iad1`.
-- Vercel has development, preview, and production database/application configuration entries. Encrypted values were intentionally not retrieved, so target alignment must be verified per deployment before consequential testing.
-- Local clones are not Vercel-linked by default. Link only `apps/web` as described above; never copy another clone's `.vercel` metadata or credentials.
+Keep this runbook and the README deployment pointers aligned on both release and Preview branches. Distinguish observed state, historical evidence and planned checks. A documentation PR can still trigger Vercel builds; review its base, diff and deployment effects before publishing or merging. Never turn a prior approval stored in a note into standing permission for a future change.
