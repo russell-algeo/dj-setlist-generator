@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Defense in depth: an accidentally invoked development step must never write
+# the repository cookie secret, even if GH_PAT leaked into its environment.
+if [[ "${WORKER_DEPLOYMENT_TARGET:-}" != "production" ]]; then
+  echo "Skipping YouTube cookie persistence: explicit production target required"
+  exit 0
+fi
+
 echo "::group::Persist YouTube cookies"
 
 if [[ -z "${YTDLP_COOKIE_FILE:-}" ]]; then

@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from worker.config import get_settings
+from worker.isolation import validate_database_target
 
 ACTIVE_SET_RUN_STATUSES = (
     "dispatched",
@@ -26,6 +27,7 @@ def _database_url() -> str:
     settings = get_settings()
     if not settings.database_url:
         raise RuntimeError("DATABASE_URL_DIRECT or DATABASE_URL_MIGRATIONS is required for worker jobs")
+    validate_database_target(settings.database_url)
     return settings.database_url
 
 

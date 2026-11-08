@@ -62,15 +62,18 @@ def get_settings(explicit_base_url: str | None = None) -> WorkerSettings:
         or saved.get("base_url")
     )
 
+    # A development worker must never inherit a production or migrator fallback.
+    database_keys = (
+        ("DATABASE_URL_DIRECT", "DEVELOPMENT_DATABASE_URL_DIRECT")
+        if os.getenv("WORKER_DEPLOYMENT_TARGET") == "development"
+        else ("DATABASE_URL_DIRECT", "DATABASE_URL_MIGRATIONS",
+              "DEVELOPMENT_DATABASE_URL_DIRECT", "PRODUCTION_DATABASE_URL_DIRECT")
+    )
+
     return WorkerSettings(
         api_base_url=api_base_url.rstrip("/") if api_base_url else None,
         api_token=_first_env("DJSET_API_TOKEN") or saved.get("token"),
         internal_secret=_first_env("INTERNAL_WORKER_SHARED_SECRET"),
-        database_url=_first_env(
-            "DATABASE_URL_DIRECT",
-            "DATABASE_URL_MIGRATIONS",
-            "DEVELOPMENT_DATABASE_URL_DIRECT",
-            "PRODUCTION_DATABASE_URL_DIRECT",
-        ),
+        database_url=_first_env(*database_keys),
         import_full_archive=_first_env("WORKER_IMPORT_FULL_ARCHIVE", "IMPORT_FULL_ARCHIVE") != "false",
     )

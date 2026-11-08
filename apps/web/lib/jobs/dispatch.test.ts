@@ -180,3 +180,55 @@ describe("finalizeArtistDiscoveryWorkflow", () => {
     });
   }, 15_000);
 });
+
+describe("set workflow finalization during rollout", () => {
+  const updateSet = vi.fn();
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockedDb.execute.mockReset().mockResolvedValue({ rows: [] });
+    mockedDb.select.mockReset();
+    updateSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+    mockedDb.update.mockReturnValue({ set: updateSet });
+    mockedDb.delete.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  });
+  const prepare = (overrides: Record<string, unknown> = {}) => {
+    mockedDb.select
+      .mockReturnValueOnce(selectLimit([{ id: "run-1", submissionId: "sub-1", status: "recognizing",
+        attemptCount: 0, cancelRequestedAt: null, sourceMetadata: { active_workflow_run_id: "new-workflow" }, ...overrides }]))
+      .mockReturnValueOnce(selectWhere([{ totalCount: 1, claimedCount: 1 }]))
+      .mockReturnValueOnce(selectWhere([{ hitCount: 0 }]));
+  };
+  const payload = { setRunId: "run-1", workflowRunId: "new-workflow", bootstrapResult: "success", recognizeResult: "cancelled", publishResult: "skipped" };
+  it("ignores an older workflow callback without requeue or mutation", async () => {
+    prepare();
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect(await finalizeSetRunWorkflow({ ...payload, workflowRunId: "old-workflow" })).toEqual({ action: "superseded_workflow_finalize_ignored" });
+    expect(mockedDb.update).not.toHaveBeenCalled();
+    expect(mockedDb.execute).not.toHaveBeenCalled();
+    expect(dispatchProcessSetWorkflow).not.toHaveBeenCalled();
+  });
+  it("honors cancellation without retrying the cancelled run", async () => {
+    prepare({ cancelRequestedAt: new Date() });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("cancelled");
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: "cancelled" }));
+    expect(mockedDb.delete).not.toHaveBeenCalled();
+    expect(dispatchProcessSetWorkflow).not.toHaveBeenCalled();
+  });
+  it("preserves completed runs on repeated failure callbacks", async () => {
+    prepare({ status: "completed" });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("already_terminal");
+    expect(mockedDb.update).not.toHaveBeenCalled();
+    expect(mockedDb.delete).not.toHaveBeenCalled();
+  });
+  it("stops retrying after the recovery limit", async () => {
+    prepare({ attemptCount: 3 });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("failed_after_recovery_limit");
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(mockedDb.delete).not.toHaveBeenCalled();
+    expect(dispatchProcessSetWorkflow).not.toHaveBeenCalled();
+  });
+});

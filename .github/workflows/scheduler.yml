@@ -14,17 +14,25 @@ on:
   schedule:
     - cron: "*/15 * * * *"
 
+permissions:
+  contents: read
+
 jobs:
   scheduler:
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+
       - name: Trigger internal scheduler
         env:
-          APP_BASE_URL: ${{ (github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-          INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+          APP_BASE_URL: ${{ secrets[(github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
+          INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
+          WORKER_DEPLOYMENT_TARGET: ${{ (github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
+          WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+          WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
         run: |
-          curl --fail --show-error --silent \
-            -X POST \
-            -H "x-internal-secret: ${INTERNAL_WORKER_SHARED_SECRET}" \
-            "${APP_BASE_URL}/api/internal/scheduler"
+          python3 -m worker.callbacks /api/internal/scheduler </dev/null

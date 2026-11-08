@@ -32,20 +32,32 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: read
+
 jobs:
   discover:
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      DATABASE_URL_DIRECT: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_DATABASE_URL_DIRECT || secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-      APP_BASE_URL: ${{ github.event.inputs.deployment_target == 'production' && secrets.PRODUCTION_APP_BASE_URL || secrets.DEVELOPMENT_APP_BASE_URL }}
-      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.INTERNAL_WORKER_SHARED_SECRET }}
+      DATABASE_URL_DIRECT: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_DATABASE_URL_DIRECT' || 'DEVELOPMENT_DATABASE_URL_DIRECT'] }}
+      APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
+      WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
       SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
       SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
       SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
       DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check callback isolation
+        run: python3 -m worker.callbacks --check
 
       - uses: actions/setup-python@v5
         with:
@@ -71,6 +83,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Prepare YouTube auth
+        if: ${{ github.event.inputs.deployment_target == 'production' }}
         id: youtube_auth
         env:
           YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
@@ -123,7 +136,7 @@ jobs:
         run: python -m worker.jobs.discover_artist --submission-id "${{ github.event.inputs.submission_id }}"
 
       - name: Persist refreshed YouTube cookies
-        if: ${{ success() && steps.youtube_auth.outputs.cookies_present == 'true' }}
+        if: ${{ success() && github.event.inputs.deployment_target == 'production' && steps.youtube_auth.outputs.cookies_present == 'true' }}
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           GH_REPO: ${{ github.repository }}
@@ -132,15 +145,7 @@ jobs:
       - name: Finalize discovery workflow
         if: ${{ always() }}
         run: |
-          curl \
-            --fail \
-            --show-error \
-            --silent \
-            -X POST \
-            "${APP_BASE_URL}/api/internal/finalize-discovery" \
-            -H "content-type: application/json" \
-            -H "x-internal-secret: ${INTERNAL_WORKER_SHARED_SECRET}" \
-            -d @- <<'JSON'
+          python3 -m worker.callbacks /api/internal/finalize-discovery <<'JSON'
           {
             "submissionId": "${{ github.event.inputs.submission_id }}",
             "workflowRunId": "${{ github.run_id }}",
