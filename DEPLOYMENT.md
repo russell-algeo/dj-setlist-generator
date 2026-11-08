@@ -30,6 +30,20 @@ Branch heads and Vercel aliases were rechecked on **2026-11-08 UTC**. Tests belo
 | Spotify authentication | User completed existing-account login; returned Preview session displayed Connected before and after reload. Read-only counts verified one Spotify account with refresh token, one active encrypted connection and an active session joined to it; no token values read |
 | Not yet live-tested for the worker patch | Artist discovery, manual development scheduler, forced failure/cancellation finalization, long-running token renewal, anonymous YouTube processing, multiple simultaneous sets/slots, Spotify playlist writes, production worker execution, and rollback drill |
 
+### Worker promotion checks (2026-11-08)
+
+Candidate `b6e1070` was tested against production source `93c9c3e` (the documentation-only PR #29 merge). The worker source has not yet been released. Local checks passed: 109 Python tests, 110 web tests, TypeScript, actionlint (external shellcheck/pyflakes disabled), and lint with the same four existing warnings. The candidate Vercel build is READY (`dpl_24qwo4yumTV3SSnKH6MsXo3PhrCy`).
+
+Three bounded development workflows ran at that exact candidate SHA using the existing protected Preview callback and unchanged web application code:
+
+- Scheduler [42489963821](https://github.com/russell-algeo/dj-setlist-generator/actions/runs/42489963821): success, callback HTTP 200, initially empty queue.
+- Discovery failure [42489991475](https://github.com/russell-algeo/dj-setlist-generator/actions/runs/42489991475): intentionally invalid test submission (missing artist name), expected workflow failure, finalizer HTTP 200, persisted failed submission. No provider search or media run was triggered.
+- Cancellation [42489993425](https://github.com/russell-algeo/dj-setlist-generator/actions/runs/42489993425): cancelled during bootstrap setup; finalizer succeeded, isolated submission/run persisted cancelled, no published set and no retry. The development queue returned to zero active submissions/runs.
+
+Successful discovery orchestration, empty results, provider failure, deduplication, recovery ordering, retry limits and superseded finalization are covered by local tests with external providers/database calls stubbed. A fresh live successful artist search, stale-lease recovery with real concurrent jobs, cancellation during recognition/publish, long-running token renewal, multi-slot processing and production execution of the candidate remain unverified. The earlier live process-set success remains evidence for `76c5e99`, not a claim that every later source SHA was media-tested.
+
+Rollout constraint: no schema, secret, callback payload or production endpoint changes are proposed. Existing jobs keep their checked-out source. The new concurrency-group format will not cancel older-format workflows, so drain affected runs before merging and never redispatch an existing run during the transition. Recheck both active/queued Actions and application queue state immediately before merge; an earlier empty-queue observation is not a release lock. Preserve the required independent PR review. This section supersedes only the corresponding scheduler/failure/cancellation gaps in the historical table above.
+
 Local sanitized evidence on Hal is in `/Users/hal/Documents/Codex/2026-11-06/task-3/live-check/`: `preview-worker-completion.json`, `preview-e2e-github-result.json`, `preview-e2e-current.json`, `preview-e2e-callback-log.txt`, `preview-media-completed.png`, `preview-spotify-completion.json`, and `preview-spotify-connected.png`. These are local audit artifacts, not files expected in a fresh clone. Do not commit credentials, browser sessions, downloaded media, or raw diagnostic logs.
 
 ## Architecture and environment map
