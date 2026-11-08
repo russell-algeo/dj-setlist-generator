@@ -322,19 +322,13 @@ Generate a master summary page (`output/index.html`) across all artists. Called 
 python master_summary.py                # Generate output/index.html
 ```
 
-### Web archive staging and deploy
-The Next.js app serves checked-in HTML from `apps/web/public`, not the git-ignored `output/` directory. After regenerating any archive HTML in `output/`, restage the public artifacts before deploying:
+### Web application and deployment
 
-```bash
-python3 backfill_html.py --master       # or regenerate other output/*.html files first
-APP_BASE_URL=https://dj-setlist-generator.vercel.app pnpm --filter web archive:stage
-```
+The Next.js app in `apps/web` renders the archive from normalized Neon data. Local `output/` JSON and HTML remain CLI artifacts; regenerating them does not publish database-backed web pages. The former `archive:stage` package script is no longer present. Imports and backfills need a separately reviewed data/cache update.
 
-Notes:
-- `output/` is git-ignored, so a Git-triggered Vercel build will not see local backfilled files unless the staged `apps/web/public` artifacts are updated and committed.
-- `pnpm --filter web archive:stage` rewrites social preview metadata on every staged HTML file. If `APP_BASE_URL` is missing, it will fall back to root-relative social URLs and create a large diff across `apps/web/public/**/*.html`.
-- Deploy using the existing Vercel project configured for `apps/web` (`dj-setlist-generator`). Do not run `vercel` from the repository root, or Vercel may create a separate root-level project by mistake.
-- See [DEPLOYMENT.md](DEPLOYMENT.md) for the full Vercel, Neon, and GitHub Actions deployment contract and verification procedure.
+Use Node 24.x (`.nvmrc` pins 24.15.0) and pnpm 10.8.0. Vercel's project default still reports 20.x, but package engines override it to 24.x; verify the build log rather than relying on the default setting. Use the existing Vercel project rooted at `apps/web`, not the repository-root deployment wrappers.
+
+[DEPLOYMENT.md](DEPLOYMENT.md) records the Production and Preview branch/database map, completed media and OAuth checks, remaining test gaps, and the validation, reviewed production release, and rollback checklists. Preview workers run their development Git ref without merging into Production. Web rollback, worker rollback and database recovery are separate operations.
 
 ## File Structure
 
