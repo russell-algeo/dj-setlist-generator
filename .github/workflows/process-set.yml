@@ -64,7 +64,7 @@ jobs:
       APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
       WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
-      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app
       WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
       ENABLE_CHECKPOINTS: "false"
       FFMPEG_PORTABLE_DIR: ".runtime/ffmpeg"
@@ -183,7 +183,7 @@ jobs:
       APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
       WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
-      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app
       WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
       ENABLE_CHECKPOINTS: "false"
       FFMPEG_PORTABLE_DIR: ".runtime/ffmpeg"
@@ -234,7 +234,7 @@ jobs:
       APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
       WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
-      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app
       WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
       SET_LIST_ACTIVE_SET_RUN_ID: ${{ github.event.inputs.set_run_id }}
       SET_LIST_RESUME_MODE: ${{ github.event.inputs.resume_mode }}
@@ -279,7 +279,7 @@ jobs:
       APP_BASE_URL: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
       INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
       WORKER_DEPLOYMENT_TARGET: ${{ (github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
-      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app
       WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
     steps:
       - uses: actions/checkout@v4

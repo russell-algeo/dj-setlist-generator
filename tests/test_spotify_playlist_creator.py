@@ -12,7 +12,7 @@ from spotify_playlist_creator import (
     SpotifyPlaylistCreator,
 )
 
-PREVIEW = "https://dj-setlist-generator-listened-preview.vercel.app"
+PREVIEW = "https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app"
 
 
 class ManagedSpotifyTokenTests(unittest.TestCase):
@@ -77,7 +77,7 @@ class ManagedSpotifyTokenTests(unittest.TestCase):
 
     def test_wrong_preview_origin_is_rejected_before_any_request(self):
         self.managed_env()
-        for url in ["https://dj-setlist-generator.vercel.app", PREVIEW + ".evil.test", PREVIEW + "/other"]:
+        for url in ["https://dj-setlist-generator-listened-preview.vercel.app", "https://dj-setlist-generator.vercel.app", PREVIEW + ".evil.test", PREVIEW + "/other"]:
             with self.subTest(url=url), patch.dict(os.environ, {"SET_LIST_API_BASE_URL": url}), patch(
                 "requests.post"
             ) as request, patch("worker.callbacks._open") as oidc:

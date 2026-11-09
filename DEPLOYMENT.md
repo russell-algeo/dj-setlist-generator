@@ -4,9 +4,9 @@ This is the operational runbook for the existing `russell-algeo/dj-setlist-gener
 
 ## Permanent Preview branch migration
 
-Russell requested `preview` as the permanent development branch on 2026-11-09. Agents develop and test there, then propose a reviewed PR into the current main/Production branch, `remote-deployment`. Keep `preview` after merges. Do not create a branch named `main` or rename Production as part of this change. The [README workflow](README.md#development-and-release-workflow) is the intended ongoing process.
+Russell requested `preview` as the permanent development branch on 2026-11-09. Authorized direct pushes to `preview` require no PR or review; commits still require an explicit user request under `AGENTS.md`. Agents develop and test there, then propose a PR with one approving GitHub review into the current main/Production branch, `remote-deployment`. Keep `preview` after merges. Do not create a branch named `main` or rename Production as part of this change. The [README workflow](README.md#development-and-release-workflow) is the intended ongoing process.
 
-**Migration baseline, observed 2026-11-09 before cutover:**
+**Historical branch-migration baseline, observed 2026-11-09 before cutover:**
 
 - Production/mainline: `remote-deployment` at `57734820de733a76a032846538979b679a4edd02` (PR #30), READY deployment `dpl_93FnGkVUC8DukJ5Tyzjy76umfWEE`.
 - Reviewed repair candidate: open draft [PR #31](https://github.com/russell-algeo/dj-setlist-generator/pull/31), head `be84b9b755b39ed43bae6b3e38cd39c22d21d9e2`; its separate Vercel Preview build `dpl_AVnxwiEqQpw3K5TXsmMwdZMTvuAg` is READY. It is not the stable Preview alias or a Production release.
@@ -14,17 +14,25 @@ Russell requested `preview` as the permanent development branch on 2026-11-09. A
 - Stable Preview alias: `dj-setlist-generator-listened-preview.vercel.app`, still on `dpl_HLExpWtjnfwAc8X68QwwrfoS8iJH`, source `76c5e994e7b044e8e0f7b3a4d42f1c9d901df509`. It is a deployment alias, not an automatically advancing branch domain.
 - The remote `preview` ref now exists at the reviewed PR #31 head `be84b9b755b39ed43bae6b3e38cd39c22d21d9e2`; no existing ref was overwritten. At this baseline, routing, trust and stable-alias cutover were pending. Branch creation alone is not migration completion. Recheck the live configuration and release evidence rather than treating these historical deployment IDs as the latest state.
 
+### Neutral hostname migration baseline (2026-11-09)
+
+- The permanent worker branch is `preview`. The neutral automatic branch alias [https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app](https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app) is verified READY and advances automatically after successful Preview builds. Unlike the old manual deployment alias, it does not need reassignment for each iteration.
+- Three Preview-only OIDC rules for branch `preview` are already saved, one each for `process-set`, `discover-artist` and `scheduler`. The three older `codex/preview-worker-isolation` rules remain during transition. Another alias of the same Vercel project needs no new trust.
+- This source patch targets the neutral origin. It is not evidence that Preview environment configuration, the existing GitHub development URL, OAuth redirect additions or live login/worker checks are complete. Preserve the old hostname and OAuth destinations until the transition is proven. Production origin and branch remain unchanged.
+
 ### Ordered cutover acceptance checklist
 
-- Recheck PR #31, all relevant branch heads, active/queued workflows and development submissions. Preserve concurrent edits and account for in-flight callbacks; an old empty-queue observation is not a lock.
-- Confirm the exact candidate commit and create/update `preview` without force or overwriting existing work. Keep `codex/preview-worker-isolation` available through the transition. Do not merge PR #31 or change Production merely to establish Preview.
-- Obtain the required per-action approval before adding or materially changing persistent Vercel OIDC access. The intended additional rules are Preview-only, issuer `https://token.actions.githubusercontent.com`, audience `https://github.com/russell-algeo`, repository `russell-algeo/dj-setlist-generator`, branch `preview`, and only workflow names `process-set`, `discover-artist`, and `scheduler`. Preserve existing protection and old rules while jobs drain; do not wildcard the branch, repository, workflow or environment.
-- With the applicable deployment/configuration approval, set only Preview `GITHUB_WORKFLOW_REF=preview`. Keep the development database, callback secret, OAuth clients/redirects and stable origin unchanged. The new workflow ref must include PR #31's `dispatch_generation` input before the updated dispatcher sends it.
-- Build the exact `preview` commit with Preview configuration after the ref change. Environment edits do not alter old immutable deployments. Verify READY state, source SHA and development routing before assigning the stable Preview alias to that deployment.
-- Run the approved bounded callback/cancellation test through the stable application. Verify the worker `headSha` matches the web deployment, the target is development, callbacks succeed, cancelled work does not publish, and queue/final state reconcile. No additional Spotify playlist creation is included without its own specific approval.
-- Record the verified branch, ref, trust, alias and test evidence in the release record and the existing Vault note. Only then mark migration complete. Remove obsolete branch/trust entries only with their own applicable authorization and after no deployment or job depends on them.
+- Recheck current branch heads, active/queued workflows and development submissions. Coordinate a quiet queue and an approved intake pause or agreed quiet window; an old empty-queue observation is not a lock. Preserve concurrent edits and account for in-flight callbacks.
+- Confirm the exact candidate and update permanent `preview` without force pushes or overwriting work. Direct Preview pushes do not require a PR/review; obtain the explicit commit request required by `AGENTS.md`. Keep the older branch/trust/hostname available during transition. Production still requires a PR and one approving GitHub review.
+- Inspect and preserve the six existing, narrowly scoped Preview OIDC rules described below. Do not duplicate or broaden trust for the neutral alias. Keep the development database, callback secret, provider scopes and Production settings unchanged.
+- Obtain required action-time approval before adding the exact Google redirect `https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app/api/auth/callback/google` and Spotify redirect `https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app/api/auth/callback/spotify` to the existing clients. Retain old destinations; do not create replacement clients, wildcards, origin fallbacks or redirect bypasses. The legacy `SPOTIFY_REDIRECT_URI` and `/api/spotify/callback` handler are outside this migration.
+- Coordinate Preview Vercel `APP_BASE_URL` and `NEXTAUTH_URL`, the existing GitHub `DEVELOPMENT_APP_BASE_URL`, and all six workflow `WORKER_EXPECTED_PREVIEW_ORIGIN` constants to exactly `https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app`. Keep Preview `GITHUB_WORKFLOW_REF=preview`. Do not accept either origin dynamically to mask mixed configuration.
+- Build the exact `preview` commit with Preview configuration. Environment edits do not alter immutable deployments. Let Git integration build an authorized push, then verify READY state, source SHA, automatic branch-alias advancement and development routing; do not manually reassign the old alias as the routine deployment step.
+- Keep intake quiet until the web deployment and worker ref agree on the candidate SHA and configuration. A worker ref changes at push time, before the new web build is READY. If a build fails or a newer push arrives, stop and reconcile rather than testing mixed SHAs.
+- Test Google/Spotify sign-in and authenticated reload on the neutral origin, then run the approved bounded callback/cancellation checks. Verify worker `headSha` matches the web deployment, the target is development, callbacks succeed without redirects, cancelled work does not publish, and queue/final state reconcile. No additional Spotify playlist creation is included without its own specific approval.
+- Record verified source, configuration, alias and test evidence in the release record and existing Vault note; only then mark migration complete and resume intake. Remove obsolete branches/trust/OAuth destinations only with their own applicable authorization and after no deployment or job depends on them.
 
-The new trust permits the named GitHub workflows on `preview` to pass protected Preview access checks; the application still requires its internal development secret. It must not grant access to Production or replace the application's authentication. Keep the old verified ref/alias available for a controlled rollback until the transition is proven.
+OIDC permits only the named GitHub workflows to pass protected Preview access checks; the application still requires its internal development secret. It does not grant access to Production or replace app authentication.
 
 ## Historical release state and evidence
 
@@ -79,7 +87,7 @@ Vercel runs the Next.js control plane; GitHub Actions runs media work; Neon stor
 | Component | Production | Preview / development |
 | --- | --- | --- |
 | Web and dispatched worker ref | `remote-deployment` | `preview`; see the migration baseline above for the previous worker ref |
-| `APP_BASE_URL` | `https://dj-setlist-generator.vercel.app` | `https://dj-setlist-generator-listened-preview.vercel.app` |
+| `APP_BASE_URL` | `https://dj-setlist-generator.vercel.app` | `https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app` (migration target; verify configuration and deployment) |
 | App dispatch target | `APP_ENVIRONMENT=production` | Current `APP_ENVIRONMENT=preview` resolves to `deployment_target=development` |
 | Neon project/database | `late-haze-65748644` / `neondb` | Same project/database name, independent branch |
 | Neon branch | `production`, `br-blue-field-a412pexb` | `development`, `br-flat-cake-a4nsqzd6` |
@@ -127,20 +135,20 @@ This is an accidental-misrouting defense, **not isolation from hostile workflow 
 
 ### Existing protected Preview configuration
 
-These three rules are already saved. Inspect and preserve them; do not add duplicates:
+Three rules for `preview` are already saved. The three older rules for `codex/preview-worker-isolation` are retained during transition. Inspect and preserve all six; do not add duplicates:
 
 | Claim / destination | Value |
 | --- | --- |
 | Provider / issuer | GitHub Actions / `https://token.actions.githubusercontent.com` |
 | Audience | `https://github.com/russell-algeo` |
 | Repository | `russell-algeo/dj-setlist-generator` |
-| Branch | `codex/preview-worker-isolation` |
+| Branch | `preview`; older `codex/preview-worker-isolation` rules retained |
 | Workflow names (three separate rules) | `process-set`, `discover-artist`, `scheduler` — YAML `name`, not filenames |
 | Vercel environment | Preview only |
 
-Keep the existing project self-access rule and Vercel Authentication. Workflows default to `contents: read`. Only callback jobs (`publish`, `finalize`, `discover`, and `scheduler`) receive job-scoped `id-token: write`; bootstrap and recognition cannot mint OIDC tokens. Production callback jobs retain that job capability because permissions are static, but mint no token: their OIDC audience is empty and existing shared-secret authentication remains unchanged. No additional Vercel trust or provider grant is created by promoting this source. A new worker branch needs an explicitly scoped trust update before its callbacks will work; changing the web/ref alone is insufficient. New credentials/trust changes require their own applicable authorization.
+Keep the existing project self-access rule and Vercel Authentication. Workflows default to `contents: read`. Only callback jobs (`publish`, `finalize`, `discover`, and `scheduler`) receive job-scoped `id-token: write`; bootstrap and recognition cannot mint OIDC tokens. Production callback jobs retain that job capability because permissions are static, but mint no token: their OIDC audience is empty and existing shared-secret authentication remains unchanged. No additional Vercel trust or provider grant is created by promoting this source. The neutral alias belongs to the same Vercel project and needs no additional trust. A different worker branch would need an explicitly scoped trust update before its callbacks work; changing the web/ref alone is insufficient. New credentials/trust changes require their own applicable authorization.
 
-The existing Google and Spotify clients have the exact stable-Preview destinations `/api/auth/callback/google` and `/api/auth/callback/spotify`. Both real sign-in flows and reload persistence passed. Do not create replacement clients or repeat redirect writes. Browser Vercel access, provider login and app login are separate sessions; an authenticated CLI/service callback does not prove an authenticated user flow. Preserve deployment protection and use existing authorized access; involve the user when provider login/consent is needed. Playlist creation remains a real external write and was not part of the completed test.
+The historical sign-in checks used the existing Google and Spotify clients with the old `listened-preview` destinations `/api/auth/callback/google` and `/api/auth/callback/spotify`. Both real sign-in flows and reload persistence passed on that old origin only. Add the exact neutral-origin destinations through the approved cutover above, retaining old entries; verify existing entries before writing and do not create replacement clients. Neutral-origin sign-in and reload require fresh verification. Browser Vercel access, provider login and app login are separate sessions; an authenticated CLI/service callback does not prove an authenticated user flow. Preserve deployment protection and use existing authorized access; involve the user when provider login/consent is needed. Playlist creation remains a real external write and was not part of the completed test.
 
 ## Checklist: validate a new Preview candidate
 
@@ -159,7 +167,7 @@ The existing Google and Spotify clients have the exact stable-Preview destinatio
   ```
 
   Use the project's Python environment and requirements. Record actual results, versions and omitted checks; do not relabel the earlier actionlint run as including shellcheck/pyflakes. Build with development credentials only. Documentation-only edits need link/command/diff checks, not another media job.
-- [ ] Within the approved deployment scope, build the exact branch with **Preview** configuration. Environment edits affect a new deployment, not an existing immutable one. Confirm READY/source SHA, then assign only the stable Preview alias. Preserve Production.
+- [ ] Within the approved deployment scope, build the exact branch with **Preview** configuration. Environment edits affect a new deployment, not an existing immutable one. Confirm READY/source SHA and automatic neutral branch-alias advancement. Keep intake quiet through worker/web SHA mismatch and preserve Production.
 - [ ] Check Preview's database/role, `APP_BASE_URL`, `APP_ENVIRONMENT`, explicit `GITHUB_WORKFLOW_REF`, callback secret presence and exact trust. Verify access through Vercel protection, app Google/Spotify sign-in, and authenticated reload without printing tokens.
 - [ ] Ensure the development queue is understood and empty for a one-job test. Submit one short anonymous public URL through normal app intake with playlist creation false and notifications off. Record submission/run IDs and duration. Capacity defaults are not a one-job guarantee: the web default is 10 active runs and slot selection is automatic. The completed 235-second test naturally selected one slot; verify actual slot/counts and use reviewed development-only limits if another source would exceed the intended budget.
 - [ ] Confirm workflow `headSha` equals the frozen candidate, development routing, preflight success and skipped Production cookie steps. Follow bootstrap, recognition, publish, revalidation and finalize. Capture provider failures separately from pipeline state.

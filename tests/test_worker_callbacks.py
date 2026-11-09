@@ -1,7 +1,9 @@
 import io
 import json
 import os
+import re
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
@@ -9,7 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 from worker.callbacks import _NoRedirects, callback_headers, main, post_callback, validate_callback_settings
 from worker.config import WorkerSettings
 
-PREVIEW = 'https://dj-setlist-generator-listened-preview.vercel.app'
+PREVIEW = 'https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app'
 
 
 def settings(url=PREVIEW, secret='development-test-secret'):
@@ -45,7 +47,7 @@ class CallbackTests(unittest.TestCase):
 
     def test_preview_refuses_production_or_other_origin_before_minting(self):
         self.preview_env()
-        for url in ['https://dj-setlist-generator.vercel.app', PREVIEW + '.evil.test', PREVIEW + '/other']:
+        for url in ['https://dj-setlist-generator-listened-preview.vercel.app', 'http://' + urlsplit(PREVIEW).netloc, 'https://dj-setlist-generator.vercel.app', PREVIEW + '.evil.test', PREVIEW + '/other']:
             with self.subTest(url=url), patch('worker.callbacks._open') as request:
                 with self.assertRaisesRegex(RuntimeError, 'preview origin'):
                     callback_headers(settings(url=url))
@@ -135,6 +137,17 @@ class CallbackTests(unittest.TestCase):
         with patch('worker.callbacks.get_settings', return_value=settings()), patch('worker.callbacks._open') as request, patch('sys.argv', ['callbacks', '--check']):
             main()
             request.assert_not_called()
+
+
+class WorkflowPreviewOriginTests(unittest.TestCase):
+    def test_every_worker_workflow_uses_the_same_exact_neutral_origin(self):
+        workflows = Path(__file__).resolve().parents[1] / '.github' / 'workflows'
+        expected_counts = {'process-set.yml': 4, 'discover-artist.yml': 1, 'scheduler.yml': 1}
+        for filename, count in expected_counts.items():
+            with self.subTest(workflow=filename):
+                source = (workflows / filename).read_text()
+                origins = re.findall(r'^\s*WORKER_EXPECTED_PREVIEW_ORIGIN:\s*(\S+)\s*$', source, re.MULTILINE)
+                self.assertEqual(origins, [PREVIEW] * count)
 
 
 if __name__ == '__main__':

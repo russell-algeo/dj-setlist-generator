@@ -32,7 +32,7 @@ jobs:
           APP_BASE_URL: ${{ secrets[(github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && 'PRODUCTION_APP_BASE_URL' || 'DEVELOPMENT_APP_BASE_URL'] }}
           INTERNAL_WORKER_SHARED_SECRET: ${{ secrets[(github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && 'INTERNAL_WORKER_SHARED_SECRET' || 'DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET'] }}
           WORKER_DEPLOYMENT_TARGET: ${{ (github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && 'production' || 'development' }}
-          WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-listened-preview.vercel.app
+          WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app
           WORKER_VERCEL_OIDC_AUDIENCE: ${{ !(github.event_name == 'schedule' || github.event.inputs.deployment_target == 'production') && format('https://github.com/{0}', github.repository_owner) || '' }}
         run: |
           python3 -m worker.callbacks /api/internal/scheduler </dev/null
