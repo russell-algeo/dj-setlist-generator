@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb } from "@/lib/db/client";
@@ -17,6 +17,8 @@ import {
 import type { SessionActor } from "@/lib/auth/session";
 import { createWorkerEvent } from "@/lib/jobs/internal";
 import { setRunRetryAttemptLimit } from "./policy";
+import { hasUncommittedPublication, matchesDispatchGeneration, matchesWorkflowOwner, publicationCommittedStage } from "./publication";
+import { buildRequeueWithCleanupQuery } from "./requeue";
 import {
   activeSetRunStatuses,
   isRetryableSetRun,
@@ -115,7 +117,7 @@ export const syncSubmissionStatusFromRuns = async (submissionId: string) => {
 
   const nextStatus =
     activeCount > 0
-      ? "running"
+      ? rows.some((run) => run.status === "cancelling") ? "cancelling" : "running"
       : failedCount > 0 && completedCount > 0
         ? "partial"
         : failedCount > 0
@@ -433,6 +435,10 @@ const getSubmissionRuns = async (submissionId: string, setRunIds?: readonly stri
       id: setRuns.id,
       status: setRuns.status,
       attemptCount: setRuns.attemptCount,
+      stage: setRuns.stage,
+      cancelRequestedAt: setRuns.cancelRequestedAt,
+      sourceMetadata: setRuns.sourceMetadata,
+      publishedSetId: setRuns.publishedSetId,
     })
     .from(setRuns)
     .where(
@@ -447,11 +453,13 @@ const retrySetRunsInternal = async (
   submissionId: string,
   setRunIds?: readonly string[],
 ): Promise<RetrySetRunsResult> => {
-  const now = new Date();
   const runs = await getSubmissionRuns(submissionId, setRunIds);
 
-  const retriedRunIds = runs
-    .filter((run) => isRetryableSetRun(run.status, run.attemptCount))
+  let retriedRunIds = runs
+    .filter((run) =>
+      isRetryableSetRun(run.status, run.attemptCount) &&
+      run.stage !== publicationCommittedStage && !run.publishedSetId
+    )
     .map((run) => run.id);
   const skippedExhaustedRunIds = runs
     .filter(
@@ -460,7 +468,7 @@ const retrySetRunsInternal = async (
         run.attemptCount >= setRunRetryAttemptLimit,
     )
     .map((run) => run.id);
-  const skippedIneligibleRunIds = runs
+  let skippedIneligibleRunIds = runs
     .filter((run) => !retriedRunIds.includes(run.id) && !skippedExhaustedRunIds.includes(run.id))
     .map((run) => run.id);
 
@@ -477,21 +485,36 @@ const retrySetRunsInternal = async (
     };
   }
 
-  await db.delete(segmentHits).where(inArray(segmentHits.setRunId, retriedRunIds));
-  await db.delete(setRunLeases).where(inArray(setRunLeases.setRunId, retriedRunIds));
+  const accepted = await db.execute(buildRequeueWithCleanupQuery({
+    stage: null,
+    resetCancellation: true,
+    predicate: and(
+      eq(setRuns.submissionId, submissionId),
+      or(...runs.filter((run) => retriedRunIds.includes(run.id)).map((run) => and(
+        eq(setRuns.id, run.id),
+        eq(setRuns.status, run.status),
+        eq(setRuns.attemptCount, run.attemptCount),
+        run.cancelRequestedAt ? eq(setRuns.cancelRequestedAt, run.cancelRequestedAt) : isNull(setRuns.cancelRequestedAt),
+        matchesWorkflowOwner((run.sourceMetadata as Record<string, unknown> | null)?.active_workflow_run_id as string | undefined),
+        matchesDispatchGeneration((run.sourceMetadata as Record<string, unknown> | null)?.dispatch_generation as string | undefined),
+      ))),
+      inArray(setRuns.status, ["failed", "cancelled"]),
+      lt(setRuns.attemptCount, setRunRetryAttemptLimit),
+      hasUncommittedPublication(),
+    ),
+  }));
+  const acceptedRuns = accepted.rows.map((row) => ({ id: String(row.id) }));
 
-  await db
-    .update(setRuns)
-    .set({
-      status: "queued",
-      stage: null,
-      errorSummary: null,
-      cancelRequestedAt: null,
-      completedAt: null,
-      heartbeatAt: null,
-      updatedAt: now,
-    })
-    .where(inArray(setRuns.id, retriedRunIds));
+  const acceptedIds = new Set(acceptedRuns.map((run) => run.id));
+  skippedIneligibleRunIds = [...skippedIneligibleRunIds, ...retriedRunIds.filter((id) => !acceptedIds.has(id))];
+  retriedRunIds = acceptedRuns.map((run) => run.id);
+  if (retriedRunIds.length === 0) {
+    return {
+      targetRunIds: runs.map((run) => run.id), retriedRunIds, skippedExhaustedRunIds,
+      skippedIneligibleRunIds, retriedCount: 0, skippedExhaustedCount: skippedExhaustedRunIds.length,
+      skippedIneligibleCount: skippedIneligibleRunIds.length, nothingToRetry: true,
+    };
+  }
 
   await syncSubmissionStatusFromRuns(submissionId);
 
@@ -530,17 +553,33 @@ const cancelSetRunsInternal = async (
   const now = new Date();
   const runs = await getSubmissionRuns(submissionId, setRunIds);
 
-  const cancelledRunIds = runs
-    .filter((run) => run.status === "queued")
-    .map((run) => run.id);
-  const cancellingRunIds = runs
-    .filter((run) => activeSetRunStatuses.includes(run.status as (typeof activeSetRunStatuses)[number]))
-    .map((run) => run.id);
-  const skippedIneligibleRunIds = runs
-    .filter((run) => !cancelledRunIds.includes(run.id) && !cancellingRunIds.includes(run.id))
-    .map((run) => run.id);
+  // Eligibility is evaluated by the same atomic UPDATE that records cancellation.
+  // A publisher may have claimed a run after getSubmissionRuns returned. Only
+  // RETURNING rows represent accepted cancellations, not the earlier snapshot.
+  const acceptedRuns = runs.length > 0
+    ? await db
+        .update(setRuns)
+        .set({
+          cancelRequestedAt: sql`coalesce(${setRuns.cancelRequestedAt}, ${now.toISOString()}::timestamptz)`,
+          status: sql`case when ${setRuns.status} = 'queued' then 'cancelled' else 'cancelling' end`,
+          stage: sql`case when ${setRuns.status} = 'queued' then 'cancelled' else ${setRuns.stage} end`,
+          completedAt: sql`case when ${setRuns.status} = 'queued' then ${now.toISOString()}::timestamptz else ${setRuns.completedAt} end`,
+          updatedAt: now,
+        })
+        .where(and(
+          eq(setRuns.submissionId, submissionId),
+          inArray(setRuns.id, runs.map((run) => run.id)),
+          inArray(setRuns.status, ["queued", ...activeSetRunStatuses]),
+          hasUncommittedPublication(),
+        ))
+        .returning({ id: setRuns.id, status: setRuns.status })
+    : [];
+  const cancelledRunIds = acceptedRuns.filter((run) => run.status === "cancelled").map((run) => run.id);
+  const cancellingRunIds = acceptedRuns.filter((run) => run.status === "cancelling").map((run) => run.id);
+  const acceptedRunIds = new Set(acceptedRuns.map((run) => run.id));
+  const skippedIneligibleRunIds = runs.filter((run) => !acceptedRunIds.has(run.id)).map((run) => run.id);
 
-  if (cancelledRunIds.length === 0 && cancellingRunIds.length === 0) {
+  if (acceptedRuns.length === 0) {
     return {
       targetRunIds: runs.map((run) => run.id),
       cancelledRunIds,
@@ -554,30 +593,6 @@ const cancelSetRunsInternal = async (
     };
   }
 
-  if (cancelledRunIds.length > 0) {
-    await db
-      .update(setRuns)
-      .set({
-        cancelRequestedAt: now,
-        status: "cancelled",
-        stage: "cancelled",
-        updatedAt: now,
-        completedAt: now,
-      })
-      .where(inArray(setRuns.id, cancelledRunIds));
-  }
-
-  if (cancellingRunIds.length > 0) {
-    await db
-      .update(setRuns)
-      .set({
-        cancelRequestedAt: now,
-        status: "cancelling",
-        updatedAt: now,
-      })
-      .where(inArray(setRuns.id, cancellingRunIds));
-  }
-
   if (options?.submissionScope) {
     await db
       .update(submissions)
@@ -587,9 +602,8 @@ const cancelSetRunsInternal = async (
         updatedAt: now,
       })
       .where(eq(submissions.id, submissionId));
-  } else {
-    await syncSubmissionStatusFromRuns(submissionId);
   }
+  await syncSubmissionStatusFromRuns(submissionId);
 
   await createWorkerEvent({
     submissionId,

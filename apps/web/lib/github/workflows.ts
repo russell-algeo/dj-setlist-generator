@@ -47,6 +47,7 @@ const dispatchWorkflow = async (workflowId: string | undefined, inputs: Record<s
 
 type ProcessSetWorkflowInputs = {
   resume_mode?: "full" | "publish_only";
+  dispatch_generation?: string;
 };
 
 export const dispatchProcessSetWorkflow = async (

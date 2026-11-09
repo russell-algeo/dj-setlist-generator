@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import { createWorkerEvent } from "@/lib/jobs/internal";
 import { dispatchPendingWork } from "@/lib/jobs/dispatch";
+import { recoverStaleLeasesQuery, recoverStaleRunsQuery } from "./recovery-sql";
 
 const db = getDb();
 
@@ -12,10 +13,10 @@ export const runSchedulerRecovery = async () => {
   // Recover leases before runs: a run reset to queued must not have stale claimed
   // leases still attached when the dispatcher picks it up again.
   const leaseRecovery = await db.execute(
-    sql`select ops.recover_stale_leases(interval '15 minutes') as recovered`,
+    recoverStaleLeasesQuery,
   );
   const runRecovery = await db.execute(
-    sql`select ops.recover_stale_set_runs(interval '30 minutes') as recovered`,
+    recoverStaleRunsQuery,
   );
   const cleanup = await db.execute(sql`select ops.cleanup_expired_ops_data() as counts`);
 

@@ -8,7 +8,7 @@ import {
 } from "./spotify-export.server";
 
 describe("executeSpotifyExport", () => {
-  it("creates a private playlist with canonical description and batched track uris", async () => {
+  it("requests public:false with canonical description and track uris without promising access privacy", async () => {
     const fetchFn = vi
       .fn()
       .mockResolvedValueOnce({
@@ -190,5 +190,62 @@ describe("executeSpotifyExport", () => {
         },
       ),
     ).rejects.toBeInstanceOf(SpotifyExportRemoteError);
+  });
+});
+
+describe("Spotify export request policy", () => {
+  const runSetExport = (fetchFn: typeof fetch, count: number) => executeSpotifyExport(
+    "user-123",
+    { confidenceFilter: "all", entityType: "set", slug: "example-set" },
+    {
+      appBaseUrl: "https://preview.example.test",
+      fetchFn,
+      getSet: async () => ({
+        title: "Example Set",
+        tracks: Array.from({ length: count }, (_, index) => ({
+          idx: index + 1,
+          title: `Track ${index}`,
+          conf: "HIGH",
+          spotifyUrl: `https://open.spotify.com/track/track-${index}`,
+        })),
+      } as never),
+      refreshAccessTokenForUser: async () => ({
+        accessToken: "test-access-token",
+        expiresIn: 3600,
+        scopes: ["playlist-modify-private"],
+        spotifyUserId: "spotify-user-123",
+      }),
+    },
+  );
+
+  it("keeps export working when the API does not establish access privacy", async () => {
+    const fetchFn = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "playlist-123",
+        name: "Example Set",
+        public: true,
+      }), { status: 201 }))
+      .mockResolvedValue(new Response(null, { status: 201 }));
+
+    const result = await runSetExport(fetchFn, 205);
+    expect(result.tracksAdded).toBe(205);
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toEqual({
+      description: "Built from Set Signal Archive - https://preview.example.test/sets/example-set",
+      name: "Example Set",
+      public: false,
+    });
+    const batches = fetchFn.mock.calls.slice(1).map(([, init]) => JSON.parse(String(init?.body)).uris);
+    expect(batches.map((batch) => batch.length)).toEqual([100, 100, 5]);
+    expect(batches.flat()).toEqual(Array.from({ length: 205 }, (_, index) => `spotify:track:track-${index}`));
+  });
+
+  it("reports track-write failure instead of claiming a successful export", async () => {
+    const fetchFn = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "playlist-123", name: "Example Set" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response("test rate limit", { status: 429 }));
+
+    await expect(runSetExport(fetchFn, 1)).rejects.toBeInstanceOf(SpotifyExportRemoteError);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });

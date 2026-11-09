@@ -76,6 +76,8 @@ const createPlaylist = async ({
     body: JSON.stringify({
       description,
       name,
+      // This controls profile/search listing, not access privacy.
+      // https://developer.spotify.com/documentation/web-api/concepts/playlists
       public: false,
     }),
   });

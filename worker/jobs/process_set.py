@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import os
 import socket
+from contextlib import suppress
 
 from psycopg.errors import ForeignKeyViolation
 
@@ -13,7 +14,9 @@ from config import Config
 from worker.callbacks import post_callback
 from worker.config import get_settings
 from worker.db import (
+    cancel_set_run,
     claim_next_lease,
+    claim_workflow_run,
     complete_lease,
     fetch_one,
     finalize_submission_from_runs,
@@ -32,6 +35,10 @@ from worker.scheduler import build_scheduler_plan
 
 class WorkflowSupersededError(RuntimeError):
     """Raised when a newer workflow run takes ownership of the set run."""
+
+
+class RunCancelledError(RuntimeError):
+    """Raised when the owner requests cancellation before publication commits."""
 
 
 class PublishSetRunPartialError(RuntimeError):
@@ -82,6 +89,7 @@ def _publish_set_run_payload(
         json={
             "setRunId": set_run_id,
             "payload": payload,
+            **({"workflowRunId": _workflow_run_id()} if _workflow_run_id() else {}),
         },
         timeout=120,
     )
@@ -93,6 +101,12 @@ def _publish_set_run_payload(
             response_payload = dict(parsed_payload)
     except ValueError:
         response_payload = None
+
+    if response.status_code == 409 and response_payload:
+        if response_payload.get("errorCode") == "run_cancelled":
+            raise RunCancelledError("Cancellation accepted before publication")
+        if response_payload.get("errorCode") == "workflow_superseded":
+            raise WorkflowSupersededError("Publication rejected for a superseded workflow")
 
     if response.ok:
         return response_payload or {}
@@ -130,6 +144,8 @@ def _load_run(set_run_id: str) -> dict[str, object]:
           r.source_platform,
           r.set_title,
           r.create_playlist,
+          r.cancel_requested_at,
+          r.published_set_id,
           r.source_metadata,
           s.artist_name
         from ops.set_runs r
@@ -158,17 +174,15 @@ def _claim_workflow_ownership(set_run_id: str, *, force: bool = False) -> str | 
     if not workflow_run_id:
         return None
 
-    previous_workflow_run_id = get_active_workflow_run_id(set_run_id)
-    if previous_workflow_run_id == workflow_run_id:
-        return previous_workflow_run_id
-    if previous_workflow_run_id and not force:
-        return previous_workflow_run_id
-
-    update_set_run_metadata(
-        set_run_id,
-        {"active_workflow_run_id": workflow_run_id},
+    claimed = claim_workflow_run(
+        set_run_id, workflow_run_id=workflow_run_id, force=force,
+        dispatch_generation=os.getenv("SET_LIST_DISPATCH_GENERATION") or None,
     )
-    return previous_workflow_run_id
+    if claimed is None:
+        _assert_not_cancelled(set_run_id)
+        raise WorkflowSupersededError("This workflow attempt is retired or no longer eligible")
+    previous = claimed.get("previous_workflow_run_id")
+    return str(previous) if previous else None
 
 
 def _workflow_superseded(set_run_id: str) -> bool:
@@ -187,6 +201,54 @@ def _assert_workflow_ownership(set_run_id: str) -> None:
         )
 
 
+def _assert_not_cancelled(set_run_id: str) -> None:
+    run = _load_run(set_run_id)
+    generation = (run.get("source_metadata") or {}).get("dispatch_generation") or ""
+    if generation != (os.getenv("SET_LIST_DISPATCH_GENERATION") or ""):
+        raise WorkflowSupersededError("This dispatch generation is no longer current")
+    if run.get("cancel_requested_at") or run.get("status") in {"cancelling", "cancelled"}:
+        raise RunCancelledError(f"Cancellation requested for {set_run_id}")
+
+
+def _assert_run_active(set_run_id: str) -> None:
+    _assert_workflow_ownership(set_run_id)
+    _assert_not_cancelled(set_run_id)
+
+
+def _finish_cancelled(set_run_id: str) -> None:
+    # Compare-and-set in the DB prevents a late/superseded slot from overwriting
+    # an already committed publication or a newer workflow's state.
+    run = cancel_set_run(set_run_id, workflow_run_id=_workflow_run_id())
+    if not run:
+        current = _load_run(set_run_id)
+        if current.get("status") == "cancelled" and not _workflow_superseded(set_run_id):
+            finalize_submission_from_runs(str(current["submission_id"]))
+        return
+    if run:
+        finalize_submission_from_runs(str(run["submission_id"]))
+        insert_worker_event(
+            submission_id=str(run["submission_id"]), set_run_id=set_run_id,
+            event_type="set_run.cancelled", message="Worker stopped after cancellation was requested",
+        )
+
+
+async def _recognize_with_cancellation(set_run_id: str, recognition) -> None:
+    task = asyncio.create_task(recognition)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=2)
+            _assert_run_active(set_run_id)
+            if done:
+                await task
+                return
+    finally:
+        if not task.done():
+            task.cancel()
+        # Always retrieve the result/exception; no orphaned recognition work.
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+
+
 def _record_stage_change(
     run_row: dict[str, object],
     *,
@@ -196,7 +258,10 @@ def _record_stage_change(
     message: str | None = None,
     details: dict[str, object] | None = None,
 ) -> None:
-    mark_run_stage(str(run_row["id"]), status=status, stage=stage)
+    _assert_run_active(str(run_row["id"]))
+    if not mark_run_stage(str(run_row["id"]), status=status, stage=stage):
+        _assert_run_active(str(run_row["id"]))
+        raise RuntimeError("Set run cannot enter a new phase after publication or completion")
     insert_worker_event(
         submission_id=str(run_row["submission_id"]),
         set_run_id=str(run_row["id"]),
@@ -208,6 +273,14 @@ def _record_stage_change(
 
 def _mark_failed(run_row: dict[str, object], error: Exception | str, *, stage: str = "failed") -> None:
     message = str(error)
+    current = _load_run(str(run_row["id"]))
+    if current.get("stage") == "publishing_committed" and not current.get("published_set_id"):
+        insert_worker_event(
+            submission_id=str(run_row["submission_id"]), set_run_id=str(run_row["id"]),
+            event_type="set_run.publish.uncertain",
+            message="Publication was admitted; preserve its boundary pending reconciliation",
+        )
+        return
     mark_set_run(
         str(run_row["id"]),
         status="failed",
@@ -288,10 +361,11 @@ def _mark_published_with_errors(
     return resolved_published_set_id
 
 
-async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
+async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
     from worker.pipeline.recognize import prepare_set_context, serialize_prepared_context
 
     run_row = _load_run(set_run_id)
+    _assert_not_cancelled(set_run_id)
     _claim_workflow_ownership(set_run_id, force=True)
     _record_stage_change(
         run_row,
@@ -306,6 +380,7 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
             str(run_row["source_url"]),
             artist_name=str(run_row["artist_name"]) if run_row.get("artist_name") else None,
         )
+        _assert_run_active(set_run_id)
         scheduler_plan = build_scheduler_plan(context.total_segments)
 
         metadata_patch = serialize_prepared_context(
@@ -351,16 +426,19 @@ async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
             "lease_size": scheduler_plan.lease_size,
             "audio_file": context.audio_file,
         }
+    except RunCancelledError:
+        raise
     except Exception as error:
+        _assert_run_active(set_run_id)
         _mark_failed(run_row, error, stage="bootstrap_failed")
         raise
 
 
-async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]:
+async def _recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]:
     from worker.pipeline.recognize import recognize_segment_range, restore_set_context
 
     run_row = _load_run(set_run_id)
-    _assert_workflow_ownership(set_run_id)
+    _assert_run_active(set_run_id)
     source_metadata = dict(run_row.get("source_metadata") or {})
     context = restore_set_context(
         str(run_row["source_url"]),
@@ -385,7 +463,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
 
     try:
         while True:
-            _assert_workflow_ownership(set_run_id)
+            _assert_run_active(set_run_id)
             lease = claim_next_lease(set_run_id, slot_index=slot_index, worker_name=worker_name)
             if not lease:
                 break
@@ -405,7 +483,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
 
             def persist_result(result) -> None:
                 nonlocal recognized
-                _assert_workflow_ownership(set_run_id)
+                _assert_run_active(set_run_id)
                 if result.recognized:
                     recognized += 1
                 try:
@@ -428,13 +506,13 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
                     raise
 
             try:
-                await recognize_segment_range(
+                await _recognize_with_cancellation(set_run_id, recognize_segment_range(
                     context,
                     start_index=start_index,
                     end_index=end_index,
                     on_result=persist_result,
-                )
-                _assert_workflow_ownership(set_run_id)
+                ))
+                _assert_run_active(set_run_id)
                 complete_lease(lease_id, success=True)
                 insert_worker_event(
                     submission_id=str(run_row["submission_id"]),
@@ -448,7 +526,7 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
                     status="recognizing",
                     stage=f"slot_{slot_index}_recognizing",
                 )
-            except WorkflowSupersededError:
+            except (WorkflowSupersededError, RunCancelledError):
                 raise
             except Exception as error:
                 complete_lease(lease_id, success=False, error_text=str(error))
@@ -483,13 +561,14 @@ async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]
         raise
 
 
-async def publish_phase(set_run_id: str) -> str | None:
+async def _publish_phase(set_run_id: str) -> str | None:
     from source_url_normalizer import resolve_canonical_source_url
     from worker.pipeline.aggregate import build_tracks_from_recognitions, recognitions_from_segment_hits
     from worker.pipeline.enrich import build_set_payload, enrich_tracks
     from worker.pipeline.recognize import restore_set_context
 
     run_row = _load_run(set_run_id)
+    _assert_not_cancelled(set_run_id)
     if _resume_mode() == "publish_only":
         previous_workflow_run_id = _claim_workflow_ownership(set_run_id, force=True)
         current_workflow_run_id = _workflow_run_id()
@@ -647,7 +726,7 @@ async def publish_phase(set_run_id: str) -> str | None:
             message="Publishing canonical set data",
         )
 
-        _assert_workflow_ownership(set_run_id)
+        _assert_run_active(set_run_id)
         set_payload = build_set_payload(
             enriched_tracks=enriched_tracks,
             mix_info=mix_info,
@@ -656,6 +735,8 @@ async def publish_phase(set_run_id: str) -> str | None:
             set_run_id=set_run_id,
             payload=set_payload,
         )
+    except RunCancelledError:
+        raise
     except PublishSetRunPartialError as error:
         _mark_published_with_errors(run_row, error, published_row=error.published_row)
         raise
@@ -669,6 +750,7 @@ async def publish_phase(set_run_id: str) -> str | None:
         )
         return None
     except Exception as error:
+        _assert_run_active(set_run_id)
         _mark_failed(run_row, error, stage="publish_failed")
         raise
     finally:
@@ -733,6 +815,30 @@ async def publish_phase(set_run_id: str) -> str | None:
     return published_set_id
 
 
+async def bootstrap_phase(set_run_id: str) -> dict[str, object]:
+    try:
+        return await _bootstrap_phase(set_run_id)
+    except RunCancelledError:
+        _finish_cancelled(set_run_id)
+        return {}
+
+
+async def recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int]:
+    try:
+        return await _recognize_phase(set_run_id, slot_index=slot_index)
+    except RunCancelledError:
+        _finish_cancelled(set_run_id)
+        return {"lease_count": 0, "recognized_count": 0}
+
+
+async def publish_phase(set_run_id: str) -> str | None:
+    try:
+        return await _publish_phase(set_run_id)
+    except RunCancelledError:
+        _finish_cancelled(set_run_id)
+        return None
+
+
 def finalize_phase(
     set_run_id: str,
     *,
@@ -741,6 +847,9 @@ def finalize_phase(
     publish_result: str,
 ) -> None:
     run_row = _load_run(set_run_id)
+    if (run_row.get("cancel_requested_at") or run_row.get("status") in {"cancelling", "cancelled"}) and not run_row.get("published_set_id"):
+        _finish_cancelled(set_run_id)
+        return
     terminal_status = str(run_row["status"])
 
     if terminal_status not in {"completed", "failed", "cancelled"}:
