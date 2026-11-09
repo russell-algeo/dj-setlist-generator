@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import os
 from typing import Any, Iterator
 
 from psycopg import connect as pg_connect
@@ -115,11 +116,20 @@ def mark_run_stage(
 ) -> dict[str, Any] | None:
     return fetch_one(
         """
-        select *
-        from ops.mark_run_stage(%s, %s, %s, %s, %s)
-        limit 1
+        update ops.set_runs
+        set status = %s, stage = %s, error_summary = coalesce(%s, error_summary),
+            published_set_id = coalesce(%s, published_set_id), heartbeat_at = now(),
+            completed_at = case when %s in ('completed', 'failed', 'cancelled') then now() else completed_at end,
+            updated_at = now()
+        where id = %s and cancel_requested_at is null
+          and status not in ('cancelled', 'completed', 'cancelling')
+          and stage is distinct from 'publishing_committed'
+          and (%s::text is null or source_metadata->>'active_workflow_run_id' is null
+               or source_metadata->>'active_workflow_run_id' = %s)
+        returning *
         """,
-        (set_run_id, status, stage, error_summary, published_set_id),
+        (status, stage, error_summary, published_set_id, status, set_run_id,
+         os.getenv("GITHUB_RUN_ID"), os.getenv("GITHUB_RUN_ID")),
     )
 
 
@@ -143,8 +153,42 @@ def mark_set_run(
           completed_at = case when %s in ('completed', 'failed', 'cancelled') then now() else completed_at end,
           updated_at = now()
         where id = %s
+          and ((%s = 'completed' and coalesce(%s::uuid, published_set_id) is not null)
+               or (cancel_requested_at is null and status not in ('cancelled', 'cancelling', 'completed')
+                   and stage is distinct from 'publishing_committed'))
+          and (%s::text is null or source_metadata->>'active_workflow_run_id' is null
+               or source_metadata->>'active_workflow_run_id' = %s)
         """,
-        (status, stage, error_summary, published_set_id, status, set_run_id),
+        (status, stage, error_summary, published_set_id, status, set_run_id,
+         status, published_set_id, os.getenv("GITHUB_RUN_ID"), os.getenv("GITHUB_RUN_ID")),
+    )
+
+
+def cancel_set_run(set_run_id: str, *, workflow_run_id: str | None) -> dict[str, Any] | None:
+    """Acknowledge cancellation once, without overwriting publication or new owners."""
+    return fetch_one(
+        """
+        with cancelled as (
+          update ops.set_runs
+          set status = 'cancelled', stage = 'cancelled', completed_at = now(),
+              heartbeat_at = now(), updated_at = now()
+          where id = %s
+            and (cancel_requested_at is not null or status = 'cancelling')
+            and status <> 'cancelled'
+            and published_set_id is null
+            and stage is distinct from 'publishing_committed'
+            and (%s::text is null or source_metadata->>'active_workflow_run_id' is null
+                 or source_metadata->>'active_workflow_run_id' = %s)
+          returning id, submission_id
+        ), cancelled_leases as (
+          update ops.set_run_leases
+          set status = 'cancelled', completed_at = now(), updated_at = now()
+          where set_run_id in (select id from cancelled)
+            and status in ('pending', 'claimed')
+        )
+        select * from cancelled
+        """,
+        (set_run_id, workflow_run_id, workflow_run_id),
     )
 
 
@@ -167,6 +211,10 @@ def update_set_run_metadata(
           heartbeat_at = now(),
           updated_at = now()
         where id = %s
+          and cancel_requested_at is null and status not in ('cancelled', 'cancelling')
+          and (%s::text is null or source_metadata->>'active_workflow_run_id' is null
+               or source_metadata->>'active_workflow_run_id' = %s)
+          and coalesce(source_metadata->>'dispatch_generation', '') = %s
         """,
         (
             set_title,
@@ -174,7 +222,37 @@ def update_set_run_metadata(
             source_platform,
             json_value(metadata),
             set_run_id,
+            *_worker_fence_params(),
         ),
+    )
+
+
+def claim_workflow_run(set_run_id: str, *, workflow_run_id: str, force: bool, dispatch_generation: str | None = None) -> dict[str, Any] | None:
+    """Acquire the current attempt without reviving a retired workflow."""
+    return fetch_one(
+        """
+        with current as (
+          select id, source_metadata
+          from ops.set_runs
+          where id = %s and cancel_requested_at is null
+            and status not in ('cancelled', 'completed', 'cancelling')
+            and published_set_id is null and stage is distinct from 'publishing_committed'
+          for update
+        )
+        update ops.set_runs run
+        set source_metadata = coalesce(current.source_metadata, '{}'::jsonb)
+              || jsonb_build_object('active_workflow_run_id', %s::text),
+            updated_at = now(), heartbeat_at = now()
+        from current
+        where run.id = current.id
+          and not (coalesce(current.source_metadata->'retired_workflow_run_ids', '[]'::jsonb) ? %s)
+          and coalesce(current.source_metadata->>'dispatch_generation', '') = %s
+          and (current.source_metadata->>'active_workflow_run_id' is null
+               or current.source_metadata->>'active_workflow_run_id' = %s
+               or (%s and current.source_metadata->>'active_workflow_run_id' = 'awaiting_dispatch'))
+        returning current.source_metadata->>'active_workflow_run_id' as previous_workflow_run_id
+        """,
+        (set_run_id, workflow_run_id, workflow_run_id, dispatch_generation or "", workflow_run_id, force),
     )
 
 
@@ -194,6 +272,24 @@ def get_active_workflow_run_id(set_run_id: str) -> str | None:
     return str(value) if value else None
 
 
+# Lock the run before touching its recognition rows. A preflight read alone can
+# race cancellation/retry between the check and an INSERT/lease completion.
+_WORKER_RUN_FENCE = """
+    run.cancel_requested_at is null
+    and run.status not in ('cancelled', 'cancelling', 'completed')
+    and run.published_set_id is null
+    and run.stage is distinct from 'publishing_committed'
+    and (%s::text is null or run.source_metadata->>'active_workflow_run_id' is null
+         or run.source_metadata->>'active_workflow_run_id' = %s)
+    and coalesce(run.source_metadata->>'dispatch_generation', '') = %s
+"""
+
+
+def _worker_fence_params() -> tuple[str | None, str | None, str]:
+    owner = os.getenv("GITHUB_RUN_ID")
+    return owner, owner, os.getenv("SET_LIST_DISPATCH_GENERATION") or ""
+
+
 def initialize_set_run_leases(
     set_run_id: str,
     *,
@@ -202,34 +298,56 @@ def initialize_set_run_leases(
     lease_size: int,
 ) -> int:
     row = fetch_one(
-        """
-        select ops.initialize_set_run_leases(%s, %s, %s, %s) as lease_count
+        f"""
+        with owned as (
+          select run.id from ops.set_runs run
+          where run.id = %s and {_WORKER_RUN_FENCE} for update
+        )
+        select ops.initialize_set_run_leases(id, %s, %s, %s) as lease_count from owned
         """,
-        (set_run_id, total_segments, slot_count, lease_size),
+        (set_run_id, *_worker_fence_params(), total_segments, slot_count, lease_size),
     )
     return int(row["lease_count"]) if row else 0
 
 
 def claim_next_lease(set_run_id: str, *, slot_index: int, worker_name: str) -> dict[str, Any] | None:
-    # ops.claim_next_lease accepts slot_index for API clarity (callers can reason about "slot N
-    # is claiming") but since migration 0002 (global work stealing) the SQL function ignores the
-    # slot_index filter so any slot may claim any pending lease.
+    # Global work stealing is retained; the slot is diagnostic, not a filter.
     return fetch_one(
-        """
-        select *
-        from ops.claim_next_lease(%s, %s, %s)
-        limit 1
+        f"""
+        with owned as (
+          select run.id from ops.set_runs run
+          where run.id = %s and {_WORKER_RUN_FENCE} for update
+        ), candidate as (
+          select lease.id from ops.set_run_leases lease
+          where lease.set_run_id in (select id from owned) and lease.status = 'pending'
+          order by lease.segment_start_index asc, lease.id asc
+          limit 1 for update skip locked
+        )
+        update ops.set_run_leases lease
+        set status = 'claimed', claimed_by = %s, claimed_at = now(), updated_at = now()
+        where lease.id in (select id from candidate)
+        returning lease.*
         """,
-        (set_run_id, slot_index, worker_name),
+        (set_run_id, *_worker_fence_params(), worker_name),
     )
 
 
 def complete_lease(lease_id: str, *, success: bool, error_text: str | None = None) -> None:
     execute(
-        """
-        select ops.complete_lease(%s, %s, %s)
+        f"""
+        with owned as (
+          select run.id from ops.set_runs run
+          where run.id = (select set_run_id from ops.set_run_leases where id = %s)
+            and {_WORKER_RUN_FENCE} for update
+        )
+        update ops.set_run_leases lease
+        set status = case when %s then 'completed' else 'failed' end,
+            completed_at = case when %s then now() else null end,
+            error_text = %s, updated_at = now()
+        where lease.id = %s and lease.status = 'claimed'
+          and lease.set_run_id in (select id from owned)
         """,
-        (lease_id, success, error_text),
+        (lease_id, *_worker_fence_params(), success, success, error_text, lease_id),
     )
 
 
@@ -246,7 +364,11 @@ def upsert_segment_hit(
     raw_data: dict[str, Any] | None,
 ) -> None:
     execute(
-        """
+        f"""
+        with owned as (
+          select run.id from ops.set_runs run
+          where run.id = %s and {_WORKER_RUN_FENCE} for update
+        )
         insert into ops.segment_hits (
           set_run_id,
           lease_id,
@@ -258,7 +380,7 @@ def upsert_segment_hit(
           recognized,
           raw_data
         )
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        select id, %s, %s, %s, %s, %s, %s, %s, %s from owned
         on conflict (set_run_id, segment_index)
         do update
         set
@@ -272,6 +394,7 @@ def upsert_segment_hit(
         """,
         (
             set_run_id,
+            *_worker_fence_params(),
             lease_id,
             segment_index,
             timestamp_seconds,

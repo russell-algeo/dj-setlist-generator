@@ -3,12 +3,21 @@
 import os
 from typing import List, Optional
 
-import requests
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import Config
 from detail_explorer_common import spotify_track_id
+from worker.callbacks import post_callback
+from worker.config import get_settings
+
+
+# public=False controls profile/search listing, not access privacy.
+# https://developer.spotify.com/documentation/web-api/concepts/playlists
+SPOTIFY_PLAYLIST_PRIVACY_NOTICE = (
+    "We request a playlist hidden from your profile, but it may be accessible by link. "
+    "Use Make private in Spotify to restrict access."
+)
 
 
 class SpotifyPlaylistCreator:
@@ -47,27 +56,32 @@ class SpotifyPlaylistCreator:
 
     def _fetch_managed_access_token(self) -> Optional[str]:
         """Fetch a short-lived Spotify access token from the web app in remote mode."""
-        api_base_url = os.getenv("SET_LIST_API_BASE_URL") or os.getenv("APP_BASE_URL")
-        internal_secret = os.getenv("INTERNAL_WORKER_SHARED_SECRET")
         set_run_id = os.getenv("SET_LIST_ACTIVE_SET_RUN_ID")
 
-        if not api_base_url or not internal_secret or not set_run_id:
+        if not set_run_id and not os.getenv("WORKER_DEPLOYMENT_TARGET"):
             return None
+        if not set_run_id:
+            raise RuntimeError("Managed Spotify authentication requires an active set run")
 
-        response = requests.post(
-            f"{api_base_url.rstrip('/')}/api/internal/spotify-token",
-            headers={"x-internal-secret": internal_secret},
+        # Share the same Preview origin, OIDC and no-redirect policy as every
+        # other internal worker callback. Never fall back to local OAuth when
+        # a managed run cannot obtain its user's token.
+        response = post_callback(
+            get_settings(),
+            "/api/internal/spotify-token",
             json={"setRunId": set_run_id},
             timeout=30,
         )
 
         if response.status_code == 404:
-            print("Spotify connection not found for this run; skipping managed playlist auth")
-            return None
+            raise RuntimeError("Spotify connection not found for this run")
 
         response.raise_for_status()
         payload = response.json()
-        return payload.get("access_token")
+        token = payload.get("access_token") if isinstance(payload, dict) else None
+        if not isinstance(token, str) or not token.strip() or "\n" in token or "\r" in token:
+            raise RuntimeError("Managed Spotify response did not contain a valid access token")
+        return token
 
     def find_or_create_artist_playlist(self, artist_name: str) -> Optional[str]:
         """Find existing artist playlist by name or create a new one.
@@ -231,6 +245,7 @@ class SpotifyPlaylistCreator:
         print("\n" + "=" * 70)
         print("SPOTIFY PLAYLIST")
         print("=" * 70)
+        print(SPOTIFY_PLAYLIST_PRIVACY_NOTICE)
 
         # Artist-playlist-only mode: skip set playlist, add directly to artist playlist
         if not Config.CREATE_SET_PLAYLISTS:

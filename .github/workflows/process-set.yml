@@ -7,6 +7,10 @@ on:
         description: Set run UUID to process
         required: true
         type: string
+      dispatch_generation:
+        description: Non-secret attempt fence assigned by the application dispatcher
+        required: false
+        type: string
       resume_mode:
         description: Whether to run the full pipeline or only the publish/finalize tail
         required: false
@@ -39,6 +43,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  SET_LIST_DISPATCH_GENERATION: ${{ github.event.inputs.dispatch_generation }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 

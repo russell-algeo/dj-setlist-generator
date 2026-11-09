@@ -74,7 +74,8 @@ class WorkerIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             marker = root / "gh-called"
-            (root / "gh").write_text('#!/bin/sh\nprintf called > "$GH_MARKER"\n')
+            # Consume the pipe like gh does; an early exit races the writer under pipefail.
+            (root / "gh").write_text('#!/bin/sh\ncat >/dev/null\nprintf called > "$GH_MARKER"\n')
             (root / "gh").chmod(0o700)
             cookie = root / "cookies"
             cookie.write_text("synthetic-cookie")

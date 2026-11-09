@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { SPOTIFY_EXPORT_PRIVACY_NOTICE } from "@/lib/archive/spotify-export-policy";
+
 import {
   SPOTIFY_EXPORT_FILTERS,
   type SpotifyExportCounts,
@@ -175,6 +177,8 @@ export function SpotifyExportButton({
   return (
     <div className={styles.wrap} ref={containerRef}>
       <button
+        aria-disabled={isDisabled}
+        title={SPOTIFY_EXPORT_PRIVACY_NOTICE}
         className={joinClasses(
           styles.trigger,
           isDisabled && styles.triggerDisabled,
@@ -199,7 +203,7 @@ export function SpotifyExportButton({
       {open ? (
         <div className={styles.panel}>
           <h3 className={styles.panelTitle}>Create Spotify Playlist</h3>
-          <p className={styles.panelSubtitle}>Private playlist in your connected Spotify account</p>
+          <p className={styles.panelSubtitle}>{SPOTIFY_EXPORT_PRIVACY_NOTICE}</p>
 
           <div className={styles.filterRow}>
             {SPOTIFY_EXPORT_FILTERS.map((filter) => (

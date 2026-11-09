@@ -1,6 +1,8 @@
 import "server-only";
 
-import { eq, inArray, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { dispatchDiscoverArtistWorkflow, dispatchProcessSetWorkflow } from "@/lib/github/workflows";
 import { getDb } from "@/lib/db/client";
@@ -12,6 +14,8 @@ import {
 } from "@/lib/jobs/internal";
 import { isActiveSubmissionStatus, isTerminalSetRunStatus } from "@/lib/jobs/status";
 import { syncSubmissionStatusFromRuns } from "@/lib/jobs/submissions";
+import { hasUncommittedPublication, matchesDispatchGeneration, matchesWorkflowOwner, prepareDispatchMetadata, publicationCommittedStage, retireWorkflowOwner } from "@/lib/jobs/publication";
+import { buildRequeueWithCleanupQuery } from "@/lib/jobs/requeue";
 
 const db = getDb();
 
@@ -75,6 +79,19 @@ const getSetRunRecoveryState = async (setRunId: string) => {
   };
 };
 
+// Finalizer reads are snapshots. Recheck cancellation, publication and workflow
+// ownership in every recovery mutation so a late callback cannot revive a run.
+const recoveryEligibility = (run: typeof setRuns.$inferSelect) => and(
+  eq(setRuns.id, run.id),
+  eq(setRuns.status, run.status),
+  eq(setRuns.attemptCount, run.attemptCount),
+  run.stage ? eq(setRuns.stage, run.stage) : isNull(setRuns.stage),
+  isNull(setRuns.cancelRequestedAt),
+  hasUncommittedPublication(),
+  matchesWorkflowOwner((run.sourceMetadata as Record<string, unknown> | null)?.active_workflow_run_id as string | undefined),
+  matchesDispatchGeneration((run.sourceMetadata as Record<string, unknown> | null)?.dispatch_generation as string | undefined),
+);
+
 const requeueSetRunForFullRecovery = async (
   run: typeof setRuns.$inferSelect,
   reason: string,
@@ -82,21 +99,12 @@ const requeueSetRunForFullRecovery = async (
 ) => {
   const now = new Date();
 
-  await db.delete(segmentHits).where(eq(segmentHits.setRunId, run.id));
-  await db.delete(setRunLeases).where(eq(setRunLeases.setRunId, run.id));
-
-  await db
-    .update(setRuns)
-    .set({
-      status: "queued",
-      stage: "queued",
-      errorSummary: null,
-      heartbeatAt: null,
-      completedAt: null,
-      updatedAt: now,
-      attemptCount: sql`${setRuns.attemptCount} + 1`,
-    })
-    .where(eq(setRuns.id, run.id));
+  const requeued = await db.execute(buildRequeueWithCleanupQuery({
+    predicate: recoveryEligibility(run),
+    stage: "queued",
+    incrementAttempt: true,
+  }));
+  if (requeued.rows.length === 0) return false;
 
   await db
     .update(submissions)
@@ -115,6 +123,7 @@ const requeueSetRunForFullRecovery = async (
     message: reason,
     details,
   });
+  return true;
 };
 
 const markSetRunFailed = async (
@@ -124,7 +133,7 @@ const markSetRunFailed = async (
 ) => {
   const now = new Date();
 
-  await db
+  const [failed] = await db
     .update(setRuns)
     .set({
       status: "failed",
@@ -134,7 +143,10 @@ const markSetRunFailed = async (
       completedAt: now,
       updatedAt: now,
     })
-    .where(eq(setRuns.id, run.id));
+    .where(recoveryEligibility(run))
+    .returning({ id: setRuns.id });
+
+  if (!failed) return false;
 
   await createWorkerEvent({
     submissionId: run.submissionId,
@@ -143,6 +155,7 @@ const markSetRunFailed = async (
     message: reason,
     details,
   });
+  return true;
 };
 
 const dispatchPublishOnlyRecovery = async (
@@ -151,19 +164,24 @@ const dispatchPublishOnlyRecovery = async (
   details?: Record<string, unknown>,
 ) => {
   const now = new Date();
+  const generation = randomUUID();
 
-  await db
+  const [claimed] = await db
     .update(setRuns)
     .set({
       status: "dispatched",
       stage: "publish_retry_dispatching",
+      sourceMetadata: prepareDispatchMetadata(generation),
       errorSummary: null,
       heartbeatAt: now,
       completedAt: null,
       updatedAt: now,
       attemptCount: sql`${setRuns.attemptCount} + 1`,
     })
-    .where(eq(setRuns.id, run.id));
+    .where(recoveryEligibility(run))
+    .returning();
+
+  if (!claimed) return { action: "recovery_skipped" as const };
 
   await db
     .update(submissions)
@@ -175,16 +193,9 @@ const dispatchPublishOnlyRecovery = async (
     })
     .where(eq(submissions.id, run.submissionId));
 
+  let result: Awaited<ReturnType<typeof dispatchProcessSetWorkflow>>;
   try {
-    const result = await dispatchProcessSetWorkflow(run.id, { resume_mode: "publish_only" });
-    await createWorkerEvent({
-      submissionId: run.submissionId,
-      setRunId: run.id,
-      eventType: "set_run.publish_retry_dispatched",
-      message: reason,
-      details: { ...(details ?? {}), result },
-    });
-    return { action: "publish_retry_dispatched" as const, result };
+    result = await dispatchProcessSetWorkflow(run.id, { resume_mode: "publish_only", dispatch_generation: generation });
   } catch (error) {
     await createWorkerEvent({
       submissionId: run.submissionId,
@@ -193,17 +204,28 @@ const dispatchPublishOnlyRecovery = async (
       message: error instanceof Error ? error.message : "Publish retry dispatch failed",
     });
 
-    await requeueSetRunForFullRecovery(
-      run,
+    const requeued = await requeueSetRunForFullRecovery(
+      claimed,
       "Publish-only recovery dispatch failed; falling back to a full retry",
       details,
     );
+
+    if (!requeued) return { action: "recovery_skipped" as const };
 
     return {
       action: "publish_retry_fell_back_to_full_retry" as const,
       dispatch: await dispatchPendingWork(),
     };
   }
+
+  await createWorkerEvent({
+    submissionId: run.submissionId,
+    setRunId: run.id,
+    eventType: "set_run.publish_retry_dispatched",
+    message: reason,
+    details: { ...(details ?? {}), result },
+  });
+  return { action: "publish_retry_dispatched" as const, result };
 };
 
 // ---------------------------------------------------------------------------
@@ -250,41 +272,54 @@ export const dispatchQueuedArtistSubmission = async () => {
 };
 
 const dispatchOneSetRun = async (queuedRun: typeof setRuns.$inferSelect) => {
+  const generation = randomUUID();
+  const [claimed] = await db.update(setRuns).set({
+    sourceMetadata: prepareDispatchMetadata(generation),
+    updatedAt: new Date(),
+  }).where(recoveryEligibility(queuedRun)).returning({ id: setRuns.id });
+  if (!claimed) return { setRun: queuedRun, result: { dispatched: false, reason: "run_changed" } };
+  const dispatchSnapshot = {
+    ...queuedRun,
+    sourceMetadata: {
+      ...(queuedRun.sourceMetadata as Record<string, unknown> | null ?? {}),
+      active_workflow_run_id: "awaiting_dispatch",
+      dispatch_generation: generation,
+    },
+  };
+
   await db
     .update(submissions)
     .set({ status: "running", updatedAt: new Date() })
     .where(eq(submissions.id, queuedRun.submissionId));
 
+  let result: Awaited<ReturnType<typeof dispatchProcessSetWorkflow>>;
   try {
-    const result = await dispatchProcessSetWorkflow(queuedRun.id);
-    await createWorkerEvent({
-      submissionId: queuedRun.submissionId,
-      setRunId: queuedRun.id,
-      eventType: "set_run.dispatch",
-      message: result.dispatched ? "Process set workflow dispatched" : "Set run dispatch skipped",
-      details: result,
-    });
-    return { setRun: queuedRun, result };
+    result = await dispatchProcessSetWorkflow(queuedRun.id, { dispatch_generation: generation });
   } catch (error) {
-    await db
+    const [reset] = await db
       .update(setRuns)
-      .set({ status: "queued", stage: null, heartbeatAt: null, updatedAt: new Date() })
-      .where(eq(setRuns.id, queuedRun.id));
+      .set({ status: "queued", stage: null, heartbeatAt: null, updatedAt: new Date(), sourceMetadata: retireWorkflowOwner() })
+      .where(recoveryEligibility(dispatchSnapshot))
+      .returning({ id: setRuns.id });
 
-    await db
-      .update(submissions)
-      .set({ status: "queued", updatedAt: new Date() })
-      .where(eq(submissions.id, queuedRun.submissionId));
-
+    if (reset) await syncSubmissionStatusFromRuns(queuedRun.submissionId);
     await createWorkerEvent({
       submissionId: queuedRun.submissionId,
       setRunId: queuedRun.id,
       eventType: "set_run.dispatch_failed",
       message: error instanceof Error ? error.message : "Set run dispatch failed",
     });
-
     throw error;
   }
+
+  await createWorkerEvent({
+    submissionId: queuedRun.submissionId,
+    setRunId: queuedRun.id,
+    eventType: "set_run.dispatch",
+    message: result.dispatched ? "Process set workflow dispatched" : "Set run dispatch skipped",
+    details: result,
+  });
+  return { setRun: queuedRun, result };
 };
 
 export const dispatchAllQueuedSetRuns = async () => {
@@ -306,7 +341,7 @@ export const dispatchAllQueuedSetRuns = async () => {
   return {
     maxActive,
     claimedCount,
-    dispatched: results.filter((r) => r.status === "fulfilled").length,
+    dispatched: results.filter((r) => r.status === "fulfilled" && r.value.result.dispatched).length,
     results: results.map((r) => (r.status === "fulfilled" ? r.value : { error: String(r.reason) })),
   };
 };
@@ -437,21 +472,32 @@ export const finalizeSetRunWorkflow = async (values: {
     return { action: "superseded_workflow_finalize_ignored" as const };
   }
 
-  if (isTerminalSetRunStatus(run.status)) {
-    await syncSubmissionStatusFromRuns(run.submissionId);
-    return {
-      action: "already_terminal" as const,
-      status: run.status,
-      dispatch: await dispatchPendingWork(),
-    };
+  // A committed writer can still be running after a caller timeout. Do not
+  // cancel it, clear its gate, or dispatch an overlapping recovery attempt.
+  if (run.stage === publicationCommittedStage && !run.publishedSetId) {
+    await createWorkerEvent({
+      submissionId: run.submissionId,
+      setRunId: run.id,
+      eventType: "set_run.publication_requires_reconciliation",
+      message: "Publication may still be running or have an uncertain outcome. Reconcile archive writes before retrying.",
+      details,
+    });
+    return { action: "publication_requires_reconciliation" as const };
   }
 
-  if (run.cancelRequestedAt) {
+  if (run.cancelRequestedAt && !run.publishedSetId && run.status !== "cancelled") {
     const now = new Date();
-    await db
+    const [cancelled] = await db
       .update(setRuns)
       .set({ status: "cancelled", stage: "cancelled", completedAt: now, updatedAt: now })
-      .where(eq(setRuns.id, run.id));
+      .where(and(
+        eq(setRuns.id, run.id),
+        isNotNull(setRuns.cancelRequestedAt),
+        hasUncommittedPublication(),
+        matchesWorkflowOwner(values.workflowRunId),
+      ))
+      .returning({ id: setRuns.id });
+    if (!cancelled) return { action: "recovery_skipped" as const };
     await createWorkerEvent({
       submissionId: run.submissionId,
       setRunId: run.id,
@@ -466,13 +512,23 @@ export const finalizeSetRunWorkflow = async (values: {
     };
   }
 
+  if (isTerminalSetRunStatus(run.status) || run.publishedSetId) {
+    await syncSubmissionStatusFromRuns(run.submissionId);
+    return {
+      action: "already_terminal" as const,
+      status: run.status,
+      dispatch: await dispatchPendingWork(),
+    };
+  }
+
   if (recognitionComplete) {
     if (run.attemptCount >= automaticRecoveryAttemptLimit) {
-      await markSetRunFailed(
+      const failed = await markSetRunFailed(
         run,
         `Automatic recovery exhausted after ${run.attemptCount} retries while waiting for publish`,
         details,
       );
+      if (!failed) return { action: "recovery_skipped" as const };
       await syncSubmissionStatusFromRuns(run.submissionId);
       return {
         action: "failed_after_recovery_limit" as const,
@@ -488,11 +544,12 @@ export const finalizeSetRunWorkflow = async (values: {
   }
 
   if (run.attemptCount >= automaticRecoveryAttemptLimit) {
-    await markSetRunFailed(
+    const failed = await markSetRunFailed(
       run,
       `Automatic recovery exhausted after ${run.attemptCount} retries with incomplete recognition state`,
       details,
     );
+    if (!failed) return { action: "recovery_skipped" as const };
     await syncSubmissionStatusFromRuns(run.submissionId);
     return {
       action: "failed_after_recovery_limit" as const,
@@ -500,11 +557,13 @@ export const finalizeSetRunWorkflow = async (values: {
     };
   }
 
-  await requeueSetRunForFullRecovery(
+  const requeued = await requeueSetRunForFullRecovery(
     run,
     "Recognition workflow did not reach a terminal publishable state; requeuing automatically",
     details,
   );
+
+  if (!requeued) return { action: "recovery_skipped" as const };
 
   return {
     action: "requeued_for_full_retry" as const,

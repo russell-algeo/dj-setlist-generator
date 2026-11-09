@@ -27,7 +27,7 @@ export async function POST(request: Request, { params }: Params) {
   if (result.nothingToCancel) {
     return NextResponse.json(
       {
-        error: "No queued or active runs remain to cancel",
+        error: "No runs can be cancelled. Publication may already have started.",
         result,
       },
       { status: 409 },
