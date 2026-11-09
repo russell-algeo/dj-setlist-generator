@@ -55,6 +55,9 @@ describe("development and Preview-only folder approval", () => {
   it.each([
     ["production", "development", "development"],
     ["preview", "production", "production"],
+    ["production", "preview", "production"],
+    ["development", "preview", "development"],
+    ["staging", "preview", "production"],
     [" PRODUCTION ", "development", "development"],
     [undefined, undefined, "production"],
     [undefined, "development", "production"],
@@ -68,6 +71,8 @@ describe("development and Preview-only folder approval", () => {
   });
   it.each([
     ["preview", "development", "production"],
+    ["preview", "preview", "production"],
+    [undefined, "preview", "production"],
     ["preview", undefined, "production"],
     ["development", "development", "development"],
     [undefined, undefined, "development"],
@@ -98,6 +103,8 @@ describe("validated collection and media route integration", () => {
     const { yoonCollectionSchema } = await import("./collection-model.server");
     const { toYoonSetDetail } = await import("./data.server");
     const { fixture } = await import("./fixtures.test-support");
+    vi.stubEnv("APP_ENVIRONMENT", "preview");
+    vi.stubEnv("VERCEL_ENV", undefined);
     const collection = structuredClone(fixture);
     collection.sets[0]!.audio.sources[0]!.url = source;
     const parsed = yoonCollectionSchema.parse(collection);

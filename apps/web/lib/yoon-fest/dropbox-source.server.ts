@@ -9,7 +9,13 @@ function permitsFolderCapability(): boolean {
   const app = process.env.APP_ENVIRONMENT?.trim().toLowerCase();
   const vercel = process.env.VERCEL_ENV?.trim().toLowerCase();
   if (app === "production" || vercel === "production") return false;
-  if (app && app !== "development") return false;
+  if (app && !["development", "preview"].includes(app)) return false;
+  if (vercel && !["development", "preview"].includes(vercel)) return false;
+  // APP_ENVIRONMENT=preview is the explicit deployed Preview label, including
+  // when Vercel system variables are not exposed. A conflicting local target
+  // must not turn that label into permission. APP_ENVIRONMENT=development with
+  // VERCEL_ENV=preview remains the supported non-production database target.
+  if (app === "preview") return !vercel || vercel === "preview";
   return vercel === "preview" ||
     ((!vercel || vercel === "development") && process.env.NODE_ENV === "development");
 }
