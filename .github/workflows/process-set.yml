@@ -27,6 +27,11 @@ on:
         options:
           - development
           - production
+      spotify_token_probe:
+        description: Preview-only managed Spotify callback check; skips all media and publishing jobs
+        required: false
+        default: false
+        type: boolean
       recognition_slot_count:
         description: Number of recognition slots to fan out across, or auto
         required: false
@@ -39,7 +44,7 @@ on:
         type: string
 
 concurrency:
-  group: process-set-${{ github.ref }}-${{ github.event.inputs.deployment_target }}-${{ github.event.inputs.set_run_id }}
+  group: process-set-${{ github.ref }}-${{ github.event.inputs.deployment_target }}-${{ github.event.inputs.set_run_id }}${{ github.event.inputs.spotify_token_probe == 'true' && '-spotify-token-probe' || '' }}
   cancel-in-progress: true
 
 env:
@@ -51,8 +56,42 @@ permissions:
   contents: read
 
 jobs:
+  spotify-token-probe:
+    if: ${{ github.event.inputs.spotify_token_probe == 'true' }}
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APP_BASE_URL: ${{ secrets.DEVELOPMENT_APP_BASE_URL }}
+      INTERNAL_WORKER_SHARED_SECRET: ${{ secrets.DEVELOPMENT_INTERNAL_WORKER_SHARED_SECRET }}
+      WORKER_DEPLOYMENT_TARGET: ${{ github.event.inputs.deployment_target }}
+      WORKER_EXPECTED_PREVIEW_ORIGIN: https://dj-setlist-generator-git-preview-russell-algeos-projects.vercel.app
+      WORKER_VERCEL_OIDC_AUDIENCE: https://github.com/russell-algeo
+      SET_LIST_ACTIVE_SET_RUN_ID: ${{ github.event.inputs.set_run_id }}
+    steps:
+      - name: Reject non-Preview diagnostics
+        run: |
+          if [[ "$WORKER_DEPLOYMENT_TARGET" != "development" || "$GITHUB_REF" != "refs/heads/preview" ]]; then
+            echo "Spotify token diagnostics require development on the preview branch."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install callback-only dependencies
+        run: python -m pip install 'spotipy>=2.23.0' 'requests>=2.31.0'
+
+      - name: Verify managed Spotify token without publishing
+        run: python -m worker.spotify_token_probe
+
   bootstrap:
-    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
+    if: ${{ github.event.inputs.spotify_token_probe != 'true' && github.event.inputs.resume_mode != 'publish_only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -171,7 +210,7 @@ jobs:
   recognize:
     needs:
       - bootstrap
-    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
+    if: ${{ github.event.inputs.spotify_token_probe != 'true' && github.event.inputs.resume_mode != 'publish_only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -223,7 +262,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: ${{ always() && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
+    if: ${{ always() && github.event.inputs.spotify_token_probe != 'true' && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
     needs:
       - bootstrap
       - recognize
@@ -268,7 +307,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: ${{ always() }}
+    if: ${{ always() && github.event.inputs.spotify_token_probe != 'true' }}
     needs:
       - bootstrap
       - recognize

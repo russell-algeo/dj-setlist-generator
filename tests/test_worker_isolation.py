@@ -97,9 +97,11 @@ class WorkerIsolationTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/process-set.yml").read_text()
         template = re.search(r"^  group: (.+)$", text, re.MULTILINE).group(1)
 
-        def group(branch, target):
+        def group(branch, target, probe=False):
             values = {"github.ref": branch, "github.event.inputs.deployment_target": target,
-                      "github.event.inputs.set_run_id": "same-set-id"}
+                      "github.event.inputs.set_run_id": "same-set-id",
+                      "github.event.inputs.spotify_token_probe == 'true' && '-spotify-token-probe' || ''":
+                          "-spotify-token-probe" if probe else ""}
             return re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda match: values[match[1]], template)
 
         production = group("refs/heads/remote-deployment", "production")
@@ -107,6 +109,8 @@ class WorkerIsolationTests(unittest.TestCase):
         self.assertNotEqual(production, group("refs/heads/codex/preview-worker-isolation", "production"))
         self.assertNotEqual(production, group("refs/heads/codex/preview-worker-isolation", "development"))
         self.assertEqual(production, group("refs/heads/remote-deployment", "production"))
+        self.assertNotEqual(group("refs/heads/preview", "development"),
+                            group("refs/heads/preview", "development", probe=True))
 
 
 if __name__ == "__main__":
