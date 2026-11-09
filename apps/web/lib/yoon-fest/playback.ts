@@ -51,29 +51,60 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
   let activeIndex = 0;
   let awaitingMetadata = false;
   let pending: { seconds: number; autoplay: boolean } | null = null;
+  let playRequested = false;
+  let playAttempt: { version: number; settled: Promise<void> } | null = null;
+  const startPlayback = (request: number) => {
+    // Keep the pending play promise separate from the pending source seek.
+    // A seek may be applied while play() is still starting or being denied.
+    const attempt = { version: request, settled: Promise.resolve() };
+    playAttempt = attempt;
+    attempt.settled = audio.play().then(() => {
+      if (playAttempt === attempt) playAttempt = null;
+    }, () => {
+      if (playAttempt === attempt) playAttempt = null;
+      if (disposed || request !== version) return;
+      playRequested = false;
+      if (pending) pending = { ...pending, autoplay: false };
+      audio.pause();
+      onError("Playback could not start. Press Play to try again.");
+    });
+  };
+  const pause = () => {
+    version += 1;
+    playRequested = false;
+    if (pending) pending = { ...pending, autoplay: false };
+    audio.pause();
+  };
   const seek = (seconds: number, autoplay: boolean) => {
     if (disposed || !Number.isFinite(seconds)) return;
     const request = ++version;
     const target = Math.max(0, Math.min(duration, seconds));
     const index = segments.findIndex((part, index) => target < offsets[index]! + part.durationSeconds);
     const selected = index < 0 ? segments.length - 1 : index;
-    pending = { seconds: target, autoplay };
+    // The endpoint is a stopped position, never permission to play beyond it.
+    playRequested = autoplay && target < duration;
+    pending = { seconds: target, autoplay: playRequested };
     audio.pause();
     if (selected !== activeIndex) {
       activeIndex = selected;
       awaitingMetadata = true;
       audio.src = segments[selected]!.src;
       audio.load();
+    }
+    if (audio.readyState < 1 || awaitingMetadata) {
+      // Invoke play in the user's gesture even when a mobile browser defers
+      // metadata. loadedmetadata applies the pending offset before audio plays.
+      if (playRequested) startPlayback(request);
       return;
     }
-    if (audio.readyState < 1 || awaitingMetadata) return;
     try {
       audio.currentTime = Math.min(segments[selected]!.startSeconds + segments[selected]!.durationSeconds, segments[selected]!.startSeconds + target - offsets[selected]!);
       pending = null;
-      if (autoplay) void audio.play().catch(() => {
-        if (!disposed && request === version) onError("Playback could not start. Press Play to try again.");
-      });
+      if (playRequested) startPlayback(request);
     } catch {
+      playRequested = false;
+      pending = null;
+      audio.pause();
       onError("This recording could not seek. Reload the page to try again.");
     }
   };
@@ -89,6 +120,18 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     seek,
     position,
     ended,
+    isPlayRequested: () => playRequested,
+    isPending: () => pending !== null || awaitingMetadata,
+    async observePause(onPaused: () => void) {
+      const observedVersion = version;
+      const attempt = playAttempt;
+      // pause events are queued. An internal seek's pause must not cancel a
+      // newer play just because metadata/seek completed before play settled.
+      if (attempt?.version === observedVersion) await attempt.settled;
+      if (disposed || observedVersion !== version || !audio.paused || (pending && playRequested)) return;
+      pause();
+      onPaused();
+    },
     tick() {
       if (disposed || pending || awaitingMetadata || audio.readyState < 1) return position();
       const part = segments[activeIndex]!;
@@ -100,7 +143,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       return position();
     },
     ready() { awaitingMetadata = false; if (pending) seek(pending.seconds, pending.autoplay); },
-    pause() { version += 1; if (pending) pending = { ...pending, autoplay: false }; audio.pause(); },
-    dispose() { disposed = true; version += 1; pending = null; audio.pause(); },
+    pause,
+    dispose() { disposed = true; version += 1; playRequested = false; pending = null; audio.pause(); },
   };
 }

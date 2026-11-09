@@ -7,6 +7,7 @@ import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo,
 import { ArchiveDeleteControl, SubmittedByYouBadge } from "@/components/archive/archive-delete-control";
 import { buildArtistHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
+import { RecordedSetControls } from "@/components/archive/recorded-set-controls";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
 import {
@@ -950,6 +951,8 @@ export function ArchiveSetExplorer({
   const [hashHitIdx, setHashHitIdx] = useState<number | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [nativeAudioError, setNativeAudioError] = useState<string | null>(null);
+  const [nativeAudioBuffering, setNativeAudioBuffering] = useState(false);
+  const [nativeAudioUnavailable, setNativeAudioUnavailable] = useState(false);
   const [ytEmbedBlocked, setYtEmbedBlocked] = useState(false);
   const [scEmbedBlocked, setScEmbedBlocked] = useState(false);
   const deferredQuery = useDeferredValue(query);
@@ -1102,7 +1105,9 @@ export function ArchiveSetExplorer({
     (activeSource.kind === "youtube" || activeSource.kind === "soundcloud" || activeSource.kind === "native-audio") &&
     !ytEmbedBlocked &&
     !scEmbedBlocked;
-  const playbackControlsDisabled = showDock && !playerReady;
+  const playbackControlsDisabled = showDock && (activeSource.kind === "native-audio"
+    ? nativeAudioUnavailable || detail.duration <= 0
+    : !playerReady);
   const artistNames = detail.artists.map((artist) => artist.name).join(", ");
   const nowPlayingArtist = detail.artistName ?? (artistNames || "Set Signal Archive");
 
@@ -1731,6 +1736,7 @@ export function ArchiveSetExplorer({
     seekLockUntilRef.current = Date.now() + 1500;
 
     if (activeSource.kind === "native-audio") {
+      setNativeAudioError(null);
       if (nativeControllerRef.current) nativeControllerRef.current.seek(safeSeconds, autoplay);
       else { pendingSeekRef.current = safeSeconds; pendingAutoplayRef.current = autoplay; }
       return;
@@ -1814,6 +1820,7 @@ export function ArchiveSetExplorer({
   const pausePlayer = () => {
     if (activeSource.kind === "native-audio") {
       nativeControllerRef.current?.pause();
+      setNativeAudioBuffering(false);
       setIsPlaying(false);
       return;
     }
@@ -1846,7 +1853,8 @@ export function ArchiveSetExplorer({
     publishNowPlayingMetadata();
     const startAtSeconds = clamp(currentTimeRef.current, 0, Math.max(0, detail.duration));
     if (activeSource.kind === "native-audio") {
-      nativeControllerRef.current?.seek(startAtSeconds, true);
+      setNativeAudioError(null);
+      seekPlayer(startAtSeconds >= detail.duration ? 0 : startAtSeconds, false, true);
       return;
     }
 
@@ -1893,6 +1901,11 @@ export function ArchiveSetExplorer({
   };
 
   const togglePlay = () => {
+    if (activeSource.kind === "native-audio") {
+      if (nativeControllerRef.current?.isPlayRequested()) pausePlayer();
+      else playPlayer();
+      return;
+    }
     if (
       activeSource.kind === "youtube" &&
       ytPlayerRef.current?.getPlayerState &&
@@ -2126,10 +2139,13 @@ export function ArchiveSetExplorer({
     setIsPlaying(false);
 
     setNativeAudioError(null);
+    setNativeAudioBuffering(false);
+    setNativeAudioUnavailable(false);
     if (activeSource.kind === "native-audio" && nativeAudioRef.current) {
       const audio = nativeAudioRef.current;
       nativeControllerRef.current = createNativeAudioController(audio, detail.duration, (message) => {
         setIsPlaying(false);
+        setNativeAudioBuffering(false);
         setNativeAudioError(message);
       }, privateContext?.audio.segments);
       nativeControllerRef.current.seek(0, false);
@@ -2624,12 +2640,12 @@ export function ArchiveSetExplorer({
                 id="sourcePlayerFrame"
               >
                 {activeSource.kind === "native-audio" ? (
-                  <div style={{ padding: 24 }}>
+                  <div>
                     <audio
                       key={`${activeSource.sourceUrl}:${privateContext?.audio.revision}`}
                       ref={nativeAudioRef}
                       src={activeSource.sourceUrl}
-                      controls
+                      playsInline
                       controlsList="nodownload"
                       preload="metadata"
                       onLoadedMetadata={(event) => {
@@ -2638,8 +2654,24 @@ export function ArchiveSetExplorer({
                         nativeControllerRef.current?.ready();
                         if (!flushPendingSeek()) restoreReadyPlayerPosition();
                       }}
-                      onPlay={() => { playbackStartedRef.current = true; setNativeAudioError(null); setIsPlaying(true); }}
-                      onPause={() => setIsPlaying(false)}
+                      onPlay={(event) => {
+                        if (event.currentTarget.paused || !nativeControllerRef.current?.isPlayRequested()) return;
+                        playbackStartedRef.current = true; setNativeAudioError(null); setIsPlaying(true);
+                      }}
+                      onPlaying={(event) => {
+                        if (event.currentTarget.paused || !nativeControllerRef.current?.isPlayRequested()) return;
+                        setNativeAudioBuffering(false); setIsPlaying(true);
+                      }}
+                      onWaiting={() => setNativeAudioBuffering(true)}
+                      onStalled={() => { if (nativeControllerRef.current?.isPlayRequested()) setNativeAudioBuffering(true); }}
+                      onLoadStart={() => { setPlayerReadyState(false); setNativeAudioBuffering(true); }}
+                      onCanPlay={() => setNativeAudioBuffering(false)}
+                      onPause={() => {
+                        void nativeControllerRef.current?.observePause(() => {
+                          setNativeAudioBuffering(false);
+                          setIsPlaying(false);
+                        });
+                      }}
                       onEnded={() => { const position = nativeControllerRef.current?.ended() ?? detail.duration; updateFromPolledTime(position); if (position >= detail.duration) setIsPlaying(false); }}
                       onSeeking={() => { lastListenSampleRef.current = null; }}
                       onSeeked={(event) => {
@@ -2651,11 +2683,23 @@ export function ArchiveSetExplorer({
                         if (event.currentTarget === nativeAudioRef.current) updateFromPolledTime(nativeControllerRef.current?.tick() ?? 0);
                       }}
                       onError={() => {
+                        nativeControllerRef.current?.pause();
                         setPlayerReadyState(false); setIsPlaying(false);
+                        setNativeAudioUnavailable(true); setNativeAudioBuffering(false);
                         setNativeAudioError("The private recording is unavailable. Your session may have expired. Reload to try again.");
                       }}
                     />
-                    {nativeAudioError ? <p role="alert">{nativeAudioError}</p> : null}
+                    <RecordedSetControls
+                      currentTime={currentTime}
+                      duration={detail.duration}
+                      isPlaying={isPlaying}
+                      ready={playerReady}
+                      buffering={nativeAudioBuffering}
+                      unavailable={nativeAudioUnavailable}
+                      error={nativeAudioError}
+                      onTogglePlay={togglePlay}
+                      onSeek={(seconds) => jumpTo(seconds, false, nativeControllerRef.current?.isPlayRequested() ?? false)}
+                    />
                   </div>
                 ) : null}
                 {activeSource.kind === "youtube" && !ytEmbedBlocked ? (

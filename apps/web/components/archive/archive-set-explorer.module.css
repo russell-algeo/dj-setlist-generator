@@ -2092,3 +2092,80 @@
     font-size: clamp(18px, 6.5vw, 34px);
   }
 }
+
+/* Private recordings share the existing set clock, not the source file clock. */
+.root :global(.recorded-set-controls) {
+  padding: clamp(12px, 3vw, 24px);
+  min-width: 0;
+}
+
+.root :global(.recorded-set-controls-row) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.root :global(.recorded-set-play) {
+  min-width: 88px;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--lime);
+  border-radius: 6px;
+  background: #111;
+  color: var(--lime);
+  font: inherit;
+  cursor: pointer;
+}
+
+.root :global(.recorded-set-time) {
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.root :global(.recorded-set-seek) {
+  display: block;
+  width: 100%;
+  height: 48px;
+  margin: 6px 0 0;
+  accent-color: var(--lime);
+  cursor: pointer;
+}
+
+.root :global(.recorded-set-seek::-webkit-slider-thumb) {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.root :global(.recorded-set-seek::-moz-range-thumb) {
+  width: 24px;
+  height: 24px;
+}
+
+.root :global(.recorded-set-play:focus-visible),
+.root :global(.recorded-set-seek:focus-visible) {
+  outline: 2px solid var(--lime);
+  outline-offset: 4px;
+}
+
+.root :global(.recorded-set-play:disabled),
+.root :global(.recorded-set-seek:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.root :global(.recorded-set-status p) {
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
