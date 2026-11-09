@@ -75,6 +75,10 @@ The current CI bootstrap path uses direct runner egress plus authenticated yt-dl
 - `GH_PAT`: optional fine-grained token with repo secrets write access so CI can rotate `YOUTUBE_COOKIES_B64` after a successful run
 - `PROCESS_SET_MAX_ACTIVE_RUNS`: app-side cap for how many `process-set` workflow runs may be active at once (default `10`)
 
+`process-set` bootstrap reuses these existing cookie and user-agent secrets for Production and for explicit `deployment_target=development` dispatches on `refs/heads/preview` in `russell-algeo/dj-setlist-generator`. Other development branches and repositories do not gain this exception. Preview uses the job-local cookie jar for video metadata and audio download; it does not persist refreshed cookies or receive `GH_PAT`. Production-only writeback remains unchanged. The cookie file is outside the prepared-audio artifact paths.
+
+The session is shared: compromise, invalidation, account challenges, or provider throttling can affect both environments. This does not change Preview database/callback isolation. Discovery and publishing/enrichment do not gain cookie support from this bootstrap exception. The earlier anonymous YouTube failure remains a failed test; this configuration alone does not establish a successful authenticated Preview download or current cookie validity.
+
 `process-set` now runs without the WARP proxy by default. On March 28, 2026, direct-egress bootstrap succeeded on three development test runs for:
 
 - `https://www.youtube.com/watch?v=UOhLcspytqo`
