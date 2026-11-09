@@ -1,0 +1,325 @@
+"""Private Jackson durable queue using existing lease/hit tables, never events.
+
+All mutations serialize on the scoped private run. Public initialization,
+destructive requeue, callback publication and ordinary worker statuses are not
+used. A request reservation is committed before transmission; a hard-killed
+reservation is explicitly uncertain, not silently a valid no-match.
+"""
+from contextlib import contextmanager
+from dataclasses import asdict
+import json
+import re
+import uuid
+
+from worker.jobs.yoon_resume_policy import (
+    CONTINUATION_LIMIT, WINDOW_ATTEMPT_LIMIT, after_response, may_reserve,
+)
+
+
+class QueuePause(RuntimeError):
+    pass
+
+
+class ResumeStore:
+    def __init__(self, run_id, workflow_id, attempt, connect=None):
+        from worker.db import connect as default_connect
+        self.run_id = str(uuid.UUID(run_id))
+        if not workflow_id.isdecimal() or not attempt.isdecimal():
+            raise RuntimeError('invalid_private_owner')
+        self.owner = {'workflow_run_id': workflow_id, 'run_attempt': attempt}
+        self.connect = connect or default_connect
+
+    @contextmanager
+    def locked(self, *, owner=True):
+        from worker.jobs.yoon_once import PRIVATE_GUARD, validate_descriptor
+        with self.connect() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute("SET LOCAL lock_timeout = '5s'")
+            cur.execute("SET LOCAL statement_timeout = '15s'")
+            cur.execute('''SELECT r.*, extract(epoch from clock_timestamp())::float8 AS db_now
+                FROM ops.set_runs r, app.sets s, ops.submissions u, app.archive_collections c WHERE ''' + PRIVATE_GUARD + '''
+                AND u.cancel_requested_at IS NULL AND u.create_playlist=false
+                AND r.requested_by=u.requested_by AND c.id=r.collection_id
+                FOR UPDATE OF r,u''', (self.run_id,))
+            row = cur.fetchone()
+            if not row:
+                raise RuntimeError('private_resume_scope_required')
+            descriptor = row['source_metadata'].get('yoon_fixed_input')
+            validate_descriptor(descriptor)
+            state = dict(row['source_metadata'].get('yoon_resume') or {})
+            if descriptor.get('recognition_mode') != 'resumable' or state.get('version') != 1:
+                raise RuntimeError('private_resume_required')
+            cur.execute('''SELECT user_id,role FROM app.archive_collection_members
+                WHERE collection_id=%s ORDER BY user_id''', (row['collection_id'],))
+            members = [{'user_id': str(r['user_id']), 'role': r['role']} for r in cur.fetchall()]
+            if len(members) != 2 or members != state.get('members'):
+                raise RuntimeError('private_resume_audience_changed')
+            if owner and (row['status'] != 'private_resume_running' or
+                          any(state.get(k) != v for k,v in self.owner.items())):
+                raise RuntimeError('private_resume_owner_changed')
+            yield cur, row, state
+
+    def save_state(self, cur, state, status='private_resume_running'):
+        cur.execute('''UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,
+            '{yoon_resume}',%s::jsonb),status=%s,stage='private_resume',heartbeat_at=now(),
+            updated_at=now() WHERE id=%s''', (json.dumps(state), status, self.run_id))
+
+    def claim(self):
+        with self.locked(owner=False) as (cur,row,state):
+            cur.execute("SELECT obj_description('ops.cleanup_expired_ops_data()'::regprocedure,'pg_proc') AS marker")
+            if cur.fetchone()['marker']!='private-recognition-retention-v1':
+                raise RuntimeError('private_retention_migration_required')
+            if row['status'] not in ('private_resume_pending','private_resume_paused'):
+                raise RuntimeError('private_resume_not_released')
+            if state['continuations'] >= CONTINUATION_LIMIT:
+                raise QueuePause('continuation_budget')
+            identity = f"{self.owner['workflow_run_id']}:{self.owner['run_attempt']}"
+            used = list(state.get('used_owners') or [])
+            if identity in used:
+                raise RuntimeError('private_continuation_identity_replayed')
+            if state.get('review_required'):
+                raise QueuePause('private_resume_review_required')
+            reason = may_reserve(state,now=row['db_now'],session_started=row['db_now'],
+                                 session_requests=0,window_attempts=0)
+            if reason:
+                raise QueuePause(reason)
+            # No automatic takeover of an uncertain live workflow. Only a clean
+            # previous private finalization can release this run for continuation.
+            cur.execute('''SELECT count(*) AS n FROM ops.segment_hits
+                WHERE set_run_id=%s AND raw_data->'private_jackson_v2'->>'in_flight'='true' ''', (self.run_id,))
+            if cur.fetchone()['n']:
+                raise RuntimeError('uncertain_request_requires_reconciliation')
+            state.update(self.owner, continuations=state['continuations']+1,
+                         session_requests=0,session_started=row['db_now'], reason=None,
+                         recognition_mode='resumable', status='preparing')
+            state['used_owners'] = used + [identity]
+            # Reuse ordinary lease geometry/storage without destructive initializer.
+            cur.execute('''INSERT INTO ops.set_run_leases
+                (set_run_id,slot_index,segment_start_index,segment_end_index,status)
+                SELECT %s,0,i,i,'pending' FROM generate_series(0,478) i
+                WHERE NOT EXISTS(SELECT 1 FROM ops.set_run_leases l
+                  WHERE l.set_run_id=%s AND l.segment_start_index=i)''', (self.run_id,self.run_id))
+            if not state.get('provenance_seeded'):
+                self.seed_valid_evidence(cur,row,state)
+            self.save_state(cur,state)
+            return row['source_metadata']['yoon_fixed_input']['source_url']
+
+    def seed_valid_evidence(self, cur, row, state):
+        from worker.jobs.yoon_once import validate_descriptor
+        origin = state['origin']
+        cur.execute('''SELECT p.source_metadata,encode(digest(p.source_metadata::text,'sha256'),'hex') AS digest
+            FROM ops.set_runs p WHERE p.id=%s AND p.id<>%s
+            AND p.status='private_analysis_partial' AND p.publication_visibility='private'
+            AND p.target_set_id=%s AND p.collection_id=%s AND p.submission_id=%s
+            AND p.requested_by=%s AND p.create_playlist=false AND p.cancel_requested_at IS NULL
+            AND p.published_set_id IS NULL FOR SHARE''',
+            (origin['run_id'],self.run_id,row['target_set_id'],row['collection_id'],row['submission_id'],row['requested_by']))
+        parent = cur.fetchone()
+        if not parent or parent['digest']!=origin['metadata_sha256']:
+            raise RuntimeError('private_origin_changed')
+        metadata = parent['source_metadata']
+        if validate_descriptor(metadata['yoon_fixed_input']) != validate_descriptor(row['source_metadata']['yoon_fixed_input']):
+            raise RuntimeError('private_origin_source_changed')
+        analysis = metadata.get('yoon_analysis') or {}
+        if analysis.get('workflow_run_id')!=origin['workflow_run_id'] or analysis.get('status')!='partial':
+            raise RuntimeError('private_origin_provenance_mismatch')
+        audio_digest = analysis.get('audio_sha256','')
+        if not re.fullmatch('[0-9a-f]{64}',audio_digest):
+            raise RuntimeError('private_origin_audio_digest_required')
+        state['expected_audio_sha256'] = audio_digest
+        cur.execute('SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s',(self.run_id,))
+        if cur.fetchone()['n']:
+            raise RuntimeError('private_seed_requires_empty_hits')
+        attempts = analysis.get('recognition_diagnostics',{}).get('attempts',[])
+        latest = {a['segment_index']:a for a in attempts}
+        seen = set()
+        for response in analysis.get('raw_recognitions',[]):
+            index = response.get('segment_index')
+            if type(index) is not int or not 0<=index<479 or index in seen:
+                raise RuntimeError('private_origin_geometry_invalid')
+            seen.add(index)
+            if response.get('error_type') or response.get('was_rate_limited'):
+                continue
+            if response.get('timestamp')!=index*15 or latest.get(index,{}).get('http_status')!=200:
+                raise RuntimeError('private_origin_response_unverified')
+            data = dict(valid=True,in_flight=False,attempts=[],response=response,
+                        origin=dict(origin,segment_index=index))
+            cur.execute('''INSERT INTO ops.segment_hits(set_run_id,lease_id,segment_index,timestamp_seconds,
+                recognized,track_title,artist,shazam_track_id,raw_data)
+                SELECT %s,id,%s,%s,%s,%s,%s,%s,%s::jsonb FROM ops.set_run_leases
+                WHERE set_run_id=%s AND segment_start_index=%s RETURNING lease_id''',
+                (self.run_id,index,index*15,bool(response['recognized']),response.get('track_title'),
+                 response.get('artist'),response.get('shazam_track_id'),
+                 json.dumps({'private_jackson_v2':data}),self.run_id,index))
+            hit = cur.fetchone()
+            if not hit:
+                raise RuntimeError('private_origin_lease_missing')
+            cur.execute("UPDATE ops.set_run_leases SET status='completed',completed_at=now() WHERE id=%s",(hit['lease_id'],))
+        cur.execute('SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s',(self.run_id,))
+        if cur.fetchone()['n']!=origin['valid_windows']:
+            raise RuntimeError('private_origin_coverage_changed')
+        state['provenance_seeded'] = True
+
+    def require_owner(self):
+        with self.locked() as (_,_,state):
+            return state
+
+    def write(self, payload):
+        # Adapter for the unchanged fixed-source prepare/transcode implementation.
+        mismatch = False
+        with self.locked() as (cur,_,state):
+            if payload.get('audio_sha256') and payload['audio_sha256']!=state['expected_audio_sha256']:
+                state.update(status='paused',reason='prepared_audio_changed',review_required=True)
+                self.save_state(cur,state,'private_resume_paused')
+                mismatch = True
+            elif payload['status'] == 'failed':
+                state.update(status='paused',reason='preparation_failed')
+                self.save_state(cur,state,'private_resume_paused')
+            else:
+                state.update(payload)
+                self.save_state(cur,state)
+        if mismatch:
+            raise RuntimeError('prepared_audio_changed')
+
+    def next_window(self):
+        with self.locked() as (cur,row,state):
+            cur.execute('''SELECT l.id,l.segment_start_index AS segment_index,h.raw_data
+                FROM ops.set_run_leases l LEFT JOIN ops.segment_hits h
+                ON h.set_run_id=l.set_run_id AND h.segment_index=l.segment_start_index
+                WHERE l.set_run_id=%s AND l.status='pending'
+                AND coalesce(h.raw_data->'private_jackson_v2'->>'valid','false')<>'true'
+                ORDER BY l.segment_start_index LIMIT 1 FOR UPDATE OF l SKIP LOCKED''', (self.run_id,))
+            candidate = cur.fetchone()
+            if not candidate:
+                return None, 0
+            wait = max(0,state['next_allowed_at']-row['db_now'])
+            return dict(candidate), wait
+
+    def reserve(self, index):
+        with self.locked() as (cur,row,state):
+            cur.execute('''SELECT l.id,l.status,h.raw_data FROM ops.set_run_leases l
+                LEFT JOIN ops.segment_hits h ON h.set_run_id=l.set_run_id
+                  AND h.segment_index=l.segment_start_index
+                WHERE l.set_run_id=%s AND l.segment_start_index=%s FOR UPDATE OF l''', (self.run_id,index))
+            lease = cur.fetchone()
+            data = dict((lease.get('raw_data') or {}).get('private_jackson_v2') or {}) if lease else {}
+            attempts = list(data.get('attempts') or [])
+            if not lease or lease['status'] != 'pending' or data.get('valid') or data.get('in_flight'):
+                raise RuntimeError('private_window_not_available')
+            reason = may_reserve(state,now=row['db_now'],session_started=state['session_started'],
+                                 session_requests=state['session_requests'],window_attempts=len(attempts))
+            if reason:
+                raise QueuePause(reason)
+            state['requests'] += 1
+            state['session_requests'] += 1
+            record = dict(self.owner,number=state['requests'],started_at=row['db_now'],state='in_flight')
+            attempts.append(record)
+            data.update(valid=False,in_flight=True,attempts=attempts)
+            cur.execute('''INSERT INTO ops.segment_hits(set_run_id,lease_id,segment_index,timestamp_seconds,recognized,raw_data)
+                VALUES(%s,%s,%s,%s,false,%s::jsonb) ON CONFLICT(set_run_id,segment_index)
+                DO UPDATE SET raw_data=excluded.raw_data''',
+                (self.run_id,lease['id'],index,index*15,json.dumps({'private_jackson_v2':data})))
+            cur.execute("UPDATE ops.set_run_leases SET status='claimed',claimed_by=%s,claimed_at=now(),updated_at=now() WHERE id=%s",
+                        (self.owner['workflow_run_id'],lease['id']))
+            self.save_state(cur,state)
+
+    def finish(self, result, diagnostic):
+        with self.locked() as (cur,row,state):
+            cur.execute('''SELECT h.*,l.status AS lease_status,l.claimed_by FROM ops.segment_hits h
+                JOIN ops.set_run_leases l ON l.id=h.lease_id
+                WHERE h.set_run_id=%s AND h.segment_index=%s FOR UPDATE OF h,l''', (self.run_id,result.segment_index))
+            hit = cur.fetchone()
+            data = dict((hit or {}).get('raw_data',{}).get('private_jackson_v2') or {})
+            attempts = list(data.get('attempts') or [])
+            if (not hit or hit['lease_status'] != 'claimed' or not data.get('in_flight')
+                or not attempts or any(attempts[-1].get(k)!=v for k,v in self.owner.items())):
+                raise RuntimeError('private_attempt_owner_changed')
+            # Explicit status is required: provider exceptions never become no-matches.
+            valid = not result.error_type and not result.was_rate_limited and diagnostic.get('http_status') == 200
+            safe = {key:diagnostic[key] for key in ('http_status','retry_after_seconds','retry_after_format',
+                    'http_elapsed_seconds','outcome') if key in diagnostic}
+            attempts[-1].update(state='finished',finished_at=row['db_now'],diagnostic=safe)
+            data.update(valid=valid,in_flight=False,attempts=attempts)
+            response = asdict(result)
+            response['error_details'] = None
+            data['response'] = response
+            state,reason = after_response(state,now=row['db_now'],rate_limited=result.was_rate_limited,
+                valid=valid,retry_seconds=diagnostic.get('retry_after_seconds'),
+                retry_format=diagnostic.get('retry_after_format','absent'))
+            exhausted = not valid and len(attempts)>=WINDOW_ATTEMPT_LIMIT
+            cur.execute('''UPDATE ops.segment_hits SET recognized=%s,track_title=%s,artist=%s,
+                shazam_track_id=%s,raw_data=%s::jsonb WHERE id=%s''',
+                (bool(valid and result.recognized),result.track_title if valid else None,
+                 result.artist if valid else None,result.shazam_track_id if valid else None,
+                 json.dumps({'private_jackson_v2':data}),hit['id']))
+            cur.execute('''UPDATE ops.set_run_leases SET status=%s,claimed_by=null,
+                claimed_at=null,completed_at=CASE WHEN %s THEN now() ELSE null END,updated_at=now()
+                WHERE id=%s''', ('completed' if valid else 'exhausted' if exhausted else 'pending',valid,hit['lease_id']))
+            state.update(status='recognizing',reason=reason)
+            if reason == 'retry_after_needs_review':
+                state['review_required'] = True
+            self.save_state(cur,state)
+            return reason
+
+    def release(self, reason):
+        with self.locked() as (cur,_,state):
+            if self.coverage_ready(cur):
+                self.complete_locked(cur,state)
+                return
+            # A killed/uncertain request is preserved for explicit reconciliation.
+            cur.execute('''SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s
+                AND raw_data->'private_jackson_v2'->>'in_flight'='true' ''', (self.run_id,))
+            uncertain = bool(cur.fetchone()['n'])
+            state.update(status='paused',reason=reason,review_required=bool(state.get('review_required') or uncertain))
+            self.save_state(cur,state,'private_resume_paused')
+
+    def coverage_ready(self,cur):
+        cur.execute('''SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s
+            AND raw_data->'private_jackson_v2'->>'valid'='true'
+            AND raw_data->'private_jackson_v2'->>'in_flight'='false' ''',(self.run_id,))
+        return cur.fetchone()['n']==479
+
+    def finalize_ready(self):
+        # A clean paused run with every durable response can finish even when all
+        # provider budgets are exhausted. No ownership takeover or provider call.
+        with self.locked(owner=False) as (cur,row,state):
+            if row['status']=='private_resume_complete':
+                return True
+            if row['status'] not in ('private_resume_paused','private_resume_pending'):
+                return False
+            if not self.coverage_ready(cur):
+                return False
+            self.complete_locked(cur,state)
+            return True
+
+    def summary(self):
+        with self.locked() as (cur,_,state):
+            cur.execute('''SELECT count(*) FILTER(WHERE status='completed') AS valid,
+                count(*) FILTER(WHERE status='exhausted') AS exhausted,
+                count(*) FILTER(WHERE status='claimed') AS claimed,
+                count(*) AS total FROM ops.set_run_leases WHERE set_run_id=%s''', (self.run_id,))
+            return dict(cur.fetchone()),state
+
+    def complete(self):
+        with self.locked() as (cur,_,state):
+            self.complete_locked(cur,state)
+
+    def complete_locked(self,cur,state):
+        from worker.pipeline.models import Recognition
+        from worker.pipeline.aggregate import build_tracks_from_recognitions
+        cur.execute('''SELECT segment_index,raw_data FROM ops.segment_hits
+            WHERE set_run_id=%s ORDER BY segment_index''', (self.run_id,))
+        hits = cur.fetchall()
+        if len(hits)!=479 or [r['segment_index'] for r in hits]!=list(range(479)):
+            raise RuntimeError('private_resume_incomplete')
+        data = [r['raw_data']['private_jackson_v2'] for r in hits]
+        if any(not d.get('valid') or d.get('in_flight') for d in data):
+            raise RuntimeError('private_resume_incomplete')
+        responses = [Recognition.from_checkpoint(d['response']) for d in data]
+        tracks,_ = build_tracks_from_recognitions(responses)
+        state.update(status='complete',reason=None,valid_responses=479,
+                     clustered_setlist=[asdict(t) for t in tracks])
+        self.save_state(cur,state,'private_resume_complete')
+
+    def clock_state(self):
+        with self.locked() as (_,row,state):
+            return row['db_now'],state

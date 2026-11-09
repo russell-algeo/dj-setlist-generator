@@ -144,7 +144,8 @@ class Tests(unittest.TestCase):
                  'PRIVATE_RUN_ID':'12345678-1234-1234-1234-123456789012','GITHUB_RUN_ID':'1','GITHUB_RUN_ATTEMPT':'1'}
             code = """import os, subprocess, sys
 from worker.jobs import yoon_once as j
-j.Store=lambda *args: object()
+from types import SimpleNamespace
+j.Store=lambda *args: SimpleNamespace(read=lambda: {'source_metadata': {}})
 def fake(*args):
     print('SYNTHETIC_PRIVATE_TITLE', flush=True)
     os.write(2, b'SYNTHETIC_PRIVATE_CAPABILITY')
@@ -164,7 +165,7 @@ raise SystemExit(j.main())
         self.assertIn('secrets.DEVELOPMENT_DATABASE_URL_DIRECT',t)
         for forbidden in ['GH_PAT','YOON_SOURCE_URL','INTERNAL_WORKER_SHARED_SECRET','worker.callbacks']:
             self.assertNotIn(forbidden,private)
-        self.assertEqual(private.count('>/dev/null 2>&1'),2)
+        self.assertEqual(private.count('>/dev/null 2>&1'),3)
         ordinary=t.split('  private-prepare:',1)[0]
         self.assertEqual(ordinary.count("if: ${{ github.event.inputs.private_analysis != 'true'"),2)
         self.assertEqual(ordinary.count("if: ${{ always() && github.event.inputs.private_analysis != 'true'"),2)

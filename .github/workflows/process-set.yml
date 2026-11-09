@@ -321,7 +321,20 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run synthetic PostgreSQL and migration regressions
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/private-tests" @electric-sql/pglite@0.5.15 drizzle-orm@0.45.1
+          export PGLITE_PACKAGE_ROOT="$RUNNER_TEMP/private-tests/node_modules/@electric-sql/pglite"
+          export NODE_PATH="$RUNNER_TEMP/private-tests/node_modules"
+          export PYTHON="$(command -v python)"
+          node scripts/test-yoon-resume-pglite.mjs
+          node scripts/test-private-migration-stages.mjs
   private-prepare:
+    outputs:
+      complete: ${{ steps.private_prepare.outputs.complete }}
     needs: private-offline-tests
     # Publish on a reviewed, protected ref before dispatch; never execute PR code.
     if: ${{ github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
@@ -355,12 +368,14 @@ jobs:
       - run: ./.github/scripts/ensure-ffmpeg.sh
       - run: python -m pip install -r requirements-private-recognize.txt
       - name: Prepare fixed input
+        id: private_prepare
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
         run: python -m worker.jobs.yoon_once prepare >/dev/null 2>&1
       - uses: actions/upload-artifact@v4
+        if: ${{ steps.private_prepare.outputs.complete != 'true' }}
         with:
-          name: analysis-audio-${{ github.run_id }}
+          name: analysis-audio-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/fixed-analysis/audio/input.mp3
           retention-days: 1
           compression-level: 0
@@ -370,6 +385,7 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/fixed-analysis"
   private-recognize:
     needs: private-prepare
+    if: ${{ needs.private-prepare.outputs.complete != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -401,7 +417,7 @@ jobs:
       - run: python -m pip install -r requirements-private-recognize.txt
       - uses: actions/download-artifact@v4
         with:
-          name: analysis-audio-${{ github.run_id }}
+          name: analysis-audio-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/fixed-analysis/audio
       - name: Recognize fixed input privately
         env:
@@ -410,3 +426,27 @@ jobs:
       # No result/log/checkpoint artifact, cache, summary or publish/finalize callback.
       - if: ${{ always() }}
         run: rm -rf -- "$RUNNER_TEMP/fixed-analysis"
+
+  private-release:
+    # Private-only owner cleanup. Never invokes the normal finalizer or dispatcher.
+    needs: [private-offline-tests, private-prepare, private-recognize]
+    if: ${{ always() && needs.private-offline-tests.result == 'success' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PRIVATE_RUN_ID: ${{ github.event.inputs.set_run_id }}
+      WORKER_DEPLOYMENT_TARGET: development
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-base.txt
+      - name: Release only the private continuation owner
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+        run: python -m worker.jobs.yoon_once release >/dev/null 2>&1

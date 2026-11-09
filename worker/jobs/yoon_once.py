@@ -273,8 +273,29 @@ def main():
     os.chdir(root)
     store = Store(os.environ['PRIVATE_RUN_ID'], os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
     try:
-        if len(sys.argv) != 2 or sys.argv[1] not in ('prepare', 'recognize'):
+        if len(sys.argv) != 2 or sys.argv[1] not in ('prepare', 'recognize', 'release'):
             return 2
+        descriptor = store.read()['source_metadata'].get('yoon_fixed_input') or {}
+        if descriptor.get('recognition_mode') == 'resumable':
+            from worker.jobs.yoon_resume_store import ResumeStore
+            from worker.jobs.yoon_resume import recognize_resumable
+            store = ResumeStore(store.run_id,store.owner['workflow_run_id'],store.owner['run_attempt'])
+            if sys.argv[1] == 'release':
+                try:
+                    store.release('workflow_interrupted')
+                except RuntimeError:
+                    pass
+                return 0
+            if sys.argv[1] == 'prepare':
+                if store.finalize_ready():
+                    with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+                        output.write('complete=true\n')
+                    return 0
+                prepare(store,root)
+                return 0
+            return 0 if asyncio.run(recognize_resumable(store,root/'audio'/'input.mp3'))=='complete' else 1
+        if sys.argv[1] == 'release':
+            return 0
         if sys.argv[1] == 'prepare':
             prepare(store, root)
             return 0

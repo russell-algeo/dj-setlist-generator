@@ -44,5 +44,12 @@ assert.equal(second.at(-1).hash, createHash('sha256').update(readFileSync(`${sea
 await assert.rejects(db.exec("INSERT INTO app.sets(slug,title,normalized_title) VALUES ('unscoped','Unscoped','unscoped')"));
 await migrate(orm, options(seal));
 assert.deepEqual(await migrationRows(), second);
-console.log('PASS: real Drizzle incremental migration bookkeeping from0017, expand-only default, legacy public insert compatibility, separate seal, exact hashes and idempotence on synthetic PostgreSQL.');
+const recognition = preparePrivateMigrationStage(root, 'recognition');
+await migrate(orm, options(recognition));
+const third = await migrationRows();
+assert.equal(third.length, second.length + 1);
+assert.equal(third.at(-1).hash, createHash('sha256').update(readFileSync(`${recognition}/0020_private_recognition_retention.sql`)).digest('hex'));
+await migrate(orm, options(recognition));
+assert.deepEqual(await migrationRows(), third);
+console.log('PASS: real Drizzle incremental bookkeeping, expand-only default, separate seal and recognition retention, exact hashes and idempotence on synthetic PostgreSQL.');
 await db.close();
