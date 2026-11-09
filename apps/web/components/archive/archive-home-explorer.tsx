@@ -581,8 +581,10 @@ const buildTrackCardSourceGroups = (
 };
 
 export function ArchiveHomeExplorer({
+  allowDiscoveryMaxSets = false,
   initial,
 }: {
+  allowDiscoveryMaxSets?: boolean;
   initial: ArchiveHomeBootstrapPayload;
 }) {
   const scope = initial.scope ?? "global";
@@ -1887,7 +1889,7 @@ export function ArchiveHomeExplorer({
 
         <section className="section reveal" id="artists" style={{ position: "relative" }}>
           <div style={{ position: "absolute", top: 18, right: 24, zIndex: 500 }}>
-            <InlineSubmitButton mode="scan-artist" />
+            <InlineSubmitButton allowDiscoveryMaxSets={allowDiscoveryMaxSets} mode="scan-artist" />
           </div>
           <div className="section-inner">
             <div className="section-head">
@@ -2719,7 +2721,7 @@ export function ArchiveHomeExplorer({
 
         <section className="section reveal" id="sets" style={{ position: "relative" }}>
           <div style={{ position: "absolute", top: 18, right: 24, zIndex: 500 }}>
-            <InlineSubmitButton label="+ submit sets" mode="scan-artist" />
+            <InlineSubmitButton allowDiscoveryMaxSets={allowDiscoveryMaxSets} label="+ submit sets" mode="scan-artist" />
           </div>
           <div className="section-inner">
             <div className="section-head">

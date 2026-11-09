@@ -5,6 +5,7 @@ import { ArchiveHomeExplorer } from "@/components/archive/archive-home-explorer"
 import { getArchiveHomeExplorerInitial } from "@/lib/archive/home-explorer-data";
 import { buildArchiveMetadata } from "@/lib/archive/metadata";
 import { getSessionActor } from "@/lib/auth/session";
+import { isDiscoveryMaxSetsEnabled } from "@/lib/jobs/discovery-policy.server";
 
 type HomePageProps = {
   searchParams: Promise<Record<string, string | undefined>>;
@@ -58,5 +59,5 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     viewerUserId: actor?.userId,
   });
 
-  return <ArchiveHomeExplorer initial={payload} />;
+  return <ArchiveHomeExplorer allowDiscoveryMaxSets={isDiscoveryMaxSetsEnabled()} initial={payload} />;
 }

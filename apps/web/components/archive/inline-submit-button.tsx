@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 
@@ -12,6 +12,8 @@ import styles from "./inline-submit-button.module.css";
 type InlineSubmitMode = "scan-artist" | "add-sets";
 
 type InlineSubmitButtonProps = {
+  /** Server-derived Preview-only capability; defaults off. */
+  allowDiscoveryMaxSets?: boolean;
   mode: InlineSubmitMode;
   /** Pre-filled artist name for add-sets mode */
   artistName?: string;
@@ -46,17 +48,20 @@ const TITLE: Record<InlineSubmitMode, string> = {
   "add-sets": "Add sets",
 };
 
-export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButtonProps) {
+export function InlineSubmitButton({ allowDiscoveryMaxSets = false, mode, artistName, label }: InlineSubmitButtonProps) {
   const { data: session } = useSession();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [discoveryName, setDiscoveryName] = useState("");
   const [discoveryAliases, setDiscoveryAliases] = useState<string[]>([]);
+  const [discoveryMaxSets, setDiscoveryMaxSets] = useState("");
   const [curatedName, setCuratedName] = useState("");
   const [urls, setUrls] = useState("");
   const [state, setState] = useState<SubmitState>({ status: "idle" });
   const curatedUrlsRef = useRef<HTMLTextAreaElement | null>(null);
+  const discoveryMaxSetsRef = useRef<HTMLInputElement | null>(null);
+  const discoveryMaxSetsId = useId();
 
   const isAuthenticated = Boolean(session?.user);
 
@@ -72,6 +77,22 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
   };
 
   const isSubmitting = state.status === "submitting";
+  const maximumSets = discoveryMaxSets.trim();
+  const hasValidMaximumSets = !allowDiscoveryMaxSets || maximumSets === "" || (
+    Number.isSafeInteger(Number(maximumSets)) && Number(maximumSets) > 0
+  );
+
+  const handleDiscoverySubmit = async () => {
+    // Native number inputs can report badInput while their value is empty.
+    // Never interpret an unfinished numeric entry as an uncapped submission.
+    if (allowDiscoveryMaxSets && (!discoveryMaxSetsRef.current?.reportValidity() || !hasValidMaximumSets)) return;
+    await handleSubmit({
+      mode: "artist",
+      artistName: discoveryName,
+      artistAliases: discoveryAliases,
+      ...(allowDiscoveryMaxSets && maximumSets ? { maxSetsOverride: maximumSets } : {}),
+    });
+  };
 
   const routeDiscoveryToCurated = (artistName: string) => {
     setCuratedName(artistName);
@@ -127,17 +148,40 @@ export function InlineSubmitButton({ mode, artistName, label }: InlineSubmitButt
                   onChange={setDiscoveryAliases}
                   values={discoveryAliases}
                 />
+                {allowDiscoveryMaxSets ? (
+                  <>
+                    <label className={styles.fieldLabel} htmlFor={discoveryMaxSetsId}>
+                      Maximum sets (optional)
+                    </label>
+                    <input
+                      aria-describedby={`${discoveryMaxSetsId}-hint${hasValidMaximumSets ? "" : ` ${discoveryMaxSetsId}-error`}`}
+                      aria-invalid={!hasValidMaximumSets}
+                      className={styles.input}
+                      id={discoveryMaxSetsId}
+                      min={1}
+                      name="maxSetsOverride"
+                      onChange={(event) => setDiscoveryMaxSets(event.target.value)}
+                      placeholder="Default"
+                      ref={discoveryMaxSetsRef}
+                      step={1}
+                      type="number"
+                      value={discoveryMaxSets}
+                    />
+                    <span className={styles.modeDesc} id={`${discoveryMaxSetsId}-hint`}>
+                      Leave blank to use the default. Limits set count, not duration.
+                    </span>
+                    {!hasValidMaximumSets && (
+                      <span className={styles.error} id={`${discoveryMaxSetsId}-error`} role="alert">
+                        Enter a whole number greater than zero.
+                      </span>
+                    )}
+                  </>
+                ) : null}
                 <div className={styles.btnRow}>
                   <button
                     className={styles.submitBtn}
-                    disabled={!discoveryName.trim() || isSubmitting}
-                    onClick={() =>
-                      handleSubmit({
-                        mode: "artist",
-                        artistName: discoveryName,
-                        artistAliases: discoveryAliases,
-                      })
-                    }
+                    disabled={!discoveryName.trim() || isSubmitting || !hasValidMaximumSets}
+                    onClick={handleDiscoverySubmit}
                     type="button"
                   >
                     {isSubmitting ? "…" : "Start Scan"}

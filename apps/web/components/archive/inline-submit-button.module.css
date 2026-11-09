@@ -138,6 +138,13 @@
   margin-bottom: 6px;
 }
 
+.fieldLabel {
+  display: block;
+  color: var(--dark-text-muted);
+  font-size: 10px;
+  margin: 8px 0 6px;
+}
+
 .input[data-has-value="true"] {
   color: var(--dark-text-strong);
   border-color: rgba(255, 255, 255, 0.18);

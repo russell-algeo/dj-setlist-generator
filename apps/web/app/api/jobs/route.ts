@@ -7,6 +7,7 @@ import { listPublicSubmissionsForActor } from "@/lib/jobs/public.server";
 import { createSubmission, parseSubmissionInput } from "@/lib/jobs/submissions";
 import type { CreateSubmissionInput } from "@/lib/jobs/submissions";
 import { dispatchPendingWork } from "@/lib/jobs/dispatch";
+import { isDiscoveryMaxSetsEnabled } from "@/lib/jobs/discovery-policy.server";
 
 const parseSourceUrls = (value: FormDataEntryValue | FormDataEntryValue[] | undefined) => {
   if (!value) {
@@ -55,6 +56,12 @@ export async function POST(request: Request) {
   }
 
   const body = await readRequestBody(request);
+  if (body.maxSetsOverride !== undefined && !isDiscoveryMaxSetsEnabled()) {
+    return NextResponse.json(
+      { error: "Maximum sets is available only in Preview." },
+      { status: 400 },
+    );
+  }
   let input: CreateSubmissionInput;
 
   try {
