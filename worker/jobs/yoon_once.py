@@ -1,8 +1,6 @@
 """Fixed one-off analysis. Requires deployed private ACL + precreated private run."""
 from __future__ import annotations
 import asyncio
-import concurrent.futures
-import random
 from dataclasses import asdict
 import hashlib
 import json
@@ -15,6 +13,8 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+
+from worker.jobs.yoon_recognition import PrivateRecognitionSession, policy_for
 
 SOURCE_SHA = 'aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae'
 SOURCE_BYTES = 4290463660
@@ -110,7 +110,8 @@ class Store:
         source = validate_descriptor(descriptor)
         if row['status'] != 'private_analysis_pending' or row['source_metadata'].get('yoon_analysis'):
             raise RuntimeError('run_not_fresh')
-        self.write({'status': 'preparing'}, claim=True)
+        policy = policy_for(descriptor.get('recognition_mode', 'probe'))
+        self.write({'status': 'preparing', 'recognition_mode': policy.mode}, claim=True)
         return source
 
     def write(self, data, *, claim=False):
@@ -149,6 +150,7 @@ class Store:
 
 def prepare(store, root):
     source = store.claim()
+    mode = store.require_owner()['recognition_mode']
     master = root / 'source.wav'
     audio = root / 'audio' / 'input.mp3'
     audio.parent.mkdir(parents=True, exist_ok=True)
@@ -165,7 +167,7 @@ def prepare(store, root):
             raise RuntimeError('duration_mismatch')
         with audio.open('rb') as f:
             digest = hashlib.file_digest(f, 'sha256').hexdigest()
-        store.write({'status': 'prepared', 'audio_sha256': digest})
+        store.write({'status': 'prepared', 'audio_sha256': digest, 'recognition_mode': mode})
     except Exception:
         audio.unlink(missing_ok=True)
         store.write({'status': 'failed', 'reason': 'preparation_failed'})
@@ -174,51 +176,10 @@ def prepare(store, root):
         master.unlink(missing_ok=True)
 
 
-class PrivateRecognitionSession:
-    """Keep normal HTTP retries, but stop this one-off run after exhausted quota/errors."""
-    def __init__(self):
-        from track_recognizer import TrackRecognizer
-        from config import Config
-        self.recognizer = TrackRecognizer()
-        self.semaphore = asyncio.Semaphore(Config.CONCURRENT_RECOGNITIONS)
-        self.stopped = False
-
-    async def one(self, segment, on_result):
-        from config import Config
-        async with self.semaphore:
-            if self.stopped:
-                return
-            await self.recognizer._wait_for_cooldown()
-            await asyncio.sleep(random.uniform(0, Config.BASE_DELAY))
-            if self.stopped:
-                return
-            result = await self.recognizer.recognize_segment(segment)
-            # recognize_segment already exhausted the application's configured HTTP
-            # JitterRetry budget. Do not enter its unbounded outer quota retry loop.
-            if result.was_rate_limited or result.error_type:
-                self.stopped = True
-                if result.was_rate_limited:
-                    await self.recognizer._trigger_quota_cooldown()
-            try:
-                on_result(result)  # Persist good peers before waiting for the whole range.
-            except Exception:
-                self.stopped = True
-                raise
-
-
 async def recognize_private_range(context, *, start_index, end_index, session, on_result):
-    from audio_segmenter import AudioSegmenter
-    segmenter = AudioSegmenter(checkpoint_manager=context.checkpoint_manager)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(end_index-start_index+1,4)) as pool:
-        segments = await segmenter.create_segments_batch(context.audio_file,start_index,end_index+1,pool)
-    try:
-        # Cancel active peers promptly on storage/unexpected failure; no orphaned requests.
-        async with asyncio.TaskGroup() as tasks:
-            for segment in segments:
-                tasks.create_task(session.one(segment,on_result))
-    finally:
-        for segment in segments:
-            segment['file'].unlink(missing_ok=True)
+    from worker.pipeline.recognize import recognize_segment_range
+    return await recognize_segment_range(context, start_index=start_index,
+            end_index=end_index, on_result=on_result, recognizer=session)
 
 
 async def recognize(store, audio):
@@ -238,31 +199,35 @@ async def recognize(store, audio):
     if AudioSegmenter(checkpoint_manager=cp).calculate_total_segments(END - START) != WINDOWS:
         raise RuntimeError('geometry_mismatch')
     rows, status, reason = [], 'partial', None
-    session = PrivateRecognitionSession()
+    policy = policy_for(previous.get('recognition_mode', 'probe'))
+    session = PrivateRecognitionSession(policy, before_request=store.require_owner)
     def snapshot(state):
         return {'status': state, 'audio_sha256': previous['audio_sha256'],
+                'recognition_mode': policy.mode, 'recognition_diagnostics': session.diagnostics(),
                 'expected_windows': WINDOWS, 'raw_recognitions': [asdict(r) for r in rows],
                 'valid_responses': sum(not r.error_type and not r.was_rate_limited for r in rows)}
-    last_checkpoint_count = 0
     def persist(result):
-        nonlocal last_checkpoint_count
+        # One latest result per window; all attempts remain in sanitized diagnostics.
+        rows[:] = [row for row in rows if row.segment_index != result.segment_index]
         rows.append(result)
         rows.sort(key=lambda r: r.segment_index)
-        # Fixed pilot: at most48 checkpoints instead of479 full JSON snapshots.
-        # Handled stops force a final flush below; hard kills can lose this buffer.
-        if len(rows) - last_checkpoint_count >= 10:
-            store.write(snapshot('recognizing'))
-            last_checkpoint_count = len(rows)
+        store.write(snapshot('recognizing'))
     async def batches():
-        for first in range(0, WINDOWS, 10):
+        for first in range(0, min(WINDOWS, policy.window_limit), 10):
             store.require_owner()
             await recognize_private_range(context, start_index=first,
-                    end_index=min(first + 9, WINDOWS - 1), session=session, on_result=persist)
+                    end_index=min(first + 9, WINDOWS - 1, policy.window_limit - 1),
+                    session=session, on_result=persist)
             if session.stopped or any(r.error_type or r.was_rate_limited for r in rows):
-                return 'partial', 'provider_error'
-        return ('complete', None) if len(rows) == WINDOWS else ('partial', 'missing_responses')
+                return 'partial', session.reason or 'provider_error'
+        if policy.mode == 'probe':
+            return 'partial', 'probe_complete'
+        complete = (len(rows) == WINDOWS
+                    and {r.segment_index for r in rows} == set(range(WINDOWS))
+                    and all(not r.error_type and not r.was_rate_limited for r in rows))
+        return ('complete', None) if complete else ('partial', 'missing_responses')
     try:
-        status, reason = await asyncio.wait_for(batches(), BUDGET)
+        status, reason = await asyncio.wait_for(batches(), min(BUDGET, policy.seconds_limit))
     except asyncio.TimeoutError:
         reason = 'time_budget'
     except asyncio.CancelledError:
@@ -271,15 +236,24 @@ async def recognize(store, audio):
         raise
     except Exception:
         reason = 'worker_or_storage_error'
-        status = 'failed'
+        status = 'partial'
         raise
     finally:
+        # Closing the client or clustering must not bypass the final partial flush.
+        try:
+            await session.close()
+        except Exception:
+            status, reason = 'partial', 'transport_close_error'
         payload = snapshot(status)
         if reason:
             payload['reason'] = reason
         if status == 'complete':
-            tracks, _ = build_tracks_from_recognitions(rows)
-            payload['clustered_setlist'] = [asdict(t) for t in tracks]
+            try:
+                tracks, _ = build_tracks_from_recognitions(rows)
+                payload['clustered_setlist'] = [asdict(t) for t in tracks]
+            except Exception:
+                status = 'partial'
+                payload.update(status='partial', reason='aggregation_error')
         store.write(payload)
     return status
 

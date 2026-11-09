@@ -1,0 +1,6 @@
+# Private fixed pilot only. Ordinary recognition dependencies are unchanged.
+-r requirements-recognize.txt
+shazamio==0.9.0
+shazamio-core==2.0.0
+aiohttp==3.14.5
+aiohttp-retry==2.9.1

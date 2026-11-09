@@ -122,11 +122,14 @@ async def recognize_segment_range(
     start_index: int,
     end_index: int,
     on_result: Callable[[Recognition], None] | None = None,
+    recognizer=None,
 ) -> list[Recognition]:
-    from track_recognizer import TrackRecognizer
-
+    # Internal dependency injection only. Existing callers retain the exact
+    # TrackRecognizer construction, batch arguments and normal retry behavior.
     segmenter = AudioSegmenter(checkpoint_manager=context.checkpoint_manager)
-    recognizer = TrackRecognizer()
+    if recognizer is None:
+        from track_recognizer import TrackRecognizer
+        recognizer = TrackRecognizer()
     max_workers = max(1, min(end_index - start_index + 1, 4))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:

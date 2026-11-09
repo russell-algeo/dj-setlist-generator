@@ -55,7 +55,7 @@ class Tests(unittest.TestCase):
         store = job.Store(RUN, '1234', '1')
         row = {'status':'private_analysis_pending','source_metadata':{'yoon_fixed_input':descriptor()}}
         with patch.object(store,'read',return_value=row), patch.object(store,'write') as write:
-            store.claim(); write.assert_called_once_with({'status':'preparing'},claim=True)
+            store.claim(); write.assert_called_once_with({'status':'preparing', 'recognition_mode':'probe'},claim=True)
         row['source_metadata']['yoon_analysis'] = {'workflow_run_id':'old'}
         with patch.object(store,'read',return_value=row), patch.object(store,'write') as write:
             with self.assertRaises(RuntimeError): store.claim()
@@ -87,6 +87,7 @@ class Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp); audio=root/'input.mp3'; audio.write_bytes(b'synthetic')
             store=FakeStore(hashlib.sha256(b'synthetic').hexdigest()); calls=[]
+            store.saved['recognition_mode'] = 'full'
             async def fake(context,*,start_index,end_index,session,on_result):
                 calls.append((start_index,end_index))
                 if mode in ('timeout','cancel'):
@@ -112,7 +113,7 @@ class Tests(unittest.TestCase):
                 self.assertEqual(len(store.writes[-1]['raw_recognitions']),12)
                 self.assertEqual([r['segment_index'] for r in store.writes[-1]['raw_recognitions']],list(range(12)))
                 self.assertIn('clustered_setlist',store.writes[-1])
-                self.assertEqual(len(store.writes),2)  # One ten-response checkpoint + final flush.
+                self.assertEqual(len(store.writes),13)  # Each response + final flush.
             else:
                 self.assertEqual(status,'partial'); self.assertNotIn('clustered_setlist',store.writes[-1])
                 if mode in ('timeout','cancel'):
@@ -122,48 +123,6 @@ class Tests(unittest.TestCase):
     def test_error_stays_partial(self): self.synthetic('error')
     def test_timeout_stays_partial(self): self.synthetic('timeout')
     def test_cancellation_flushes_completed_responses(self): self.synthetic('cancel')
-
-    def test_exhausted_429_stops_queued_windows_and_preserves_peer(self):
-        from unittest.mock import AsyncMock
-        from types import SimpleNamespace
-        async def exercise():
-            gate=asyncio.Event(); recorded=[]; calls=[]
-            async def fake(segment):
-                calls.append(segment['index'])
-                if segment['index']==0:
-                    await gate.wait()
-                    return Recognition(0,None,None,None,None,False,0,was_rate_limited=True,error_type='RateLimit')
-                gate.set()
-                return Recognition(15,'known','artist','id',{},True,segment['index'])
-            with patch.object(Config,'BASE_DELAY',0):
-                session=job.PrivateRecognitionSession()
-                session.recognizer=SimpleNamespace(recognize_segment=fake,_wait_for_cooldown=AsyncMock(),_trigger_quota_cooldown=AsyncMock())
-                async with asyncio.TaskGroup() as group:
-                    for i in range(10): group.create_task(session.one({'index':i},recorded.append))
-                self.assertTrue(session.stopped)
-                self.assertLess(len(calls),10)
-                self.assertIn(1,[r.segment_index for r in recorded])
-                self.assertTrue(any(r.was_rate_limited for r in recorded))
-                session.recognizer._trigger_quota_cooldown.assert_awaited_once()
-        asyncio.run(exercise())
-
-    def test_timeout_keeps_successful_peer_before_batch_finishes(self):
-        from unittest.mock import AsyncMock
-        from types import SimpleNamespace
-        async def exercise():
-            recorded=[]
-            async def fake(segment):
-                if segment['index']==0: await asyncio.sleep(10)
-                return Recognition(15,'known','artist','id',{},True,1)
-            with patch.object(Config,'BASE_DELAY',0):
-                session=job.PrivateRecognitionSession()
-                session.recognizer=SimpleNamespace(recognize_segment=fake,_wait_for_cooldown=AsyncMock())
-                async def batch():
-                    async with asyncio.TaskGroup() as group:
-                        for i in range(2): group.create_task(session.one({'index':i},recorded.append))
-                with self.assertRaises(asyncio.TimeoutError): await asyncio.wait_for(batch(),.01)
-                self.assertEqual([r.segment_index for r in recorded],[1])
-        asyncio.run(exercise())
 
     def test_process_output_suppression(self):
         root=Path(__file__).resolve().parents[1]
