@@ -30,7 +30,7 @@ describe("public projection boundaries", () => {
     expect(sql).toContain("visibility = 'public' AND mode = 'artist'");
     expect(sql).toContain("publication_visibility = 'public' AND status = 'queued'");
     expect(sql).toContain("r.publication_visibility = 'public'");
-    expect(read("lib/jobs/dispatch.ts").match(/eq\(setRuns.publicationVisibility, "public"\)/g)?.length).toBeGreaterThanOrEqual(3);
+    expect((read("lib/jobs/dispatch.ts") + read("lib/jobs/recovery-eligibility.ts")).match(/eq\(setRuns.publicationVisibility, "public"\)/g)?.length).toBeGreaterThanOrEqual(3);
   });
   it("invalidates prior shared data cache keys and protects authenticated route responses", () => {
     expect(read("lib/db/cache-namespace.server.ts")).toContain("public-acl-v1");

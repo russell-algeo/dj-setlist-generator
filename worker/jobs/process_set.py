@@ -377,7 +377,12 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
         message=f"Bootstrapping {run_row['source_url']}",
     )
 
+    from worker.jobs.shared_recognition import RecognitionStore, RecognitionPause
+    durable_store = None
+    durable_state = None
     try:
+        durable_store = RecognitionStore(set_run_id)
+        durable_state = durable_store.begin()
         context = prepare_set_context(
             str(run_row["source_url"]),
             artist_name=str(run_row["artist_name"]) if run_row.get("artist_name") else None,
@@ -391,6 +396,13 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
             lease_size=scheduler_plan.lease_size,
         )
         metadata_patch["scheduler_plan"] = scheduler_plan.as_metadata()
+        if durable_state is not None:
+            # One serial provider worker; ordinary lease storage/dispatcher remain
+            # in use. The database gate also coordinates separate ordinary runs.
+            metadata_patch.update(recognition_slot_count=1, lease_size=1)
+            metadata_patch["scheduler_plan"].update(slot_count=1, lease_size=1,
+                lease_count=context.total_segments, segments_per_slot=context.total_segments,
+                leases_per_slot=context.total_segments, mode="durable_shared")
         update_set_run_metadata(
             set_run_id,
             metadata_patch,
@@ -399,12 +411,15 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
             source_platform=_detect_source_platform(str(context.source_url)),
         )
 
-        lease_count = initialize_set_run_leases(
-            set_run_id,
-            total_segments=context.total_segments,
-            slot_count=scheduler_plan.slot_count,
-            lease_size=scheduler_plan.lease_size,
-        )
+        if durable_state is not None:
+            lease_count = durable_store.prepared(context)
+        else:
+            lease_count = initialize_set_run_leases(
+                set_run_id,
+                total_segments=context.total_segments,
+                slot_count=scheduler_plan.slot_count,
+                lease_size=scheduler_plan.lease_size,
+            )
 
         _record_stage_change(
             run_row,
@@ -415,8 +430,8 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
             details={
                 "segment_count": context.total_segments,
                 "lease_count": lease_count,
-                "slot_count": scheduler_plan.slot_count,
-                "lease_size": scheduler_plan.lease_size,
+                "slot_count": 1 if durable_state is not None else scheduler_plan.slot_count,
+                "lease_size": 1 if durable_state is not None else scheduler_plan.lease_size,
                 "audio_file": str(context.audio_file),
             },
         )
@@ -424,15 +439,22 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
         return {
             "segment_count": context.total_segments,
             "lease_count": lease_count,
-            "slot_count": scheduler_plan.slot_count,
-            "lease_size": scheduler_plan.lease_size,
+            "slot_count": 1 if durable_state is not None else scheduler_plan.slot_count,
+            "lease_size": 1 if durable_state is not None else scheduler_plan.lease_size,
             "audio_file": context.audio_file,
         }
     except RunCancelledError:
         raise
-    except Exception as error:
+    except RecognitionPause:
+        # Durable reason/cooldown survives; the existing finalizer requeues only
+        # when due and budgets permit, without erasing completed evidence.
+        raise
+    except Exception:
         _assert_run_active(set_run_id)
-        _mark_failed(run_row, error, stage="bootstrap_failed")
+        if durable_state is not None:
+            durable_store.pause('preparation_failed')
+        else:
+            _mark_failed(run_row, 'bootstrap_failed', stage="bootstrap_failed")
         raise
 
 
@@ -447,6 +469,18 @@ async def _recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int
         artist_name=str(run_row["artist_name"]) if run_row.get("artist_name") else None,
         source_metadata=source_metadata,
     )
+
+    if (source_metadata.get("shared_recognition") or {}).get("version") == 1:
+        from worker.jobs.shared_recognition import RecognitionStore, recognize_continuation
+        if slot_index != 0:
+            return {"lease_count": 0, "recognized_count": 0}
+        result = {}
+        async def run_continuation():
+            nonlocal result
+            result = await recognize_continuation(RecognitionStore(set_run_id), context,
+                                                   check_active=lambda: _assert_run_active(set_run_id))
+        await _recognize_with_cancellation(set_run_id, run_continuation())
+        return result
 
     worker_name = (
         f"{socket.gethostname()}-slot-{slot_index}-"
@@ -486,6 +520,8 @@ async def _recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int
             def persist_result(result) -> None:
                 nonlocal recognized
                 _assert_run_active(set_run_id)
+                if result.error_type or result.was_rate_limited or not isinstance(result.raw_data, dict):
+                    raise RuntimeError("recognition_provider_error")
                 if result.recognized:
                     recognized += 1
                 try:
@@ -663,7 +699,12 @@ async def _publish_phase(set_run_id: str) -> str | None:
 
     total_segments = int(source_metadata.get("segment_count") or 0)
     segment_hits = list_segment_hits(set_run_id)
-    if total_segments > 0 and len(segment_hits) != total_segments:
+    from worker.jobs.shared_recognition import valid_coverage
+    shared_state = source_metadata.get("shared_recognition") or {}
+    geometry = shared_state.get("geometry") or {}
+    step = geometry.get("segment_duration", 0) - geometry.get("segment_overlap", 0)
+    if not valid_coverage(segment_hits, total_segments,
+                          versioned=shared_state.get("version") == 1, step=step if geometry else None):
         insert_worker_event(
             submission_id=str(run_row["submission_id"]),
             set_run_id=set_run_id,
@@ -853,6 +894,10 @@ def finalize_phase(
         _finish_cancelled(set_run_id)
         return
     terminal_status = str(run_row["status"])
+    if (run_row.get("source_metadata", {}).get("shared_recognition") or {}).get("version") == 1:
+        # Workflow finalization is the app's existing fenced callback. A local
+        # finalize invocation must not convert a clean cooldown to terminal failure.
+        return
 
     if terminal_status not in {"completed", "failed", "cancelled"}:
         job_results = {
@@ -932,4 +977,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # Driver/provider exceptions can contain SQL values or URLs. Durable
+        # state and allowlisted worker events carry the actionable reason.
+        raise SystemExit("Worker phase failed; inspect run status") from None

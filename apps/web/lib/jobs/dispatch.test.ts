@@ -215,11 +215,50 @@ describe("set workflow finalization during rollout", () => {
   const prepare = (overrides: Record<string, unknown> = {}, recognitionComplete = false) => {
     mockedDb.select
       .mockReturnValueOnce(selectLimit([{ id: "run-1", submissionId: "sub-1", status: "recognizing",
-        attemptCount: 0, cancelRequestedAt: null, sourceMetadata: { active_workflow_run_id: "new-workflow" }, ...overrides }]))
+        attemptCount: 0, cancelRequestedAt: null, sourceMetadata: { active_workflow_run_id: "new-workflow", segment_count: recognitionComplete ? 1 : 0 }, ...overrides }]))
       .mockReturnValueOnce(selectWhere([{ totalCount: 1, claimedCount: recognitionComplete ? 0 : 1, completedCount: recognitionComplete ? 1 : 0 }]))
-      .mockReturnValueOnce(selectWhere([{ hitCount: 0 }]));
+      .mockReturnValueOnce(selectWhere([{ hitCount: recognitionComplete ? 1 : 0, rowCount: recognitionComplete ? 1 : 0 }]));
   };
   const payload = { setRunId: "run-1", workflowRunId: "new-workflow", bootstrapResult: "success", recognizeResult: "cancelled", publishResult: "skipped" };
+  const sharedMetadata = (patch: Record<string, unknown> = {}) => ({ active_workflow_run_id: "new-workflow", segment_count: 2,
+    shared_recognition: { version: 1, created_at: Date.now()/1000, deadline: Date.now()/1000 + 86400,
+      continuations: 12, requests: 5, request_limit: 16, geometry: { segment_count: 2 }, paused: true, review_required: false, in_flight: false, next_allowed_at: Date.now()/1000 + 3600, ...patch } });
+  it("queues a clean durable pause without deleting evidence or consuming legacy retry limits", async () => {
+    prepare({ attemptCount: 9, sourceMetadata: sharedMetadata() });
+    mockedDb.execute.mockResolvedValueOnce({ rows: [{ id: "run-1" }] });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_continuation_queued");
+    const query = new PgDialect().sqlToQuery(mockedDb.execute.mock.calls[0][0]);
+    expect(query.sql).toContain("reset_shared_leases");
+    expect(query.sql).toContain("requeued.shared_version is null");
+    expect(dispatchProcessSetWorkflow).not.toHaveBeenCalled();
+  });
+  it.each([{ review_required: true }, { in_flight: true }, { paused: false }])("never retries uncertain durable state %j", async (patch) => {
+    prepare({ sourceMetadata: sharedMetadata(patch) });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_requires_reconciliation");
+    expect(mockedDb.execute).not.toHaveBeenCalled();
+    expect(mockedDb.update).not.toHaveBeenCalled();
+  });
+  it("allows bounded preparation retry before segment geometry exists", async () => {
+    prepare({ sourceMetadata: { ...sharedMetadata({ requests: 0, request_limit: 8192, geometry: undefined }), segment_count: undefined } });
+    mockedDb.execute.mockResolvedValueOnce({ rows: [{ id: "run-1" }] });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_continuation_queued");
+  });
+  it.each([null, {}, { version: 2 }, "bad"])("reconciles malformed shared state %j without legacy recovery", async (value) => {
+    prepare({ sourceMetadata: { active_workflow_run_id: "new-workflow", shared_recognition: value } });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_requires_reconciliation");
+    expect(mockedDb.execute).not.toHaveBeenCalled();
+    expect(mockedDb.update).not.toHaveBeenCalled();
+  });
+  it("stops bounded durable recognition at total request cap", async () => {
+    prepare({ sourceMetadata: sharedMetadata({ requests: 16 }) });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_budget_exhausted");
+    expect(dispatchProcessSetWorkflow).not.toHaveBeenCalled();
+  });
   it("ignores an older workflow callback without requeue or mutation", async () => {
     prepare();
     const { finalizeSetRunWorkflow } = await import("./dispatch");

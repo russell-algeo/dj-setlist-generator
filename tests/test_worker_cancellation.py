@@ -85,7 +85,7 @@ class CancellationTests(unittest.IsolatedAsyncioTestCase):
         self.mocks['get_lease_rollup'].return_value = {
             'total_count': 1, 'pending_count': 0, 'claimed_count': 0,
             'failed_count': 0, 'completed_count': 1}
-        self.mocks['list_segment_hits'].return_value = [{}]
+        self.mocks['list_segment_hits'].return_value = [{'segment_index': 0, 'raw_data': {'matches': []}}]
         def enrich(*args, **kwargs):
             self.row['cancel_requested_at'] = 'now'
             return [], {'title': 'Test'}

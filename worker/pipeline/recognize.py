@@ -127,25 +127,33 @@ async def recognize_segment_range(
     # Internal dependency injection only. Existing callers retain the exact
     # TrackRecognizer construction, batch arguments and normal retry behavior.
     segmenter = AudioSegmenter(checkpoint_manager=context.checkpoint_manager)
-    if recognizer is None:
+    owns_recognizer = recognizer is None
+    if owns_recognizer:
         from track_recognizer import TrackRecognizer
         recognizer = TrackRecognizer()
     max_workers = max(1, min(end_index - start_index + 1, 4))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        segments = await segmenter.create_segments_batch(
-            context.audio_file,
-            start_index,
-            end_index + 1,
-            executor,
-        )
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            segments = await segmenter.create_segments_batch(
+                context.audio_file,
+                start_index,
+                end_index + 1,
+                executor,
+            )
 
-    return await recognizer.recognize_batch(
-        segments,
-        total_segments=context.total_segments,
-        batch_start=start_index,
-        on_result=on_result,
-    )
+        return await recognizer.recognize_batch(
+            segments,
+            total_segments=context.total_segments,
+            batch_start=start_index,
+            on_result=on_result,
+        )
+    finally:
+        # Injected private/durable sessions are owned by their outer runner.
+        close = getattr(recognizer, 'close', None)
+        if owns_recognizer and close is not None:
+            await close()
+
 
 
 __all__ = [

@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { dispatchDiscoverArtistWorkflow, dispatchProcessSetWorkflow } from "@/lib/github/workflows";
 import { getDb } from "@/lib/db/client";
@@ -14,8 +14,11 @@ import {
 } from "@/lib/jobs/internal";
 import { isActiveSubmissionStatus, isTerminalSetRunStatus } from "@/lib/jobs/status";
 import { syncSubmissionStatusFromRuns } from "@/lib/jobs/submissions";
-import { hasUncommittedPublication, matchesDispatchGeneration, matchesWorkflowOwner, prepareDispatchMetadata, publicationCommittedStage, retireWorkflowOwner } from "@/lib/jobs/publication";
+import { hasUncommittedPublication, matchesWorkflowOwner, prepareDispatchMetadata, publicationCommittedStage, retireWorkflowOwner } from "@/lib/jobs/publication";
+import { recoveryEligibility } from "./recovery-eligibility";
 import { buildRequeueWithCleanupQuery } from "@/lib/jobs/requeue";
+
+import { sharedRecognition, sharedRecognitionExhausted, sharedRecognitionNeedsReview, validRecognitionHit } from "./shared-recognition";
 
 const db = getDb();
 
@@ -30,6 +33,12 @@ const getSetRunRecoveryState = async (setRunId: string) => {
     return null;
   }
 
+  const sourceMetadata = (run.sourceMetadata ?? {}) as Record<string, unknown>;
+  const shared = sharedRecognition(sourceMetadata);
+  const segmentCount = Number(sourceMetadata.segment_count ?? 0);
+  const geometry = shared?.geometry as Record<string, unknown> | undefined;
+  const segmentStep = typeof geometry?.segment_duration === "number" && typeof geometry?.segment_overlap === "number"
+    ? geometry.segment_duration - geometry.segment_overlap : undefined;
   const [[leaseRollup], [segmentHitRollup]] = await Promise.all([
     db
       .select({
@@ -43,15 +52,15 @@ const getSetRunRecoveryState = async (setRunId: string) => {
       .where(eq(setRunLeases.setRunId, setRunId)),
     db
       .select({
-        hitCount: sql<number>`count(*)`,
+        rowCount: sql<number>`count(*)`,
+        hitCount: sql<number>`count(*) filter (where ${validRecognitionHit(Boolean(shared), segmentCount, segmentStep)})`,
+        inFlightCount: sql<number>`count(*) filter (where ${segmentHits.rawData}->'shared_recognition'->>'in_flight' = 'true')`,
         recognizedCount: sql<number>`count(*) filter (where ${segmentHits.recognized} = true)`,
       })
       .from(segmentHits)
       .where(eq(segmentHits.setRunId, setRunId)),
   ]);
 
-  const sourceMetadata = (run.sourceMetadata ?? {}) as Record<string, unknown>;
-  const segmentCount = Number(sourceMetadata.segment_count ?? 0);
   const totalLeases = Number(leaseRollup?.totalCount ?? 0);
   const pendingLeases = Number(leaseRollup?.pendingCount ?? 0);
   const claimedLeases = Number(leaseRollup?.claimedCount ?? 0);
@@ -62,7 +71,8 @@ const getSetRunRecoveryState = async (setRunId: string) => {
     pendingLeases === 0 &&
     claimedLeases === 0 &&
     failedLeases === 0 &&
-    (segmentCount <= 0 || hitCount >= segmentCount);
+    segmentCount > 0 && Number(segmentHitRollup?.rowCount ?? 0) === segmentCount &&
+    hitCount === segmentCount && Number(segmentHitRollup?.inFlightCount ?? 0) === 0;
 
   return {
     run,
@@ -76,22 +86,9 @@ const getSetRunRecoveryState = async (setRunId: string) => {
       failedCount: failedLeases,
     },
     recognitionComplete,
+    inFlightCount: Number(segmentHitRollup?.inFlightCount ?? 0),
   };
 };
-
-// Finalizer reads are snapshots. Recheck cancellation, publication and workflow
-// ownership in every recovery mutation so a late callback cannot revive a run.
-const recoveryEligibility = (run: typeof setRuns.$inferSelect) => and(
-  eq(setRuns.publicationVisibility, "public"),
-  eq(setRuns.id, run.id),
-  eq(setRuns.status, run.status),
-  eq(setRuns.attemptCount, run.attemptCount),
-  run.stage ? eq(setRuns.stage, run.stage) : isNull(setRuns.stage),
-  isNull(setRuns.cancelRequestedAt),
-  hasUncommittedPublication(),
-  matchesWorkflowOwner((run.sourceMetadata as Record<string, unknown> | null)?.active_workflow_run_id as string | undefined),
-  matchesDispatchGeneration((run.sourceMetadata as Record<string, unknown> | null)?.dispatch_generation as string | undefined),
-);
 
 const requeueSetRunForFullRecovery = async (
   run: typeof setRuns.$inferSelect,
@@ -103,7 +100,7 @@ const requeueSetRunForFullRecovery = async (
   const requeued = await db.execute(buildRequeueWithCleanupQuery({
     predicate: recoveryEligibility(run),
     stage: "queued",
-    incrementAttempt: true,
+    incrementAttempt: !sharedRecognition((run.sourceMetadata ?? {}) as Record<string, unknown>),
   }));
   if (requeued.rows.length === 0) return false;
 
@@ -274,6 +271,9 @@ export const dispatchQueuedArtistSubmission = async () => {
 
 const dispatchOneSetRun = async (queuedRun: typeof setRuns.$inferSelect) => {
   const generation = randomUUID();
+  // Admission already claimed this row. Global provider state may change after
+  // that transaction commits; rechecking it here would strand a dispatched run.
+  // Per-run snapshot/owner/cancellation CAS remains, and reservation gates HTTP.
   const [claimed] = await db.update(setRuns).set({
     sourceMetadata: prepareDispatchMetadata(generation),
     updatedAt: new Date(),
@@ -522,6 +522,14 @@ export const finalizeSetRunWorkflow = async (values: {
     };
   }
 
+  const shared = sharedRecognition(sourceMetadata);
+  if (Object.prototype.hasOwnProperty.call(sourceMetadata, "shared_recognition") && !shared) {
+    return { action: "recognition_requires_reconciliation" as const };
+  }
+  if (shared && sharedRecognitionNeedsReview(shared, state.inFlightCount)) {
+    return { action: "recognition_requires_reconciliation" as const };
+  }
+
   if (recognitionComplete) {
     if (run.attemptCount >= automaticRecoveryAttemptLimit) {
       const failed = await markSetRunFailed(
@@ -542,6 +550,22 @@ export const finalizeSetRunWorkflow = async (values: {
       "Recognition data is complete; dispatching publish-only recovery",
       details,
     );
+  }
+
+  if (shared) {
+    if (sharedRecognitionExhausted(shared, segmentCount)) {
+      const failed = await markSetRunFailed(run, "Durable recognition budget or deadline exhausted", details);
+      if (failed) await syncSubmissionStatusFromRuns(run.submissionId);
+      return { action: failed ? "recognition_budget_exhausted" as const : "recovery_skipped" as const };
+    }
+    // Only a clean, explicit pause is an automatic continuation. Crashed or
+    // malformed state remains available for reconciliation without data loss.
+    if (shared.paused !== true || typeof shared.next_allowed_at !== "number") {
+      return { action: "recognition_requires_reconciliation" as const };
+    }
+    const requeued = await requeueSetRunForFullRecovery(run, "Durable recognition paused; preserving completed windows for continuation", details);
+    if (!requeued) return { action: "recovery_skipped" as const };
+    return { action: "recognition_continuation_queued" as const, dispatch: await dispatchPendingWork() };
   }
 
   if (run.attemptCount >= automaticRecoveryAttemptLimit) {
