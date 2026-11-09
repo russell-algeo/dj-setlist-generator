@@ -142,7 +142,7 @@ class CallbackTests(unittest.TestCase):
 class WorkflowPreviewOriginTests(unittest.TestCase):
     def test_every_worker_workflow_uses_the_same_exact_neutral_origin(self):
         workflows = Path(__file__).resolve().parents[1] / '.github' / 'workflows'
-        expected_counts = {'process-set.yml': 5, 'discover-artist.yml': 1, 'scheduler.yml': 1}
+        expected_counts = {'process-set.yml': 4, 'discover-artist.yml': 1, 'scheduler.yml': 1}
         for filename, count in expected_counts.items():
             with self.subTest(workflow=filename):
                 source = (workflows / filename).read_text()

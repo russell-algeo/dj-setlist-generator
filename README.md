@@ -31,6 +31,8 @@ Use the permanent `preview` branch for development. The repository's main/Produc
 
 **Preview configuration:** the worker ref is `preview`, and the neutral automatic branch alias is the canonical Preview origin. Preview app/auth URLs, the development worker URL and exact workflow origin guards use that same origin. Do not manually reassign the old `listened-preview` alias for routine iterations. The old `listened-preview` Google and Spotify OAuth callbacks were removed at the owner’s request after the neutral migration. The old deployment remains available, but sign-in there is intentionally unsupported; use the neutral Preview site. See the [deployment runbook](DEPLOYMENT.md#permanent-preview-branch-migration) for dated verification, remaining test limits and future cutover checks. This workflow does not rename or replace Production.
 
+**Preview validation controls:** Artist Discovery has an optional “Maximum sets” field on Preview only. It limits the number of canonical sets, not their duration; blank keeps the existing default and playlist creation stays off. The source keeps the control hidden and rejects this override in Production mode, including after a future merge. The current Production deployment remains unchanged until a reviewed release. The temporary Spotify token diagnostic used for validation was removed after its recorded check. See the [dated release checks](DEPLOYMENT.md#remaining-release-checks-2026-11-09-utc) for results and the YouTube download limitation.
+
 ## Installation
 
 ### 1. Install Python dependencies
