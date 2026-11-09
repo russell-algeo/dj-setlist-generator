@@ -10,7 +10,6 @@ import {
 } from "@/lib/archive/spotify-export";
 import type {
   SpotifyExportConfidenceFilter,
-  SpotifyExportRequest,
   SpotifyExportResponse,
 } from "@/lib/archive/types";
 
@@ -19,11 +18,10 @@ import styles from "./spotify-export-button.module.css";
 
 type SpotifyExportButtonProps = {
   counts: SpotifyExportCounts;
-  entityType: "artist" | "set";
   label?: string;
   scope?: "global" | "mine";
   slug: string;
-};
+} & ({ entityType: "artist" | "set"; endpoint?: never } | { entityType: "set" | "festival"; endpoint: "/api/yoon-fest/spotify/export" });
 
 const joinClasses = (...values: Array<string | false | null | undefined>) =>
   values.filter(Boolean).join(" ");
@@ -39,11 +37,13 @@ const formatFilterLabel = (filter: SpotifyExportConfidenceFilter, count: number)
 export function SpotifyExportButton({
   counts,
   entityType,
+  endpoint,
   label = "Export to Spotify",
   scope,
   slug,
 }: SpotifyExportButtonProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const exportInFlightRef = useRef(false);
   const { isAuthenticated, isLoading, spotifyConfigured, spotifyConnected } = useSpotifyExportStatus();
   const [open, setOpen] = useState(false);
   const [selectedFilter, setSelectedFilter] =
@@ -115,18 +115,20 @@ export function SpotifyExportButton({
   const selectedCount = counts[selectedFilter];
 
   const handleExport = async () => {
+    if (exportInFlightRef.current) return;
+    exportInFlightRef.current = true;
     setSubmitting(true);
     setError(null);
 
     try {
-      const payload: SpotifyExportRequest = {
+      const payload = {
         confidenceFilter: selectedFilter,
         entityType,
         slug,
         scope,
       };
 
-      const response = await fetch("/api/archive/spotify/export", {
+      const response = await fetch(endpoint ?? "/api/archive/spotify/export", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -156,6 +158,7 @@ export function SpotifyExportButton({
     } catch (requestError) {
       setError((requestError as Error).message);
     } finally {
+      exportInFlightRef.current = false;
       setSubmitting(false);
     }
   };

@@ -4,6 +4,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
+import { manageableSubmissionPredicate, readableSubmissionPredicate } from "@/lib/archive/access-policy";
 import { authOptions } from "@/lib/auth/options";
 import { verifyApiToken } from "@/lib/security/api-tokens";
 import { apiTokens, spotifyConnections, submissions, userProfiles } from "@/lib/db/schema";
@@ -165,16 +166,19 @@ export const assertInternalRequest = (request: Request) => {
 };
 
 export const canAccessSubmission = async (actor: SessionActor, submissionId: string) => {
-  if (actor.isAdmin) {
-    return true;
-  }
-
   const [row] = await db
     .select({ id: submissions.id })
     .from(submissions)
-    .where(and(eq(submissions.id, submissionId), eq(submissions.requestedBy, actor.userId)))
+    .where(and(eq(submissions.id, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin)))
     .limit(1);
 
+  return Boolean(row);
+};
+
+export const canManageSubmission = async (actor: SessionActor, submissionId: string) => {
+  const [row] = await db.select({ id: submissions.id }).from(submissions)
+    .where(and(eq(submissions.id, submissionId), manageableSubmissionPredicate(actor.userId, actor.isAdmin)))
+    .limit(1);
   return Boolean(row);
 };
 

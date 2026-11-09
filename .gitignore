@@ -74,3 +74,6 @@ skills-lock.json
 docs/
 .vercel
 tmp/
+
+# Credential-free staged migration copies (generated locally).
+.private-migration-stages/

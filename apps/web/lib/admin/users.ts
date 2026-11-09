@@ -2,6 +2,7 @@ import "server-only";
 
 import { asc, desc, eq } from "drizzle-orm";
 
+import { readableSubmissionPredicate } from "@/lib/archive/access-policy";
 import { getDb } from "@/lib/db/client";
 import { submissions, userProfiles } from "@/lib/db/schema";
 import type { SessionActor } from "@/lib/auth/session";
@@ -62,7 +63,7 @@ export const resolveViewAsActor = async (
   };
 };
 
-export const listAllSubmissionsWithUser = async (): Promise<SubmissionWithUserRow[]> => {
+export const listAllSubmissionsWithUser = async (actor: SessionActor): Promise<SubmissionWithUserRow[]> => {
   const rows = await db
     .select({
       id: S.id,
@@ -76,6 +77,7 @@ export const listAllSubmissionsWithUser = async (): Promise<SubmissionWithUserRo
     })
     .from(S)
     .innerJoin(UP, eq(UP.userId, S.requestedBy))
+    .where(readableSubmissionPredicate(actor.userId, actor.isAdmin))
     .orderBy(desc(S.createdAt))
     .limit(200);
   return rows as unknown as SubmissionWithUserRow[];

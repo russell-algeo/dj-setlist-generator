@@ -7,6 +7,11 @@ on:
         description: Set run UUID to process
         required: true
         type: string
+      private_analysis:
+        description: Fixed private analysis only; requires a precreated private development run
+        required: false
+        default: false
+        type: boolean
       dispatch_generation:
         description: Non-secret attempt fence assigned by the application dispatcher
         required: false
@@ -39,8 +44,8 @@ on:
         type: string
 
 concurrency:
-  group: process-set-${{ github.ref }}-${{ github.event.inputs.deployment_target }}-${{ github.event.inputs.set_run_id }}
-  cancel-in-progress: true
+  group: ${{ github.event.inputs.private_analysis == 'true' && 'process-set-private-analysis' || format('process-set-{0}-{1}-{2}', github.ref, github.event.inputs.deployment_target, github.event.inputs.set_run_id) }}
+  cancel-in-progress: ${{ github.event.inputs.private_analysis != 'true' }}
 
 env:
   SET_LIST_DISPATCH_GENERATION: ${{ github.event.inputs.dispatch_generation }}
@@ -52,7 +57,7 @@ permissions:
 
 jobs:
   bootstrap:
-    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
+    if: ${{ github.event.inputs.private_analysis != 'true' && github.event.inputs.resume_mode != 'publish_only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -173,7 +178,7 @@ jobs:
   recognize:
     needs:
       - bootstrap
-    if: ${{ github.event.inputs.resume_mode != 'publish_only' }}
+    if: ${{ github.event.inputs.private_analysis != 'true' && github.event.inputs.resume_mode != 'publish_only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -225,7 +230,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: ${{ always() && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
+    if: ${{ always() && github.event.inputs.private_analysis != 'true' && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
     needs:
       - bootstrap
       - recognize
@@ -270,7 +275,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: ${{ always() }}
+    if: ${{ always() && github.event.inputs.private_analysis != 'true' }}
     needs:
       - bootstrap
       - recognize
@@ -297,3 +302,92 @@ jobs:
             "publishResult": "${{ needs.publish.result }}"
           }
           JSON
+
+  private-prepare:
+    # Publish on a reviewed, protected ref before dispatch; never execute PR code.
+    if: ${{ github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PRIVATE_RUN_ID: ${{ github.event.inputs.set_run_id }}
+      WORKER_DEPLOYMENT_TARGET: development
+      ENABLE_CHECKPOINTS: 'false'
+      SEGMENT_DURATION: '30'
+      SEGMENT_OVERLAP: '15'
+      CONCURRENT_RECOGNITIONS: '2'
+      BATCH_SIZE: '10'
+      QUOTA_COOLDOWN_DURATION: '60'
+      ENABLE_SPOTIFY: 'false'
+      ENABLE_YOUTUBE: 'false'
+      ENABLE_DISCOGS: 'false'
+      ENABLE_SPOTIFY_PLAYLISTS: 'false'
+      NTFY_TOPIC: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: ./.github/scripts/ensure-ffmpeg.sh
+      - run: python -m pip install -r requirements-recognize.txt
+      - name: Prepare fixed input
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+        run: python -m worker.jobs.yoon_once prepare >/dev/null 2>&1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analysis-audio-${{ github.run_id }}
+          path: ${{ runner.temp }}/fixed-analysis/audio/input.mp3
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: false
+      - if: ${{ always() }}
+        run: rm -rf -- "$RUNNER_TEMP/fixed-analysis"
+  private-recognize:
+    needs: private-prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PRIVATE_RUN_ID: ${{ github.event.inputs.set_run_id }}
+      WORKER_DEPLOYMENT_TARGET: development
+      ENABLE_CHECKPOINTS: 'false'
+      SEGMENT_DURATION: '30'
+      SEGMENT_OVERLAP: '15'
+      CONCURRENT_RECOGNITIONS: '2'
+      BATCH_SIZE: '10'
+      QUOTA_COOLDOWN_DURATION: '60'
+      ENABLE_SPOTIFY: 'false'
+      ENABLE_YOUTUBE: 'false'
+      ENABLE_DISCOGS: 'false'
+      ENABLE_SPOTIFY_PLAYLISTS: 'false'
+      NTFY_TOPIC: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: ./.github/scripts/ensure-ffmpeg.sh
+      - run: python -m pip install -r requirements-recognize.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: analysis-audio-${{ github.run_id }}
+          path: ${{ runner.temp }}/fixed-analysis/audio
+      - name: Recognize fixed input privately
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+        run: python -m worker.jobs.yoon_once recognize >/dev/null 2>&1
+      # No result/log/checkpoint artifact, cache, summary or publish/finalize callback.
+      - if: ${{ always() }}
+        run: rm -rf -- "$RUNNER_TEMP/fixed-analysis"

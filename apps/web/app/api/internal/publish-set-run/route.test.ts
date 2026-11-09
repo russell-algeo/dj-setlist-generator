@@ -17,7 +17,7 @@ vi.mock("@/lib/auth/session", () => ({ assertInternalRequest }));
 const setRunId = "00000000-0000-4000-8000-000000000001";
 const published = { setId: "00000000-0000-4000-8000-000000000002", slug: "test-set", affectedArtistSlugs: ["test-artist"] };
 const run = {
-  id: setRunId, status: "publishing", stage: "publishing", cancelRequestedAt: null,
+  id: setRunId, publicationVisibility: "public", targetSetId: null, collectionId: null, status: "publishing", stage: "publishing", cancelRequestedAt: null,
   publishedSetId: null, sourceMetadata: { active_workflow_run_id: "workflow-1" },
 };
 const request = (workflowRunId: string | undefined = "workflow-1") => new Request("http://localhost/api/internal/publish-set-run", {
@@ -30,7 +30,7 @@ describe("publication cancellation boundary", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mockedDb.select.mockReset();
-    claim.mockReset().mockResolvedValue([{ id: setRunId }]);
+    claim.mockReset().mockResolvedValue([{ id: setRunId, publicationVisibility: "public", targetSetId: null, collectionId: null }]);
     updateWhere.mockReturnValue({ returning: claim });
     updateSet.mockReturnValue({ where: updateWhere });
     mockedDb.update.mockReturnValue({ set: updateSet });
@@ -103,7 +103,7 @@ describe("publication cancellation boundary", () => {
       started();
       return new Promise((resolve) => { finish = resolve; });
     });
-    claim.mockResolvedValueOnce([{ id: setRunId }]).mockResolvedValueOnce([]);
+    claim.mockResolvedValueOnce([{ id: setRunId, publicationVisibility: "public", targetSetId: null, collectionId: null }]).mockResolvedValueOnce([]);
     mockedDb.select.mockReturnValue(selectRows([{ ...run, stage: "publishing_committed" }]));
     const { POST } = await import("./route");
     const first = POST(request());
@@ -118,11 +118,11 @@ describe("publication cancellation boundary", () => {
 
   it("replays persisted success after a lost response without rewriting published data", async () => {
     claim.mockResolvedValue([]);
-    mockedDb.select.mockReturnValue(selectRows([{
+    mockedDb.select.mockReturnValueOnce(selectRows([{
       ...run, status: "completed", publishedSetId: published.setId,
       cancelRequestedAt: new Date(), // legacy inconsistent state must not erase real data
       sourceMetadata: { ...run.sourceMetadata, publication_result: published },
-    }]));
+    }])).mockReturnValueOnce(selectRows([{ id: published.setId, visibility: "public", collectionId: null }]));
     const { POST } = await import("./route");
     const response = await POST(request());
     expect(response.status).toBe(200);
@@ -132,7 +132,7 @@ describe("publication cancellation boundary", () => {
   });
 
   it("does not record success for a superseded generation after writing", async () => {
-    claim.mockResolvedValueOnce([{ id: setRunId }]).mockResolvedValueOnce([]);
+    claim.mockResolvedValueOnce([{ id: setRunId, publicationVisibility: "public", targetSetId: null, collectionId: null }]).mockResolvedValueOnce([]);
     const { POST } = await import("./route");
     const response = await POST(request());
     expect(response.status).toBe(409);
@@ -164,6 +164,32 @@ describe("publication cancellation boundary", () => {
     expect(await response.json()).toMatchObject({ ...published, errorCode: "archive_home_materialized_view_refresh_failed" });
     expect(updateSet).toHaveBeenLastCalledWith(expect.objectContaining({ publishedSetId: published.setId, status: "completed" }));
     log.mockRestore();
+  });
+
+  it("uses the trusted private target and never refreshes public views", async () => {
+    const collectionId = "00000000-0000-4000-8000-000000000003";
+    claim.mockResolvedValueOnce([{ id: setRunId, publicationVisibility: "private", targetSetId: published.setId, collectionId }]);
+    const { POST } = await import("./route");
+    expect((await POST(request())).status).toBe(200);
+    expect(upsertArchiveSet).toHaveBeenCalledWith(expect.objectContaining({ access: { visibility: "private", setId: published.setId, collectionId } }));
+    expect(refreshArchiveHomeMaterializedViews).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for an unscoped run", async () => {
+    claim.mockResolvedValueOnce([{ id: setRunId, publicationVisibility: "private", targetSetId: null, collectionId: null }]);
+    const { POST } = await import("./route");
+    expect((await POST(request())).status).toBe(500);
+    expect(upsertArchiveSet).not.toHaveBeenCalled();
+    expect(refreshArchiveHomeMaterializedViews).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a private database error in the response or console", async () => {
+    claim.mockResolvedValueOnce([{ id: setRunId, publicationVisibility: "private", targetSetId: published.setId, collectionId: "00000000-0000-4000-8000-000000000003" }]);
+    upsertArchiveSet.mockRejectedValue(new Error("private track-bearing SQL parameters"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { POST } = await import("./route");
+    const response = await POST(request()); expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain("track-bearing"); expect(log).not.toHaveBeenCalled(); log.mockRestore();
   });
 
   it("rejects unauthenticated calls without claiming a run", async () => {

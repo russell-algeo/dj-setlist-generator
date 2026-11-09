@@ -42,7 +42,7 @@ import {
 } from "@/lib/archive/utils";
 import { getDb } from "@/lib/db/client";
 import { getArchiveCacheNamespace } from "@/lib/db/cache-namespace.server";
-import { artists, setArtists, setEntries, setRuns, sets, tracks } from "@/lib/db/schema";
+import { publicArtists as artists, publicSetArtists as setArtists, publicSetEntries as setEntries, publicSetRuns as setRuns, publicSets as sets, publicTracks as tracks } from "@/lib/db/schema";
 
 const HOME_TAGS = {
   atlas: "archive:home-atlas",
@@ -497,8 +497,8 @@ const getHomeArtistCardsUncached = async () => {
       SELECT
         sa.artist_id,
         count(DISTINCT sa.set_id)::int AS "setCount"
-      FROM "app"."set_artists" sa
-      INNER JOIN "app"."sets" s
+      FROM "app"."public_set_artists" sa
+      INNER JOIN "app"."public_sets" s
         ON s.id = sa.set_id
       WHERE sa.role = 'primary'
       GROUP BY sa.artist_id
@@ -527,7 +527,7 @@ const getHomeArtistCardsUncached = async () => {
       COALESCE(set_counts."setCount", 0)::int AS "setCount",
       COALESCE(atlas_counts."uniqueTracks", 0)::int AS "uniqueTracks",
       COALESCE(atlas_counts."totalAppearances", 0)::int AS "totalAppearances"
-    FROM "app"."artists" a
+    FROM "app"."public_artists" a
     LEFT JOIN set_counts
       ON set_counts.artist_id = a.id
     LEFT JOIN atlas_counts
@@ -557,20 +557,20 @@ const getHomeGlobalStatsUncached = async () => {
         count(*) FILTER (WHERE upper(COALESCE(confidence, 'UNCERTAIN')) = 'LOW')::int AS "lowCount",
         count(*) FILTER (WHERE upper(COALESCE(confidence, 'UNCERTAIN')) = 'UNCERTAIN')::int AS "uncertainCount",
         count(*)::int AS "totalTrackEntries"
-      FROM "app"."set_entries"
+      FROM "app"."public_set_entries"
     ),
     artist_counts AS (
       SELECT count(*)::int AS "totalArtists"
       FROM (
         SELECT DISTINCT a.id
-        FROM "app"."artists" a
-        LEFT JOIN "app"."set_artists" sa
+        FROM "app"."public_artists" a
+        LEFT JOIN "app"."public_set_artists" sa
           ON sa.artist_id = a.id
         WHERE sa.set_id IS NOT NULL
       ) artist_ids
     ),
     set_counts AS (
-      SELECT count(*)::int AS "totalSets" FROM "app"."sets"
+      SELECT count(*)::int AS "totalSets" FROM "app"."public_sets"
     ),
     atlas_counts AS (
       SELECT
@@ -579,7 +579,7 @@ const getHomeGlobalStatsUncached = async () => {
       FROM "app"."archive_home_artist_atlas_mv"
     ),
     generated_at AS (
-      SELECT max(updated_at)::text AS "generatedAt" FROM "app"."sets"
+      SELECT max(updated_at)::text AS "generatedAt" FROM "app"."public_sets"
     )
     SELECT
       generated_at."generatedAt",
@@ -645,27 +645,27 @@ const getWorkspaceGlobalStats = async (userId: string) => {
       COUNT(se.id)::int AS "totalAppearances",
       COUNT(se.id) FILTER (WHERE t.title ILIKE 'Unknown Track%')::float / NULLIF(COUNT(se.id), 0) AS "unknownRatio"
     FROM (
-      SELECT DISTINCT s2.id, s2.source_url FROM "app"."sets" s2
-      JOIN "ops"."set_runs" sr2
+      SELECT DISTINCT s2.id, s2.source_url FROM "app"."public_sets" s2
+      JOIN "ops"."public_set_runs" sr2
         ON sr2.source_url = s2.source_url
        AND sr2.requested_by = ${userId}
        AND sr2.archive_removed_at IS NULL
     ) s
-    LEFT JOIN "app"."set_artists" sa ON sa.set_id = s.id
-    LEFT JOIN "app"."set_entries" se ON se.set_id = s.id
-    LEFT JOIN "app"."tracks" t ON t.id = se.track_id
+    LEFT JOIN "app"."public_set_artists" sa ON sa.set_id = s.id
+    LEFT JOIN "app"."public_set_entries" se ON se.set_id = s.id
+    LEFT JOIN "app"."public_tracks" t ON t.id = se.track_id
   `);
 
   const confResult = await db.execute(sql<{ confidence: string; count: number | string }>`
     SELECT se.confidence, COUNT(*)::int AS count
     FROM (
-      SELECT DISTINCT s2.id FROM "app"."sets" s2
-      JOIN "ops"."set_runs" sr2
+      SELECT DISTINCT s2.id FROM "app"."public_sets" s2
+      JOIN "ops"."public_set_runs" sr2
         ON sr2.source_url = s2.source_url
        AND sr2.requested_by = ${userId}
        AND sr2.archive_removed_at IS NULL
     ) s
-    JOIN "app"."set_entries" se ON se.set_id = s.id
+    JOIN "app"."public_set_entries" se ON se.set_id = s.id
     GROUP BY se.confidence
   `);
 
@@ -865,8 +865,8 @@ const getArchiveHomeAtlasPayloadUncached = async ({
     // Fetch the set slugs belonging to this user's workspace
     const slugResult = await db.execute(sql<{ setSlug: string }>`
       SELECT DISTINCT s.slug AS "setSlug"
-      FROM "ops"."set_runs" sr
-      JOIN "app"."sets" s ON s.source_url = sr.source_url
+      FROM "ops"."public_set_runs" sr
+      JOIN "app"."public_sets" s ON s.source_url = sr.source_url
       WHERE sr.requested_by = ${userId}
         AND sr.archive_removed_at IS NULL
     `);
@@ -968,8 +968,8 @@ const getArchiveHomePairPayloadUncached = async ({
     // Filter shared tracks to only those whose set references are in the user's workspace
     const slugResult = await db.execute(sql<{ setSlug: string }>`
       SELECT DISTINCT s.slug AS "setSlug"
-      FROM "ops"."set_runs" sr
-      JOIN "app"."sets" s ON s.source_url = sr.source_url
+      FROM "ops"."public_set_runs" sr
+      JOIN "app"."public_sets" s ON s.source_url = sr.source_url
       WHERE sr.requested_by = ${userId}
         AND sr.archive_removed_at IS NULL
     `);
@@ -1249,14 +1249,14 @@ const getViewerSubmittedScope = async (userId: string): Promise<ViewerSubmittedS
     SELECT DISTINCT
       s.id::text AS "setId",
       a.slug AS "artistSlug"
-    FROM "app"."sets" s
-    INNER JOIN "ops"."set_runs" sr
+    FROM "app"."public_sets" s
+    INNER JOIN "ops"."public_set_runs" sr
       ON sr.source_url = s.source_url
      AND sr.requested_by = ${userId}
      AND sr.archive_removed_at IS NULL
-    LEFT JOIN "app"."set_artists" sa
+    LEFT JOIN "app"."public_set_artists" sa
       ON sa.set_id = s.id
-    LEFT JOIN "app"."artists" a
+    LEFT JOIN "app"."public_artists" a
       ON a.id = sa.artist_id
   `);
   const rows = asRows<{ artistSlug: string | null; setId: string }>(result.rows);
@@ -1294,8 +1294,8 @@ export const getWorkspaceArtistCards = async (userId: string): Promise<ArchiveHo
     db.execute(sql<HomeArtistCoverImageRow>`
       WITH user_sets AS (
         SELECT DISTINCT s.id
-        FROM "app"."sets" s
-        JOIN "ops"."set_runs" sr
+        FROM "app"."public_sets" s
+        JOIN "ops"."public_set_runs" sr
           ON sr.source_url = s.source_url
          AND sr.requested_by = ${userId}
          AND sr.archive_removed_at IS NULL
@@ -1430,8 +1430,8 @@ const getWorkspaceHeroSetCandidates = async (userId: string): Promise<ArchiveHom
   const result = await db.execute(sql<HomeHeroSetRow>`
     WITH user_sets AS (
       SELECT DISTINCT s.id
-      FROM "app"."sets" s
-      JOIN "ops"."set_runs" sr
+      FROM "app"."public_sets" s
+      JOIN "ops"."public_set_runs" sr
         ON sr.source_url = s.source_url
        AND sr.requested_by = ${userId}
        AND sr.archive_removed_at IS NULL

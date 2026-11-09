@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { neon } from "@neondatabase/serverless";
 import { revalidatePath, revalidateTag } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { archiveCacheTags } from "@/lib/archive/data";
 import { archiveHomeTags } from "@/lib/archive/home-explorer-data";
@@ -152,7 +152,7 @@ const loadSetRecord = async (slug: string): Promise<SetRecord | null> => {
       title: sets.title,
     })
     .from(sets)
-    .where(eq(sets.slug, slug))
+    .where(and(eq(sets.slug, slug), eq(sets.visibility, "public")))
     .limit(1);
 
   return setRecord ?? null;
@@ -167,7 +167,7 @@ const loadArtistRecord = async (slug: string): Promise<ArtistRecord | null> => {
       slug: artists.slug,
     })
     .from(artists)
-    .where(eq(artists.slug, slug))
+    .where(and(eq(artists.slug, slug), sql`exists (select 1 from "app"."set_artists" sa join "app"."sets" s on s.id = sa.set_id where sa.artist_id = ${artists.id} and s.visibility = 'public')`))
     .limit(1);
 
   return artistRecord ?? null;
@@ -194,10 +194,8 @@ const loadActiveSetRuns = async (setRecord: SetRecord): Promise<ActiveRunRow[]> 
     FROM "ops"."set_runs" sr
     WHERE sr.archive_removed_at IS NULL
       AND sr.status = 'completed'
-      AND (
-        sr.published_set_id = ${setRecord.id}::uuid
-        OR (${setRecord.sourceUrl}::text IS NOT NULL AND sr.source_url = ${setRecord.sourceUrl})
-      )
+      AND sr.publication_visibility = 'public'
+      AND sr.published_set_id = ${setRecord.id}::uuid
   `);
 
   return asRows<ActiveRunRow>(result.rows);
@@ -212,10 +210,8 @@ const loadSetOwners = async (setRecord: SetRecord): Promise<SetOwnerRow[]> => {
     FROM "ops"."set_runs" sr
     WHERE sr.archive_removed_at IS NULL
       AND sr.status = 'completed'
-      AND (
-        sr.published_set_id = ${setRecord.id}::uuid
-        OR (${setRecord.sourceUrl}::text IS NOT NULL AND sr.source_url = ${setRecord.sourceUrl})
-      )
+      AND sr.publication_visibility = 'public'
+      AND sr.published_set_id = ${setRecord.id}::uuid
     GROUP BY sr.requested_by
   `);
 
@@ -240,11 +236,10 @@ const loadArtistSets = async (artistRecord: ArtistRecord): Promise<ArtistSetRow[
     LEFT JOIN "ops"."set_runs" sr
       ON sr.archive_removed_at IS NULL
      AND sr.status = 'completed'
-     AND (
-       sr.published_set_id = s.id
-       OR (s.source_url IS NOT NULL AND sr.source_url = s.source_url)
-     )
+     AND sr.publication_visibility = 'public'
+     AND sr.published_set_id = s.id
     WHERE sa.artist_id = ${artistRecord.id}::uuid
+      AND s.visibility = 'public'
     GROUP BY s.id, s.slug, s.title, s.source_url
     ORDER BY s.title ASC
   `);
@@ -267,11 +262,10 @@ const loadActiveArtistRuns = async (
     INNER JOIN "ops"."set_runs" sr
       ON sr.archive_removed_at IS NULL
      AND sr.status = 'completed'
-     AND (
-       sr.published_set_id = s.id
-       OR (s.source_url IS NOT NULL AND sr.source_url = s.source_url)
-     )
+     AND sr.publication_visibility = 'public'
+     AND sr.published_set_id = s.id
     WHERE sa.artist_id = ${artistRecord.id}::uuid
+      AND s.visibility = 'public'
   `);
 
   return asRows<ActiveRunRow>(result.rows);
@@ -496,8 +490,7 @@ export const deleteArchiveSetBySlug = async ({
     entityType: "set",
     reason: sanitizedReason,
   });
-  const sourceUrls = setRecord.sourceUrl ? [setRecord.sourceUrl] : [];
-  const runActorClause = actor.isAdmin || hardDelete ? "" : "AND sr.requested_by = $6";
+  const runActorClause = actor.isAdmin || hardDelete ? "" : "AND sr.requested_by = $5";
   const runActorParams = actor.isAdmin || hardDelete ? [] : [actor.userId];
   const sqlClient = getMutationSql();
 
@@ -568,7 +561,6 @@ export const deleteArchiveSetBySlug = async ({
         deletionId,
         [setRecord.id],
         JSON.stringify(runDeletionMetadata),
-        sourceUrls,
         ...runActorParams,
       ],
       text: `
@@ -589,10 +581,9 @@ export const deleteArchiveSetBySlug = async ({
           updated_at = $1::timestamptz
         WHERE sr.archive_removed_at IS NULL
           AND sr.status = 'completed'
-          AND (
-            sr.published_set_id = ANY($3::uuid[])
-            OR sr.source_url = ANY($5::text[])
-          )
+          AND sr.publication_visibility = 'public'
+          AND sr.published_set_id = ANY($3::uuid[])
+          AND EXISTS (SELECT 1 FROM app.sets s WHERE s.id = sr.published_set_id AND s.visibility = 'public')
           ${runActorClause}
       `,
     },
@@ -602,7 +593,7 @@ export const deleteArchiveSetBySlug = async ({
     queries.push(
       {
         params: [[setRecord.id]],
-        text: `DELETE FROM "app"."sets" WHERE id = ANY($1::uuid[])`,
+        text: `DELETE FROM "app"."sets" WHERE id = ANY($1::uuid[]) AND visibility = 'public'`,
       },
       {
         params: [],
@@ -695,9 +686,6 @@ export const deleteArchiveArtistBySlug = async ({
   const touchedSetSlugs = artistSets
     .filter((setItem) => touchedSetIds.includes(setItem.id))
     .map((setItem) => setItem.slug);
-  const touchedSourceUrls = artistSets
-    .filter((setItem) => touchedSetIds.includes(setItem.id) && setItem.sourceUrl)
-    .map((setItem) => setItem.sourceUrl as string);
   const artistWillBeRemoved = artistSets.length > 0 && hardDeleteSetIds.length === artistSets.length;
   const deletionId = randomUUID();
   const now = new Date().toISOString();
@@ -709,7 +697,7 @@ export const deleteArchiveArtistBySlug = async ({
     entityType: "artist",
     reason: sanitizedReason,
   });
-  const runActorClause = actor.isAdmin ? "" : "AND sr.requested_by = $6";
+  const runActorClause = actor.isAdmin ? "" : "AND sr.requested_by = $5";
   const runActorParams = actor.isAdmin ? [] : [actor.userId];
   const sqlClient = getMutationSql();
 
@@ -782,7 +770,6 @@ export const deleteArchiveArtistBySlug = async ({
         deletionId,
         touchedSetIds,
         JSON.stringify(runDeletionMetadata),
-        touchedSourceUrls,
         ...runActorParams,
       ],
       text: `
@@ -803,10 +790,9 @@ export const deleteArchiveArtistBySlug = async ({
           updated_at = $1::timestamptz
         WHERE sr.archive_removed_at IS NULL
           AND sr.status = 'completed'
-          AND (
-            sr.published_set_id = ANY($3::uuid[])
-            OR sr.source_url = ANY($5::text[])
-          )
+          AND sr.publication_visibility = 'public'
+          AND sr.published_set_id = ANY($3::uuid[])
+          AND EXISTS (SELECT 1 FROM app.sets s WHERE s.id = sr.published_set_id AND s.visibility = 'public')
           ${runActorClause}
       `,
     },
@@ -815,14 +801,16 @@ export const deleteArchiveArtistBySlug = async ({
   if (hardDeleteSetIds.length > 0) {
     queries.push({
       params: [hardDeleteSetIds],
-      text: `DELETE FROM "app"."sets" WHERE id = ANY($1::uuid[])`,
+      text: `DELETE FROM "app"."sets" WHERE id = ANY($1::uuid[]) AND visibility = 'public'`,
     });
   }
 
   if (actor.isAdmin || artistWillBeRemoved) {
     queries.push({
       params: [artistRecord.id],
-      text: `DELETE FROM "app"."artists" WHERE id = $1::uuid`,
+      text: `DELETE FROM "app"."artists" a WHERE a.id = $1::uuid
+          AND NOT EXISTS (SELECT 1 FROM "app"."set_artists" sa WHERE sa.artist_id = a.id)
+          AND NOT EXISTS (SELECT 1 FROM "app"."track_artists" ta WHERE ta.artist_id = a.id)`,
     });
   } else {
     queries.push({
@@ -833,6 +821,7 @@ export const deleteArchiveArtistBySlug = async ({
           AND NOT EXISTS (
             SELECT 1 FROM "app"."set_artists" sa WHERE sa.artist_id = a.id
           )
+          AND NOT EXISTS (SELECT 1 FROM "app"."track_artists" ta WHERE ta.artist_id = a.id)
       `,
     });
   }

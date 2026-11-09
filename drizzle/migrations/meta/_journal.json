@@ -120,6 +120,20 @@
       "when": 1777165320000,
       "tag": "0017_user_set_listen_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794268800000,
+      "tag": "0018_private_collection_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794268800001,
+      "tag": "0019_private_insert_defaults",
+      "breakpoints": true
     }
   ]
 }

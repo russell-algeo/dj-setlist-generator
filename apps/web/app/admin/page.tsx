@@ -49,7 +49,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const { tab = "users" } = await searchParams;
   const [users, allSubmissions]: [UserRow[], SubmissionWithUserRow[]] = await Promise.all([
     listUsers(),
-    listAllSubmissionsWithUser(),
+    listAllSubmissionsWithUser(actor),
   ]);
 
   const totalAdmins = users.filter((user) => user.isAdmin).length;

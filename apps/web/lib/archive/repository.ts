@@ -18,7 +18,7 @@ import {
 
 import { getDb } from "@/lib/db/client";
 import { normalizeText } from "@/lib/archive/import-helpers";
-import { artists, setArtists, setRuns, sets } from "@/lib/db/schema";
+import { publicArtists as artists, publicSetArtists as setArtists, publicSetRuns as setRuns, publicSets as sets } from "@/lib/db/schema";
 
 const clampPage = (page: number) => (Number.isFinite(page) && page > 0 ? Math.floor(page) : 1);
 

@@ -138,6 +138,7 @@ def run(submission_id: str) -> None:
                 insert into ops.set_runs (
                   submission_id,
                   requested_by,
+                  publication_visibility,
                   status,
                   stage,
                   source_url,
@@ -151,6 +152,7 @@ def run(submission_id: str) -> None:
                 select
                   s.id,
                   s.requested_by,
+                  'public',
                   case when pub.published_set_id is not null then 'completed' else 'queued' end,
                   case when pub.published_set_id is not null then 'deduped' else null end,
                   %s,
@@ -162,14 +164,19 @@ def run(submission_id: str) -> None:
                   case when pub.published_set_id is not null then now() else null end
                 from ops.submissions s
                 left join lateral (
-                  select published_set_id
+                  select pub.published_set_id
                   from ops.set_runs pub
+                  join app.sets published on published.id = pub.published_set_id
                   where pub.source_url = %s
                     and pub.status = 'completed'
+                    and pub.publication_visibility = 'public'
+                    and published.visibility = 'public'
+                    and pub.archive_removed_at is null
                     and pub.published_set_id is not null
                   limit 1
                 ) pub on true
                 where s.id = %s
+                  and s.visibility = 'public'
                   and not exists (
                     select 1
                     from ops.set_runs existing

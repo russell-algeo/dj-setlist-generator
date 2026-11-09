@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "drizzle-kit";
+import { preparePrivateMigrationStage } from "./scripts/private-migration-stage.mjs";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,7 +23,12 @@ if (!url) {
 export default defineConfig({
   dialect: "postgresql",
   schema: path.join(rootDir, "drizzle", "schema.ts"),
-  out: path.join(rootDir, "drizzle", "migrations"),
+  // During the two-phase rollout, ordinary migrate stops safely at expand.
+  // Sealing is a separate explicit operator step after guarded code is verified.
+  // Build/deploy never invokes this. Keep generation on the canonical journal.
+  out: process.argv.includes("migrate")
+    ? preparePrivateMigrationStage(rootDir, process.env.PRIVATE_ARCHIVE_MIGRATION_PHASE ?? "expand")
+    : path.join(rootDir, "drizzle", "migrations"),
   migrations: {
     schema: "public",
     table: "__drizzle_migrations",

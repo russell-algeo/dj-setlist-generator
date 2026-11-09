@@ -151,6 +151,8 @@ def _load_run(set_run_id: str) -> dict[str, object]:
         from ops.set_runs r
         inner join ops.submissions s on s.id = r.submission_id
         where r.id = %s
+          and r.publication_visibility = 'public'
+          and s.visibility = 'public'
         """,
         (set_run_id,),
     )

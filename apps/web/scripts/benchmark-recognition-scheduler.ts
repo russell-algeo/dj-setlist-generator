@@ -174,6 +174,7 @@ const createBenchmarkRun = async (email: string, sourceUrl: string) => {
 
   const [submission] = await sql`
     insert into ops.submissions (
+      visibility,
       requested_by,
       mode,
       status,
@@ -182,6 +183,7 @@ const createBenchmarkRun = async (email: string, sourceUrl: string) => {
       create_playlist
     )
     values (
+      'public',
       ${profile.user_id},
       'curated_artist',
       'queued',
@@ -194,6 +196,7 @@ const createBenchmarkRun = async (email: string, sourceUrl: string) => {
 
   const [setRun] = await sql`
     insert into ops.set_runs (
+      publication_visibility,
       submission_id,
       requested_by,
       status,
@@ -204,6 +207,7 @@ const createBenchmarkRun = async (email: string, sourceUrl: string) => {
       source_metadata
     )
     values (
+      'public',
       ${submission.id},
       ${profile.user_id},
       'queued',
@@ -224,6 +228,7 @@ const createBenchmarkRun = async (email: string, sourceUrl: string) => {
       details
     )
     values (
+      'public',
       ${submission.id},
       'submission.created',
       'Submission queued in curated_artist mode',

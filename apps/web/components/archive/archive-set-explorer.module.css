@@ -572,6 +572,15 @@
   aspect-ratio: auto;
 }
 
+.root :global(.source-player-frame.is-native-audio) {
+  min-height: 110px;
+}
+
+.root :global(.source-player-frame.is-native-audio audio) {
+  display: block;
+  width: 100%;
+}
+
 .root :global(.source-player-frame.is-fallback) {
   min-height: 120px;
 }

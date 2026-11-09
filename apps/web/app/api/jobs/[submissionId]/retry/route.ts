@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { canAccessSubmission, getRequestActor } from "@/lib/auth/session";
+import { canManageSubmission, getRequestActor } from "@/lib/auth/session";
 import { isJsonRequest } from "@/lib/http/request-body";
 import { retryFailedSetRuns } from "@/lib/jobs/submissions";
 import { dispatchPendingWork } from "@/lib/jobs/dispatch";
@@ -18,7 +18,7 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const { submissionId } = await params;
-  const allowed = await canAccessSubmission(actor, submissionId);
+  const allowed = await canManageSubmission(actor, submissionId);
   if (!allowed) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

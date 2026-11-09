@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
+import { createNativeAudioController, type NativeAudioSegment } from "@/lib/yoon-fest/playback";
 import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ArchiveDeleteControl, SubmittedByYouBadge } from "@/components/archive/archive-delete-control";
@@ -73,7 +74,14 @@ type HeroCard = {
   title: string;
 };
 
+export type PrivateSetContext = {
+  collectionHref: string;
+  boundaryNote: string;
+  audio: { src: string; revision: string; segments?: NativeAudioSegment[] };
+};
+
 type SetSourceModel =
+  | { kind: "native-audio"; frameClass: string; label: string; platform: string; sourceUrl: string }
   | {
     embedId: string;
     frameClass: string;
@@ -890,18 +898,21 @@ export function ArchiveSetExplorer({
   initialListened,
   initialQuery,
   management,
+  privateContext,
 }: {
   detail: ArchiveSetDetail;
   initialListened: boolean | null;
   initialQuery: string;
   management: SetManagement;
+  privateContext?: PrivateSetContext;
 }) {
   const model = useMemo(() => buildSetModel(detail), [detail]);
   const sourceOptions = useMemo(() => buildSourceOptions(detail), [detail]);
   const playbackStorageKey = useMemo(() => buildPlaybackStorageKey(detail.id), [detail.id]);
   const listenProgressStorageKey = useMemo(() => buildListenProgressStorageKey(detail.id), [detail.id]);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | null>(null);
-  const activeSource = useMemo(() => {
+  const activeSource = useMemo((): SetSourceModel => {
+    if (privateContext) return { kind: "native-audio", frameClass: "source-player-frame is-native-audio", label: "Private recording", platform: "private", sourceUrl: privateContext.audio.src };
     if (sourceOptions.length === 0) {
       return detectSourceModel({
         platform: detail.sourcePlatform,
@@ -914,7 +925,7 @@ export function ArchiveSetExplorer({
       sourceOptions.find((source) => source.sourceUrl === detail.sourceUrl) ??
       sourceOptions[0]!
     );
-  }, [detail.sourcePlatform, detail.sourceUrl, selectedSourceUrl, sourceOptions]);
+  }, [detail.sourcePlatform, detail.sourceUrl, selectedSourceUrl, sourceOptions, privateContext]);
   const sourceSwitcherSources = useMemo(() => {
     const soundCloudSource = sourceOptions.find((source) => source.kind === "soundcloud");
     const youtubeSource = sourceOptions.find((source) => source.kind === "youtube");
@@ -938,6 +949,7 @@ export function ArchiveSetExplorer({
   const [journeyTooltip, setJourneyTooltip] = useState<JourneyTooltipState>(null);
   const [hashHitIdx, setHashHitIdx] = useState<number | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
+  const [nativeAudioError, setNativeAudioError] = useState<string | null>(null);
   const [ytEmbedBlocked, setYtEmbedBlocked] = useState(false);
   const [scEmbedBlocked, setScEmbedBlocked] = useState(false);
   const deferredQuery = useDeferredValue(query);
@@ -946,6 +958,8 @@ export function ArchiveSetExplorer({
   const heroSideRef = useRef<HTMLDivElement | null>(null);
   const heroViewportRef = useRef<HTMLDivElement | null>(null);
   const heroTrackRef = useRef<HTMLDivElement | null>(null);
+  const nativeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const nativeControllerRef = useRef<ReturnType<typeof createNativeAudioController> | null>(null);
   const youtubeHostRef = useRef<HTMLDivElement | null>(null);
   const soundCloudFrameRef = useRef<HTMLIFrameElement | null>(null);
   const currentTimeRef = useRef(currentTime);
@@ -991,6 +1005,7 @@ export function ArchiveSetExplorer({
   }, [detail.id]);
 
   useEffect(() => {
+    if (privateContext) return;
     const cached = readStoredListenProgress(listenProgressStorageKey, detail.duration);
     if (!cached) {
       return;
@@ -1002,7 +1017,7 @@ export function ArchiveSetExplorer({
     );
     void syncListenProgress(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.id, detail.duration, listenProgressStorageKey]);
+  }, [detail.id, detail.duration, listenProgressStorageKey, privateContext]);
 
   useEffect(() => {
     if (sourceOptions.length < 2 || typeof window === "undefined") {
@@ -1084,7 +1099,7 @@ export function ArchiveSetExplorer({
   const activeTrack = model.tracks.find((track) => track.idx === activeIdx) ?? null;
   const dockTrack = activeTrack ?? model.tracks[0] ?? null;
   const showDock =
-    (activeSource.kind === "youtube" || activeSource.kind === "soundcloud") &&
+    (activeSource.kind === "youtube" || activeSource.kind === "soundcloud" || activeSource.kind === "native-audio") &&
     !ytEmbedBlocked &&
     !scEmbedBlocked;
   const playbackControlsDisabled = showDock && !playerReady;
@@ -1092,6 +1107,7 @@ export function ArchiveSetExplorer({
   const nowPlayingArtist = detail.artistName ?? (artistNames || "Set Signal Archive");
 
   function persistListenProgressCache() {
+    if (privateContext) return;
     if (listenIntervalsRef.current.length === 0 || detail.duration <= 0) {
       return;
     }
@@ -1106,6 +1122,7 @@ export function ArchiveSetExplorer({
   }
 
   async function syncListenProgress(force = false) {
+    if (privateContext) return;
     if (listenMarkerPendingRef.current || listenSyncInFlightRef.current || listenIntervalsRef.current.length === 0) {
       return;
     }
@@ -1159,6 +1176,7 @@ export function ArchiveSetExplorer({
   }
 
   async function toggleListened() {
+    if (privateContext) return;
     if (listened === null || listenMarkerPendingRef.current) {
       return;
     }
@@ -1188,6 +1206,7 @@ export function ArchiveSetExplorer({
   }
 
   function recordListenPlaybackSample(seconds: number) {
+    if (privateContext) return;
     if (listenMarkerPendingRef.current || !isPlayingRef.current || detail.duration <= 0 || Date.now() < seekLockUntilRef.current) {
       lastListenSampleRef.current = null;
       return;
@@ -1356,6 +1375,7 @@ export function ArchiveSetExplorer({
   };
 
   const persistPlaybackPositionForTime = (seconds: number, force = false) => {
+    if (privateContext) return;
     const duration = Math.max(0, detail.duration);
     if (duration <= 0 || !Number.isFinite(seconds)) {
       return;
@@ -1439,6 +1459,8 @@ export function ArchiveSetExplorer({
   };
 
   const destroyPlayers = (updateReactState = true) => {
+    nativeControllerRef.current?.dispose();
+    nativeControllerRef.current = null;
     stopPlayerPoll();
     stopFallbackTick();
     clearSoundCloudReadyTimer();
@@ -1529,6 +1551,10 @@ export function ArchiveSetExplorer({
   };
 
   const pollPlayerTime = () => {
+    if (activeSource.kind === "native-audio" && nativeAudioRef.current) {
+      updateFromPolledTime(nativeControllerRef.current?.tick() ?? 0);
+      return;
+    }
     if (!playerReadyRef.current) {
       return;
     }
@@ -1574,6 +1600,7 @@ export function ArchiveSetExplorer({
   };
 
   const persistLatestPlayerPosition = (force = true) => {
+    if (privateContext) return;
     if (Date.now() < seekLockUntilRef.current) {
       persistPlaybackPositionForTime(currentTimeRef.current, force);
       return;
@@ -1703,6 +1730,12 @@ export function ArchiveSetExplorer({
     updateFromTime(safeSeconds, scroll);
     seekLockUntilRef.current = Date.now() + 1500;
 
+    if (activeSource.kind === "native-audio") {
+      if (nativeControllerRef.current) nativeControllerRef.current.seek(safeSeconds, autoplay);
+      else { pendingSeekRef.current = safeSeconds; pendingAutoplayRef.current = autoplay; }
+      return;
+    }
+
     if (activeSource.kind === "youtube") {
       if (ytEmbedBlocked) {
         setIsPlaying(false);
@@ -1779,6 +1812,11 @@ export function ArchiveSetExplorer({
   };
 
   const pausePlayer = () => {
+    if (activeSource.kind === "native-audio") {
+      nativeControllerRef.current?.pause();
+      setIsPlaying(false);
+      return;
+    }
     if (activeSource.kind === "youtube" && ytPlayerRef.current?.pauseVideo && playerReadyRef.current) {
       setIsPlaying(false);
       stopFallbackTick();
@@ -1807,6 +1845,10 @@ export function ArchiveSetExplorer({
     updateFromTime(currentTimeRef.current, false);
     publishNowPlayingMetadata();
     const startAtSeconds = clamp(currentTimeRef.current, 0, Math.max(0, detail.duration));
+    if (activeSource.kind === "native-audio") {
+      nativeControllerRef.current?.seek(startAtSeconds, true);
+      return;
+    }
 
     if (activeSource.kind === "youtube") {
       if (ytEmbedBlocked) {
@@ -1944,6 +1986,7 @@ export function ArchiveSetExplorer({
       return;
     }
 
+    if (privateContext) return;
     const restoredSeconds = readStoredPlaybackPosition(playbackStorageKey, detail.duration);
     if (restoredSeconds == null) {
       return;
@@ -1958,7 +2001,7 @@ export function ArchiveSetExplorer({
     activeIdxRef.current = restoredTrack?.idx ?? null;
     setCurrentTime(restoredSeconds);
     setActiveIdx(restoredTrack?.idx ?? null);
-  }, [detail.id, detail.duration, model.tracks, playbackStorageKey]);
+  }, [detail.id, detail.duration, model.tracks, playbackStorageKey, privateContext]);
 
   useEffect(() => {
     fitHeroTitle();
@@ -2081,6 +2124,17 @@ export function ArchiveSetExplorer({
     setScEmbedBlocked(false);
     destroyPlayers();
     setIsPlaying(false);
+
+    setNativeAudioError(null);
+    if (activeSource.kind === "native-audio" && nativeAudioRef.current) {
+      const audio = nativeAudioRef.current;
+      nativeControllerRef.current = createNativeAudioController(audio, detail.duration, (message) => {
+        setIsPlaying(false);
+        setNativeAudioError(message);
+      }, privateContext?.audio.segments);
+      nativeControllerRef.current.seek(0, false);
+      if (audio.readyState >= 1) setPlayerReadyState(true);
+    }
 
     const youtubeEmbedId = activeSource.kind === "youtube" ? activeSource.embedId : null;
     const youtubeHost = youtubeHostRef.current;
@@ -2288,7 +2342,7 @@ export function ArchiveSetExplorer({
       youtubeHost?.replaceChildren();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.id, activeSource.kind, activeSource.sourceUrl]);
+  }, [detail.id, activeSource.kind, activeSource.sourceUrl, privateContext?.audio.revision, privateContext?.audio.segments]);
 
   useEffect(() => {
     const handleHash = () => {
@@ -2429,8 +2483,11 @@ export function ArchiveSetExplorer({
     >
       <ArchiveScrollRoot />
       <ArchiveHeader
+        hideSearch={Boolean(privateContext)}
+        hideSubmit={Boolean(privateContext)}
         hideScopeToggle
         navLinks={[
+          ...(privateContext ? [{ label: "Yoon Fest", href: privateContext.collectionHref }] : []),
           { label: "Playback", href: "#workspace" },
         ]}
       />
@@ -2438,7 +2495,8 @@ export function ArchiveSetExplorer({
       <main className="shell detail-shell">
         <section className="section" id="overview">
           <div className="section-inner">
-            <div className="kicker">Set Intelligence Deck</div>
+            <div className="kicker">{privateContext ? "Private Yoon Fest recording" : "Set Intelligence Deck"}</div>
+            {privateContext ? <><p role="note">{privateContext.boundaryNote}</p><p>Audio streams directly from Dropbox. Anyone who receives an audio link can play it.</p></> : null}
             <div className="set-hero">
               <div className="set-hero-grid">
                 <div className="set-hero-main" ref={heroMainRef}>
@@ -2548,6 +2606,7 @@ export function ArchiveSetExplorer({
               counts={spotifyExportCounts}
               entityType="set"
               slug={detail.slug}
+              {...(privateContext ? { endpoint: "/api/yoon-fest/spotify/export" as const } : {})}
             />
           </div>
           <div className="section-inner">
@@ -2564,6 +2623,41 @@ export function ArchiveSetExplorer({
                 )}
                 id="sourcePlayerFrame"
               >
+                {activeSource.kind === "native-audio" ? (
+                  <div style={{ padding: 24 }}>
+                    <audio
+                      key={`${activeSource.sourceUrl}:${privateContext?.audio.revision}`}
+                      ref={nativeAudioRef}
+                      src={activeSource.sourceUrl}
+                      controls
+                      controlsList="nodownload"
+                      preload="metadata"
+                      onLoadedMetadata={(event) => {
+                        if (event.currentTarget !== nativeAudioRef.current) return;
+                        setPlayerReadyState(true);
+                        nativeControllerRef.current?.ready();
+                        if (!flushPendingSeek()) restoreReadyPlayerPosition();
+                      }}
+                      onPlay={() => { playbackStartedRef.current = true; setNativeAudioError(null); setIsPlaying(true); }}
+                      onPause={() => setIsPlaying(false)}
+                      onEnded={() => { const position = nativeControllerRef.current?.ended() ?? detail.duration; updateFromPolledTime(position); if (position >= detail.duration) setIsPlaying(false); }}
+                      onSeeking={() => { lastListenSampleRef.current = null; }}
+                      onSeeked={(event) => {
+                        if (event.currentTarget !== nativeAudioRef.current) return;
+                        seekLockUntilRef.current = 0;
+                        updateFromPolledTime(nativeControllerRef.current?.tick() ?? 0);
+                      }}
+                      onTimeUpdate={(event) => {
+                        if (event.currentTarget === nativeAudioRef.current) updateFromPolledTime(nativeControllerRef.current?.tick() ?? 0);
+                      }}
+                      onError={() => {
+                        setPlayerReadyState(false); setIsPlaying(false);
+                        setNativeAudioError("The private recording is unavailable. Your session may have expired. Reload to try again.");
+                      }}
+                    />
+                    {nativeAudioError ? <p role="alert">{nativeAudioError}</p> : null}
+                  </div>
+                ) : null}
                 {activeSource.kind === "youtube" && !ytEmbedBlocked ? (
                   <div className="youtube-player-host" ref={youtubeHostRef} />
                 ) : null}
@@ -2704,7 +2798,7 @@ export function ArchiveSetExplorer({
                     ))}
                   </div>
                 ) : null}
-                {activeSource.sourceUrl ? (
+                {activeSource.sourceUrl && !privateContext ? (
                   <a className="source-player-open" href={activeSource.sourceUrl} rel="noopener" target="_blank">
                     Open Source
                   </a>

@@ -10,6 +10,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 vi.mock("@/lib/archive/listen-progress.server", () => ({
+  ListenProgressAccessError: class ListenProgressAccessError extends Error {},
   listUserSetListenProgress,
   setUserSetListened,
   upsertUserSetListenProgress,
@@ -21,6 +22,19 @@ describe("/api/archive/listen-progress", () => {
     listUserSetListenProgress.mockReset();
     setUserSetListened.mockReset();
     upsertUserSetListenProgress.mockReset();
+  });
+
+  it("does not reveal a private set on unauthorized progress writes", async () => {
+    getRequestActor.mockResolvedValue({ userId: "outsider" });
+    const { ListenProgressAccessError } = await import("@/lib/archive/listen-progress.server");
+    upsertUserSetListenProgress.mockRejectedValue(new ListenProgressAccessError("Set not found"));
+    const { POST } = await import("./route");
+    const response = await POST(new Request("http://localhost/api/archive/listen-progress", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "4e1b45fc-1a38-4bfd-8831-5b7e98fb2c99", duration: 100, intervals: [[0, 10]], lastPosition: 10 }),
+    }));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Set not found" });
   });
 
   it("requires authentication for bulk reads", async () => {

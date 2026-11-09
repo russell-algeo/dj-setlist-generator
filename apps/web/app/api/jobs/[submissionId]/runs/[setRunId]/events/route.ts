@@ -27,6 +27,7 @@ export async function GET(request: Request, { params }: Params) {
   const rawPageSize = Number(searchParams.get("pageSize"));
 
   const eventsPage = await getPublicSubmissionRunEventsPage({
+    actor,
     page: Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1,
     pageSize: Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.floor(rawPageSize) : 6,
     setRunId,

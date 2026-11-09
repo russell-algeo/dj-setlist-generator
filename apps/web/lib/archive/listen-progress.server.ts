@@ -10,8 +10,11 @@ import {
   type ListenInterval,
   type ListenProgressSummary,
 } from "@/lib/archive/listen-progress";
+import { readableSetPredicate } from "@/lib/archive/access-policy";
 import { getDb, type AppDb } from "@/lib/db/client";
 import { sets, userSetListenProgress } from "@/lib/db/schema";
+
+export class ListenProgressAccessError extends Error {}
 
 export type UpsertListenProgressInput = {
   duration: number;
@@ -58,13 +61,17 @@ export const listUserSetListenProgress = async (
   }
 
   const db = deps.db ?? getDb();
+  const readableSets = await db.select({ id: sets.id }).from(sets)
+    .where(and(inArray(sets.id, uniqueSetIds), readableSetPredicate(userId)));
+  const readableIds = readableSets.map((set) => set.id);
+  if (readableIds.length === 0) return [];
   const rows = await db
     .select()
     .from(userSetListenProgress)
     .where(
       and(
         eq(userSetListenProgress.userId, userId),
-        inArray(userSetListenProgress.setId, uniqueSetIds),
+        inArray(userSetListenProgress.setId, readableIds),
       ),
     );
 
@@ -82,7 +89,7 @@ export const setUserSetListened = async (
   const [setRecord] = await db
     .select({ durationSeconds: sets.durationSeconds, sourceUrl: sets.sourceUrl })
     .from(sets)
-    .where(eq(sets.id, setId))
+    .where(and(eq(sets.id, setId), readableSetPredicate(userId)))
     .limit(1);
 
   if (!setRecord) {
@@ -129,6 +136,9 @@ export const upsertUserSetListenProgress = async (
 ) => {
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
+  const [readableSet] = await db.select({ id: sets.id }).from(sets)
+    .where(and(eq(sets.id, input.setId), readableSetPredicate(userId))).limit(1);
+  if (!readableSet) throw new ListenProgressAccessError("Set not found");
   const incomingDuration = Math.max(0, input.duration, input.lastPosition);
 
   const [existing] = await db

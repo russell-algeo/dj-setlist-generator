@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { asc } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
-import { artists, sets } from "@/lib/db/schema";
+import { publicArtists as artists, publicSets as sets } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 
 const baseUrl = (() => {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { canAccessSubmission, getRequestActor } from "@/lib/auth/session";
+import { canManageSubmission, getRequestActor } from "@/lib/auth/session";
 import { cancelSubmissionSetRun, getSubmissionSetRun } from "@/lib/jobs/submissions";
 
 type Params = {
@@ -17,7 +17,7 @@ export async function POST(_request: Request, { params }: Params) {
   }
 
   const { submissionId, setRunId } = await params;
-  const allowed = await canAccessSubmission(actor, submissionId);
+  const allowed = await canManageSubmission(actor, submissionId);
   if (!allowed) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

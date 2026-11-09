@@ -20,6 +20,7 @@ const importSet = async (jsonPath: string) => {
   const relativeIdentity = path.relative(OUTPUT_ROOT, jsonPath);
 
   return upsertArchiveSet({
+    access: { visibility: "public" },
     payload,
     provenance: {
       source: "output",

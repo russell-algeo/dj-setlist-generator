@@ -1,6 +1,7 @@
-import { sql } from "drizzle-orm";
+import { eq, getTableColumns, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -203,11 +204,30 @@ export const trackArtists = app.table(
   }),
 );
 
+// Collection membership is the authority for private content, not global admin flags.
+export const archiveCollections = app.table("archive_collections", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  slug: text("slug").notNull().unique(),
+  title: text("title").notNull(),
+  ...timestamps(),
+});
+export const archiveCollectionMembers = app.table("archive_collection_members", {
+  collectionId: uuid("collection_id").notNull().references(() => archiveCollections.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("viewer"),
+  ...timestamps(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.collectionId, table.userId] }),
+  roleCheck: check("archive_collection_member_role_check", sql`${table.role} in ('viewer', 'manager')`),
+}));
+
 export const sets = app.table(
   "sets",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     slug: text("slug").notNull(),
+    visibility: text("visibility").notNull().default("private"),
+    collectionId: uuid("collection_id").references(() => archiveCollections.id, { onDelete: "restrict" }),
     title: text("title").notNull(),
     normalizedTitle: text("normalized_title").notNull(),
     sourcePlatform: text("source_platform"),
@@ -224,11 +244,25 @@ export const sets = app.table(
     ...timestamps(),
   },
   (table) => ({
+    visibilityCheck: check("sets_visibility_check", sql`${table.visibility} in ('public', 'private')`),
+    privateScopeCheck: check("sets_private_scope_check", sql`(${table.visibility} = 'public' and ${table.collectionId} is null) or (${table.visibility} = 'private' and ${table.collectionId} is not null)`),
+    collectionIdx: index("sets_collection_idx").on(table.collectionId),
     slugIdx: uniqueIndex("sets_slug_idx").on(table.slug),
     sourceUrlIdx: uniqueIndex("sets_source_url_idx").on(table.sourceUrl),
     normalizedTitleIdx: index("sets_normalized_title_idx").on(table.normalizedTitle),
   }),
 );
+
+export const setMedia = app.table("set_media", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  setId: uuid("set_id").notNull().unique().references(() => sets.id, { onDelete: "cascade" }),
+  revision: text("revision").notNull(),
+  contentType: text("content_type").notNull(),
+  durationSeconds: numeric("duration_seconds", { precision: 12, scale: 6 }).notNull(),
+  recordingSources: jsonb("recording_sources").notNull(),
+  sourceSpans: jsonb("source_spans").notNull(),
+  ...timestamps(),
+});
 
 export const setArtists = app.table(
   "set_artists",
@@ -354,6 +388,8 @@ export const submissions = ops.table(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     mode: text("mode").notNull(),
+    visibility: text("visibility").notNull().default("private"),
+    collectionId: uuid("collection_id").references(() => archiveCollections.id, { onDelete: "restrict" }),
     status: text("status").notNull(),
     artistName: text("artist_name"),
     artistAliases: jsonb("artist_aliases").default(sql`'[]'::jsonb`).notNull(),
@@ -368,6 +404,7 @@ export const submissions = ops.table(
     ...timestamps(),
   },
   (table) => ({
+    privateScopeCheck: check("submissions_private_scope_check", sql`(${table.visibility} = 'public' and ${table.collectionId} is null) or (${table.visibility} = 'private' and ${table.collectionId} is not null)`),
     requestedByIdx: index("submissions_requested_by_idx").on(table.requestedBy),
     statusIdx: index("submissions_status_idx").on(table.status),
   }),
@@ -413,6 +450,9 @@ export const setRuns = ops.table(
     stage: text("stage"),
     attemptCount: integer("attempt_count").default(0).notNull(),
     sourceUrl: text("source_url").notNull(),
+    publicationVisibility: text("publication_visibility").notNull().default("private"),
+    targetSetId: uuid("target_set_id").references(() => sets.id, { onDelete: "restrict" }),
+    collectionId: uuid("collection_id").references(() => archiveCollections.id, { onDelete: "restrict" }),
     sourcePlatform: text("source_platform"),
     setTitle: text("set_title"),
     createPlaylist: boolean("create_playlist").default(false).notNull(),
@@ -431,6 +471,7 @@ export const setRuns = ops.table(
     ...timestamps(),
   },
   (table) => ({
+    privateTargetCheck: check("set_runs_private_target_check", sql`(${table.publicationVisibility} = 'public' and ${table.targetSetId} is null and ${table.collectionId} is null) or (${table.publicationVisibility} = 'private' and ${table.targetSetId} is not null and ${table.collectionId} is not null)`),
     archiveRemovedAtIdx: index("set_runs_archive_removed_at_idx").on(table.archiveRemovedAt),
     publishedSetIdx: index("set_runs_published_set_id_idx").on(table.publishedSetId),
     requestedByIdx: index("set_runs_requested_by_idx").on(table.requestedBy),
@@ -539,3 +580,18 @@ export const authTables = {
   sessionsTable: sessions,
   verificationTokensTable: verificationTokens,
 };
+
+// Public archive code reads these projections, never mixed-visibility base rows.
+export const publicSets = app.view("public_sets").as((qb) => qb.select().from(sets).where(eq(sets.visibility, "public")));
+export const publicSetEntries = app.view("public_set_entries").as((qb) => qb.select(getTableColumns(setEntries)).from(setEntries)
+  .where(sql`exists (select 1 from app.sets s where s.id = ${setEntries.setId} and s.visibility = 'public')`));
+export const publicSetArtists = app.view("public_set_artists").as((qb) => qb.select(getTableColumns(setArtists)).from(setArtists)
+  .where(sql`exists (select 1 from app.sets s where s.id = ${setArtists.setId} and s.visibility = 'public')`));
+export const publicSetSourceLinks = app.view("public_set_source_links").as((qb) => qb.select(getTableColumns(setSourceLinks)).from(setSourceLinks)
+  .where(sql`exists (select 1 from app.sets s where s.id = ${setSourceLinks.setId} and s.visibility = 'public')`));
+export const publicArtists = app.view("public_artists").as((qb) => qb.select(getTableColumns(artists)).from(artists)
+  .where(sql`exists (select 1 from app.set_artists sa join app.sets s on s.id = sa.set_id where sa.artist_id = ${artists.id} and s.visibility = 'public')`));
+export const publicTracks = app.view("public_tracks").as((qb) => qb.select(getTableColumns(tracks)).from(tracks)
+  .where(sql`exists (select 1 from app.set_entries se join app.sets s on s.id = se.set_id where se.track_id = ${tracks.id} and s.visibility = 'public')`));
+export const publicSubmissions = ops.view("public_submissions").as((qb) => qb.select().from(submissions).where(eq(submissions.visibility, "public")));
+export const publicSetRuns = ops.view("public_set_runs").as((qb) => qb.select().from(setRuns).where(eq(setRuns.publicationVisibility, "public")));

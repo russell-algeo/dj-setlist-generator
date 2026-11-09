@@ -1,4 +1,5 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { assertPublicationTarget, type PublicationAccess } from "./publication-access";
 
 import { getDb } from "@/lib/db/client";
 import {
@@ -35,6 +36,7 @@ type PublishSource = "output" | "worker";
 type UpsertArchiveSetInput = {
   db?: DbClient;
   payload: ArchiveSetPayload;
+  access: PublicationAccess;
   provenance: {
     source: PublishSource;
     relativeJsonPath?: string;
@@ -280,17 +282,22 @@ export const upsertArchiveSet = async ({
   db = getDb(),
   payload,
   provenance,
+  access,
 }: UpsertArchiveSetInput) => {
   const mixInfo = payload.mix_info;
   const setTitle = String(mixInfo.title ?? "Unknown Set");
   const sourceUrl = (mixInfo.url as string | undefined) ?? null;
   const mixArtistName = String(mixInfo.artist_name ?? "").trim();
   const artistName = mixArtistName || null;
-  const artist = artistName ? await upsertArtist(db, artistName, mixInfo) : null;
   const proposedSetSlug = makeSlug(setTitle, hashSuffix(sourceUrl ?? setTitle));
-  const [existingSet] = sourceUrl
-    ? await db.select().from(sets).where(eq(sets.sourceUrl, sourceUrl)).limit(1)
-    : [];
+  // Resolve the trusted target before any shared artist/track writes. A private
+  // run never discovers ownership through a matching URL, slug, or payload flag.
+  const [existingSet] = await db.select().from(sets).where(
+    access.visibility === "private" ? eq(sets.id, access.setId)
+      : sourceUrl ? eq(sets.sourceUrl, sourceUrl) : eq(sets.slug, proposedSetSlug),
+  ).limit(1);
+  assertPublicationTarget(access, existingSet);
+  const artist = access.visibility === "public" && artistName ? await upsertArtist(db, artistName, mixInfo) : null;
   const setSlug = existingSet?.slug ?? proposedSetSlug;
   const totalTracks = Number(payload.metadata.total_tracks ?? payload.tracks.length ?? 0);
   const uncertainTracks = Number(payload.metadata.uncertain_tracks ?? 0);
@@ -302,38 +309,40 @@ export const upsertArchiveSet = async ({
     slug: setSlug,
     title: setTitle,
     normalizedTitle: normalizeText(setTitle),
-    sourcePlatform,
-    sourceUrl,
+    visibility: access.visibility,
+    ...(access.visibility === "public" ? { sourcePlatform, sourceUrl } : {}),
     durationSeconds,
     uploader: (mixInfo.uploader as string | undefined) ?? null,
     imageUrl: resolveSetSpecificImageUrl(mixInfo),
     recognitionRate,
     metadata: {
+      ...(access.visibility === "private" ? asRecord(existingSet?.metadata) : {}),
       mixInfo,
       summary: payload.metadata,
       importProvenance: provenance,
     },
   } as const;
 
-  const upsertSet = db.insert(sets).values(setValues);
-
-  if (sourceUrl) {
-    await upsertSet.onConflictDoUpdate({
-      target: sets.sourceUrl,
-      set: { ...setValues, updatedAt: new Date() },
-    });
+  if (access.visibility === "private") {
+    // The protected row was reserved before dispatch. Never create or downgrade
+    // it from worker payload, including on replay or a same-source collision.
+    const changed = await db.update(sets).set({ ...setValues, updatedAt: new Date() }).where(and(
+      eq(sets.id, access.setId), eq(sets.visibility, "private"), eq(sets.collectionId, access.collectionId),
+    )).returning({ id: sets.id });
+    if (changed.length !== 1) throw new Error("Private publication target changed");
   } else {
+    const upsertSet = db.insert(sets).values(setValues);
     await upsertSet.onConflictDoUpdate({
-      target: sets.slug,
+      target: sourceUrl ? sets.sourceUrl : sets.slug,
       set: { ...setValues, updatedAt: new Date() },
+      setWhere: eq(sets.visibility, "public"),
     });
   }
-
-  const [setRecord] = await db
-    .select()
-    .from(sets)
-    .where(sourceUrl ? eq(sets.sourceUrl, sourceUrl) : eq(sets.slug, setSlug))
-    .limit(1);
+  const [setRecord] = await db.select().from(sets).where(
+    access.visibility === "private"
+      ? and(eq(sets.id, access.setId), eq(sets.visibility, "private"), eq(sets.collectionId, access.collectionId))
+      : and(eq(sets.visibility, "public"), sourceUrl ? eq(sets.sourceUrl, sourceUrl) : eq(sets.slug, setSlug)),
+  ).limit(1);
 
   if (!setRecord) {
     throw new Error(`Failed to upsert set ${setTitle}`);
@@ -346,7 +355,7 @@ export const upsertArchiveSet = async ({
       .onConflictDoNothing();
   }
 
-  const sourceLinks = buildSourceLinks({
+  const sourceLinks = access.visibility === "private" ? [] : buildSourceLinks({
     durationSeconds,
     mixInfo,
     sourcePlatform,
@@ -387,7 +396,9 @@ export const upsertArchiveSet = async ({
 
   for (const [index, trackRow] of payload.tracks.entries()) {
     const isUnknown = String(trackRow.artist ?? "") === "Unknown";
-    const trackRecord = isUnknown ? null : await upsertTrack(db, trackRow);
+    // Private evidence stays on its protected entry. Do not overwrite shared
+    // catalog metadata, artist images, track links, or recognition provenance.
+    const trackRecord = isUnknown || access.visibility === "private" ? null : await upsertTrack(db, trackRow);
 
     await db.insert(setEntries).values({
       setId: setRecord.id,

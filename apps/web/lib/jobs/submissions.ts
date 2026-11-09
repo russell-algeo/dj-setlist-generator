@@ -3,6 +3,7 @@ import "server-only";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { readableSetPredicate, readableSubmissionPredicate } from "@/lib/archive/access-policy";
 import { getDb } from "@/lib/db/client";
 import {
   discoveryCandidates,
@@ -184,6 +185,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
     .insert(submissions)
     .values({
       requestedBy: actor.userId,
+      visibility: "public",
       mode: input.mode,
       status: "queued",
       artistName: input.artistName ?? null,
@@ -216,8 +218,11 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
     const existingCompleted = await db
       .select({ sourceUrl: setRuns.sourceUrl, publishedSetId: setRuns.publishedSetId })
       .from(setRuns)
+      .innerJoin(sets, eq(sets.id, setRuns.publishedSetId))
       .where(
         and(
+          eq(setRuns.publicationVisibility, "public"),
+          eq(sets.visibility, "public"),
           inArray(setRuns.sourceUrl, normalizedUrls),
           eq(setRuns.status, "completed"),
           isNotNull(setRuns.publishedSetId),
@@ -236,6 +241,7 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
       return {
         submissionId: submission.id,
         requestedBy: actor.userId,
+        publicationVisibility: "public",
         status: existingPublishedSetId ? "completed" : "queued",
         stage: existingPublishedSetId ? "deduped" : null,
         sourceUrl,
@@ -266,11 +272,11 @@ export const createSubmission = async (actor: SessionActor, input: CreateSubmiss
   return { submission, warnings };
 };
 
-export const getSubmissionDetail = async (submissionId: string) => {
+export const getSubmissionDetail = async (submissionId: string, actor: SessionActor) => {
   const [submission] = await db
     .select()
     .from(submissions)
-    .where(eq(submissions.id, submissionId))
+    .where(and(eq(submissions.id, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin)))
     .limit(1);
 
   if (!submission) {
@@ -330,7 +336,7 @@ export const getSubmissionDetail = async (submissionId: string) => {
     ? await db
         .select({ id: sets.id, slug: sets.slug })
         .from(sets)
-        .where(inArray(sets.id, publishedSetIds))
+        .where(and(inArray(sets.id, publishedSetIds), readableSetPredicate(actor.userId)))
     : [];
 
   const leaseRollupsByRun = new Map(
@@ -362,12 +368,12 @@ export const listSubmissionsForActor = async (actor: SessionActor) =>
   db
     .select()
     .from(submissions)
-    .where(actor.isAdmin ? undefined : eq(submissions.requestedBy, actor.userId))
+    .where(readableSubmissionPredicate(actor.userId, actor.isAdmin))
     .orderBy(desc(submissions.createdAt))
     .limit(100);
 
 export const getDashboardSummary = async (actor: SessionActor) => {
-  const whereClause = actor.isAdmin ? undefined : eq(submissions.requestedBy, actor.userId);
+  const whereClause = readableSubmissionPredicate(actor.userId, actor.isAdmin);
   const [submissionCounts] = await db
     .select({
       total: sql<number>`count(${submissions.id})`,
@@ -378,9 +384,10 @@ export const getDashboardSummary = async (actor: SessionActor) => {
     .where(whereClause);
 
   const recentRuns = await db
-    .select()
+    .select({ run: setRuns })
     .from(setRuns)
-    .where(actor.isAdmin ? undefined : eq(setRuns.requestedBy, actor.userId))
+    .innerJoin(submissions, eq(submissions.id, setRuns.submissionId))
+    .where(readableSubmissionPredicate(actor.userId, actor.isAdmin))
     .orderBy(desc(setRuns.createdAt))
     .limit(10);
 
@@ -388,7 +395,7 @@ export const getDashboardSummary = async (actor: SessionActor) => {
     totalSubmissions: Number(submissionCounts?.total ?? 0),
     activeSubmissions: Number(submissionCounts?.active ?? 0),
     failedSubmissions: Number(submissionCounts?.failed ?? 0),
-    recentRuns,
+    recentRuns: recentRuns.map(({ run }) => run),
   };
 };
 

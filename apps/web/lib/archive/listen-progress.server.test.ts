@@ -16,16 +16,20 @@ type ProgressRow = typeof userSetListenProgress.$inferSelect;
 
 // Exercise the persistence boundary without accessing the application's live database.
 // Decode real Drizzle WHERE parameters so an unscoped read fails the isolation tests.
-const createProgressStore = (duration: number | null = 100) => {
+const createProgressStore = (duration: number | null = 100, canRead = { value: true }) => {
   const records = new Map<string, ProgressRow>();
   const dialect = new PgDialect();
   const db = {
     select: () => ({
       from: (table: unknown) => ({
         where: (condition: SQL) => {
-          const { params } = dialect.sqlToQuery(condition);
+          const { params, sql } = dialect.sqlToQuery(condition);
+          if (table === sets) {
+            expect(sql).toContain("visibility");
+            expect(sql).toContain("archive_collection_members");
+          }
           const rows = table === sets
-            ? params[0] === setId ? [{ durationSeconds: duration, sourceUrl: null }] : []
+            ? params[0] === setId && canRead.value ? [{ id: setId, durationSeconds: duration, sourceUrl: null }] : []
             : [...records.values()].filter((row) => row.userId === params[0] && params.slice(1).includes(row.setId));
           return Object.assign(Promise.resolve(rows), { limit: async (limit: number) => rows.slice(0, limit) });
         },
@@ -48,6 +52,20 @@ const createProgressStore = (duration: number | null = 100) => {
 };
 
 describe("persisted listened markers", () => {
+  it("rechecks collection access for reads and both mutations after revocation", async () => {
+    const access = { value: true };
+    const { db, records } = createProgressStore(100, access);
+    await setUserSetListened("user-a", setId, true, { db, now });
+    const saved = JSON.stringify([...records]);
+    access.value = false;
+    await expect(listUserSetListenProgress("user-a", [setId], { db })).resolves.toEqual([]);
+    await expect(setUserSetListened("user-a", setId, false, { db, now })).resolves.toBeNull();
+    await expect(upsertUserSetListenProgress("user-a", {
+      duration: 100, intervals: [[0, 80]], lastPosition: 80, setId, sourceUrl: null,
+    }, { db, now })).rejects.toThrow("Set not found");
+    expect(JSON.stringify([...records])).toBe(saved);
+  });
+
   it("marks an externally heard set and preserves its timestamp on repeated requests", async () => {
     const { db, records } = createProgressStore();
     const first = await setUserSetListened("user-a", setId, true, { db, now });

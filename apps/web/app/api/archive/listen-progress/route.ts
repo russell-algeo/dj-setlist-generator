@@ -3,6 +3,7 @@ import { ZodError, z } from "zod";
 
 import { parseListenIntervals } from "@/lib/archive/listen-progress";
 import {
+  ListenProgressAccessError,
   listUserSetListenProgress,
   setUserSetListened,
   upsertUserSetListenProgress,
@@ -50,6 +51,7 @@ export async function GET(request: Request) {
     const progress = await listUserSetListenProgress(actor.userId, setIds);
     return NextResponse.json({ progress });
   } catch (error) {
+    if (error instanceof ListenProgressAccessError) return NextResponse.json({ error: "Set not found" }, { status: 404 });
     if (error instanceof ZodError) {
       return NextResponse.json(
         { error: error.issues[0]?.message ?? "Invalid set ids" },
@@ -84,6 +86,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ progress });
   } catch (error) {
+    if (error instanceof ListenProgressAccessError) return NextResponse.json({ error: "Set not found" }, { status: 404 });
     if (error instanceof ZodError) {
       return NextResponse.json(
         { error: error.issues[0]?.message ?? "Invalid listen progress payload" },
@@ -110,6 +113,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ progress });
   } catch (error) {
+    if (error instanceof ListenProgressAccessError) return NextResponse.json({ error: "Set not found" }, { status: 404 });
     if (error instanceof ZodError || error instanceof SyntaxError) {
       return NextResponse.json({ error: "Invalid listened marker payload" }, { status: 400 });
     }

@@ -243,6 +243,17 @@ describe("set workflow finalization during rollout", () => {
     expect(mockedDb.update).not.toHaveBeenCalled();
     expect(mockedDb.delete).not.toHaveBeenCalled();
   });
+  it("treats private or missing runs as unavailable before finalizer side effects", async () => {
+    prepare();
+    const where = vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) });
+    mockedDb.select.mockReset().mockReturnValue({ from: () => ({ where }) });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect(await finalizeSetRunWorkflow(payload)).toEqual({ action: "missing_set_run" });
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+    expect(query.sql).toContain('"publication_visibility"'); expect(query.params).toContain("public");
+    expect(mockedDb.update).not.toHaveBeenCalled(); expect(mockedDb.execute).not.toHaveBeenCalled();
+    expect(mockedDb.delete).not.toHaveBeenCalled(); expect(createWorkerEvent).not.toHaveBeenCalled(); expect(dispatchProcessSetWorkflow).not.toHaveBeenCalled();
+  });
   it("honors pending cancellation before a failed terminal callback", async () => {
     prepare({ status: "failed", cancelRequestedAt: new Date() });
     const { finalizeSetRunWorkflow } = await import("./dispatch");

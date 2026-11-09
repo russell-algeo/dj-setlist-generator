@@ -24,7 +24,7 @@ const db = getDb();
 // ---------------------------------------------------------------------------
 
 const getSetRunRecoveryState = async (setRunId: string) => {
-  const [run] = await db.select().from(setRuns).where(eq(setRuns.id, setRunId)).limit(1);
+  const [run] = await db.select().from(setRuns).where(and(eq(setRuns.id, setRunId), eq(setRuns.publicationVisibility, "public"))).limit(1);
 
   if (!run) {
     return null;
@@ -82,6 +82,7 @@ const getSetRunRecoveryState = async (setRunId: string) => {
 // Finalizer reads are snapshots. Recheck cancellation, publication and workflow
 // ownership in every recovery mutation so a late callback cannot revive a run.
 const recoveryEligibility = (run: typeof setRuns.$inferSelect) => and(
+  eq(setRuns.publicationVisibility, "public"),
   eq(setRuns.id, run.id),
   eq(setRuns.status, run.status),
   eq(setRuns.attemptCount, run.attemptCount),
@@ -237,7 +238,7 @@ export const dispatchQueuedArtistSubmission = async () => {
   const claimedSubmissionId = claimed.rows[0]?.id ? String(claimed.rows[0].id) : null;
 
   const [submission] = claimedSubmissionId
-    ? await db.select().from(submissions).where(eq(submissions.id, claimedSubmissionId)).limit(1)
+    ? await db.select().from(submissions).where(and(eq(submissions.id, claimedSubmissionId), eq(submissions.visibility, "public"))).limit(1)
     : [];
 
   if (!submission) {
@@ -334,7 +335,7 @@ export const dispatchAllQueuedSetRuns = async () => {
   }
 
   const claimedIds = claimed.rows.map((r) => String(r.id));
-  const queuedRuns = await db.select().from(setRuns).where(inArray(setRuns.id, claimedIds));
+  const queuedRuns = await db.select().from(setRuns).where(and(inArray(setRuns.id, claimedIds), eq(setRuns.publicationVisibility, "public")));
 
   const results = await Promise.allSettled(queuedRuns.map(dispatchOneSetRun));
 
@@ -363,7 +364,7 @@ export const finalizeArtistDiscoveryWorkflow = async (values: {
   const [submission] = await db
     .select()
     .from(submissions)
-    .where(eq(submissions.id, values.submissionId))
+    .where(and(eq(submissions.id, values.submissionId), eq(submissions.visibility, "public")))
     .limit(1);
 
   if (!submission) {
@@ -412,7 +413,7 @@ export const finalizeArtistDiscoveryWorkflow = async (values: {
       completedAt: now,
       updatedAt: now,
     })
-    .where(eq(submissions.id, values.submissionId));
+    .where(and(eq(submissions.id, values.submissionId), eq(submissions.visibility, "public")));
 
   await createWorkerEvent({
     submissionId: values.submissionId,

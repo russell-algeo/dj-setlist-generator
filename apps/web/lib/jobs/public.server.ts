@@ -2,6 +2,7 @@ import "server-only";
 
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
+import { readableSubmissionPredicate } from "@/lib/archive/access-policy";
 import type { SessionActor } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { setRuns, submissions, workerEvents } from "@/lib/db/schema";
@@ -211,7 +212,7 @@ export const listPublicSubmissionsForActor = async (
 ): Promise<SubmissionListItemDto[]> => {
   const filter = normalizePublicSubmissionFilter(requestedFilter);
   const whereClause = and(
-    actor.isAdmin ? undefined : eq(submissions.requestedBy, actor.userId),
+    readableSubmissionPredicate(actor.userId, actor.isAdmin),
     getFilterClause(filter),
   );
 
@@ -434,8 +435,8 @@ export const serializeSubmissionDetail = (
   };
 };
 
-export const getPublicSubmissionDetail = async (submissionId: string) => {
-  const detail = await getSubmissionDetail(submissionId);
+export const getPublicSubmissionDetail = async (submissionId: string, actor: SessionActor) => {
+  const detail = await getSubmissionDetail(submissionId, actor);
   if (!detail) {
     return null;
   }
@@ -483,11 +484,13 @@ export const getPublicSubmissionDetail = async (submissionId: string) => {
 };
 
 export const getPublicSubmissionRunEventsPage = async ({
+  actor,
   page,
   pageSize,
   setRunId,
   submissionId,
 }: {
+  actor: SessionActor;
   page: number;
   pageSize: number;
   setRunId: string;
@@ -496,7 +499,8 @@ export const getPublicSubmissionRunEventsPage = async ({
   const [run] = await db
     .select({ id: setRuns.id })
     .from(setRuns)
-    .where(and(eq(setRuns.id, setRunId), eq(setRuns.submissionId, submissionId)))
+    .innerJoin(submissions, eq(submissions.id, setRuns.submissionId))
+    .where(and(eq(setRuns.id, setRunId), eq(setRuns.submissionId, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin)))
     .limit(1);
 
   if (!run) {

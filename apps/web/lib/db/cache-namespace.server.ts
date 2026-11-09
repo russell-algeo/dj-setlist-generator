@@ -19,4 +19,4 @@ export const buildDatabaseCacheNamespace = (connectionString: string): string =>
 };
 
 export const getArchiveCacheNamespace = (): string =>
-  buildDatabaseCacheNamespace(requireEnv("databaseUrl") as string);
+  `${buildDatabaseCacheNamespace(requireEnv("databaseUrl") as string)}:public-acl-v1`;

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { refreshArchiveHomeMaterializedViews } from "@/lib/archive/home-materialized-views";
 import { assertInternalRequest } from "@/lib/auth/session";
+import { publicationAccessFromRun, assertPublicationTarget, type PublicationAccess } from "@/lib/archive/publication-access";
 import { upsertArchiveSet } from "@/lib/archive/publish-set";
 import { readRequestBody } from "@/lib/http/request-body";
 import { getDb } from "@/lib/db/client";
@@ -42,14 +43,17 @@ export async function POST(request: Request) {
     isNull(setRuns.cancelRequestedAt),
     hasUncommittedPublication(),
     matchesWorkflowOwner(body.workflowRunId),
-  )).returning({ id: setRuns.id });
+  )).returning({ id: setRuns.id, publicationVisibility: setRuns.publicationVisibility,
+    targetSetId: setRuns.targetSetId, collectionId: setRuns.collectionId });
 
   let published: Awaited<ReturnType<typeof upsertArchiveSet>>;
+  let access: PublicationAccess;
   if (!claimed) {
     const [run] = await db.select().from(setRuns).where(eq(setRuns.id, body.setRunId)).limit(1);
     if (!run) {
       return NextResponse.json({ error: "Set run not found", errorCode: "run_not_found" }, { status: 404 });
     }
+    access = publicationAccessFromRun(run);
     const metadata = (run.sourceMetadata ?? {}) as Record<string, unknown>;
     const owner = metadata.active_workflow_run_id;
     if (typeof owner === "string" && owner !== body.workflowRunId) {
@@ -58,6 +62,10 @@ export async function POST(request: Request) {
     // A response may have been lost after publication. Replay without rewriting
     // archive data; this also preserves legitimately published legacy runs.
     if (run.publishedSetId) {
+      const [target] = await db.select({ id: sets.id, visibility: sets.visibility, collectionId: sets.collectionId })
+        .from(sets).where(eq(sets.id, run.publishedSetId)).limit(1);
+      if (!target) return NextResponse.json({ error: "Published target no longer exists" }, { status: 409 });
+      assertPublicationTarget(access, target);
       const saved = metadata.publication_result as typeof published | undefined;
       if (saved?.setId === run.publishedSetId) {
         published = saved;
@@ -77,7 +85,9 @@ export async function POST(request: Request) {
     // marker on exceptions and caller timeouts; reconciliation, not cancellation
     // or a second writer, is required for an uncertain publication outcome.
     try {
+      access = publicationAccessFromRun(claimed);
       published = await upsertArchiveSet({
+        access,
         payload: body.payload,
         provenance: { source: "worker", setRunId: body.setRunId },
       });
@@ -120,9 +130,15 @@ export async function POST(request: Request) {
       } catch {
         console.error("publication_reconciliation_status_write_failed", { setRunId: body.setRunId });
       }
+      if (claimed.publicationVisibility === "private") {
+        return NextResponse.json({ error: "Private publication could not complete. Reconciliation is required.", errorCode: "publication_requires_reconciliation" },
+          { status: 500, headers: { "Cache-Control": "private, no-store" } });
+      }
       throw error;
     }
   }
+
+  if (access.visibility === "private") return NextResponse.json(published);
 
   try {
     await refreshArchiveHomeMaterializedViews();

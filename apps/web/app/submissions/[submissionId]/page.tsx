@@ -23,7 +23,7 @@ export default async function SubmissionDetailPage({ params }: DetailPageProps) 
   const hasAccess = await canAccessSubmission(actor, submissionId);
   if (!hasAccess) notFound();
 
-  const detail = await getPublicSubmissionDetail(submissionId);
+  const detail = await getPublicSubmissionDetail(submissionId, actor);
   if (!detail) notFound();
 
   return (

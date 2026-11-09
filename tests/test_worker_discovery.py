@@ -33,6 +33,12 @@ class DiscoveryJobTests(unittest.TestCase):
         job.run('submission')
         statements = [call.args[0] for call in self.mocks['execute'].call_args_list]
         self.assertTrue(any('insert into ops.set_runs' in sql and 'not exists' in sql for sql in statements))
+        run_sql = next(sql for sql in statements if 'insert into ops.set_runs' in sql)
+        self.assertIn('publication_visibility', run_sql)
+        self.assertIn("pub.publication_visibility = 'public'", run_sql)
+        self.assertIn("published.visibility = 'public'", run_sql)
+        self.assertIn('pub.archive_removed_at is null', run_sql)
+        self.assertIn("s.visibility = 'public'", run_sql)
         self.mocks['_dispatch_pending'].assert_called_once()
         self.assertEqual(Config.MAX_SETS_PER_ARTIST, self.original_limit)
 
