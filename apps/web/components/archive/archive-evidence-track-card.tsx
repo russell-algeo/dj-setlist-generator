@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import type { CSSProperties, MouseEvent } from "react";
 
 const joinClasses = (...values: Array<string | false | null | undefined>) =>

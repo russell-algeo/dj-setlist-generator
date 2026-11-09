@@ -709,7 +709,10 @@ export function ArchiveHomeExplorer({
     () => new Map(artistCards.map((artistCard) => [artistCard.slug, artistCard])),
     [artistCards],
   );
-  const scopedTrackCatalog = artistCards.length === 0 ? [] : atlasPayload.trackCatalog;
+  const scopedTrackCatalog = useMemo(
+    () => (artistCards.length === 0 ? [] : atlasPayload.trackCatalog),
+    [artistCards.length, atlasPayload.trackCatalog],
+  );
   const visibleArtists = useMemo(() => {
     const normalizedQuery = normalizeSearchText(deferredArtistQuery);
     return artistCards.filter((artistCard) =>
@@ -1455,7 +1458,7 @@ export function ArchiveHomeExplorer({
       }
       // Tap on already-hovered card: select
       setFocusArtistSlug(artistSlug);
-      setSelectedArtistSlugs((current) => {
+      setSelectedArtistSlugs(() => {
         const next = [artistSlug];
         latestSelectedArtistSlugsRef.current = next;
         if (!artistPanePointerInside) {
