@@ -19,6 +19,18 @@ Automatically generate setlists from DJ mixes on YouTube or SoundCloud, complete
 - Resume from where you left off after crashes
 - Push notifications via ntfy.sh (optional)
 
+## Development and release workflow
+
+Use the permanent `preview` branch for development. The repository's main/Production branch is currently named `remote-deployment`; there is no separate branch named `main`.
+
+1. Fetch the latest refs and inspect the working tree before editing. Coordinate concurrent agents working on `preview`; preserve other work and never force-push or reset it to resolve a conflict.
+2. Develop and run local checks on `preview`. Before pushing a worker/app change, coordinate a quiet development queue and avoid new Preview submissions during the transition. A push advances the worker ref immediately, but does not move the stable web alias. Freeze the candidate, build that exact commit with Preview configuration, verify development routing, and assign the stable alias before running bounded live checks. Confirm that the web deployment and worker run use the same commit; a matching branch name alone is not enough.
+3. Review the diff and run the required checks in [DEPLOYMENT.md](DEPLOYMENT.md). When explicitly authorized to commit and publish, open a PR from `preview` into `remote-deployment`. Merge and deployment require the applicable release approval; development does not authorize a Production release.
+4. Keep `preview` after the PR is merged. Reconcile the reviewed mainline merge back into `preview`, using a non-forced fast-forward when ancestry permits. If the branches have diverged, review a normal merge rather than discarding either side.
+5. Verify the resulting Preview deployment and stable alias before resuming work. Updating a branch does not automatically move the stable Preview alias. Do not delete the permanent branch as post-merge cleanup.
+
+**Preview configuration:** the worker ref is `preview`. Before a ref or deployment cutover, verify the narrowly scoped callback trust and workflow inputs, then build the exact candidate with the Preview configuration and assign the stable alias. Retain the old branch/trust until bounded checks pass. See the [migration checklist](DEPLOYMENT.md#permanent-preview-branch-migration) for required ordering and the recorded migration baseline. This workflow does not rename or replace Production.
+
 ## Installation
 
 ### 1. Install Python dependencies

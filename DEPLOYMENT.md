@@ -2,7 +2,33 @@
 
 This is the operational runbook for the existing `russell-algeo/dj-setlist-generator` repository and Vercel project `dj-setlist-generator`. Read `AGENTS.md` before changing source or committing. This document is not authorization to deploy, change access, migrate data, or incur charges. Use the current task's authorization and applicable confirmation rules.
 
-## Release state and evidence
+## Permanent Preview branch migration
+
+Russell requested `preview` as the permanent development branch on 2026-11-09. Agents develop and test there, then propose a reviewed PR into the current main/Production branch, `remote-deployment`. Keep `preview` after merges. Do not create a branch named `main` or rename Production as part of this change. The [README workflow](README.md#development-and-release-workflow) is the intended ongoing process.
+
+**Migration baseline, observed 2026-11-09 before cutover:**
+
+- Production/mainline: `remote-deployment` at `57734820de733a76a032846538979b679a4edd02` (PR #30), READY deployment `dpl_93FnGkVUC8DukJ5Tyzjy76umfWEE`.
+- Reviewed repair candidate: open draft [PR #31](https://github.com/russell-algeo/dj-setlist-generator/pull/31), head `be84b9b755b39ed43bae6b3e38cd39c22d21d9e2`; its separate Vercel Preview build `dpl_AVnxwiEqQpw3K5TXsmMwdZMTvuAg` is READY. It is not the stable Preview alias or a Production release.
+- Existing Preview worker ref: `codex/preview-worker-isolation` at `6e522e9c55547334b77a8cf0e681ac5cc3b6ea6f`. The Preview-scoped `GITHUB_WORKFLOW_REF` still names this branch, with no branch-specific override. `APP_ENVIRONMENT=preview` resolves to the development worker target.
+- Stable Preview alias: `dj-setlist-generator-listened-preview.vercel.app`, still on `dpl_HLExpWtjnfwAc8X68QwwrfoS8iJH`, source `76c5e994e7b044e8e0f7b3a4d42f1c9d901df509`. It is a deployment alias, not an automatically advancing branch domain.
+- The remote `preview` ref now exists at the reviewed PR #31 head `be84b9b755b39ed43bae6b3e38cd39c22d21d9e2`; no existing ref was overwritten. At this baseline, routing, trust and stable-alias cutover were pending. Branch creation alone is not migration completion. Recheck the live configuration and release evidence rather than treating these historical deployment IDs as the latest state.
+
+### Ordered cutover acceptance checklist
+
+- Recheck PR #31, all relevant branch heads, active/queued workflows and development submissions. Preserve concurrent edits and account for in-flight callbacks; an old empty-queue observation is not a lock.
+- Confirm the exact candidate commit and create/update `preview` without force or overwriting existing work. Keep `codex/preview-worker-isolation` available through the transition. Do not merge PR #31 or change Production merely to establish Preview.
+- Obtain the required per-action approval before adding or materially changing persistent Vercel OIDC access. The intended additional rules are Preview-only, issuer `https://token.actions.githubusercontent.com`, audience `https://github.com/russell-algeo`, repository `russell-algeo/dj-setlist-generator`, branch `preview`, and only workflow names `process-set`, `discover-artist`, and `scheduler`. Preserve existing protection and old rules while jobs drain; do not wildcard the branch, repository, workflow or environment.
+- With the applicable deployment/configuration approval, set only Preview `GITHUB_WORKFLOW_REF=preview`. Keep the development database, callback secret, OAuth clients/redirects and stable origin unchanged. The new workflow ref must include PR #31's `dispatch_generation` input before the updated dispatcher sends it.
+- Build the exact `preview` commit with Preview configuration after the ref change. Environment edits do not alter old immutable deployments. Verify READY state, source SHA and development routing before assigning the stable Preview alias to that deployment.
+- Run the approved bounded callback/cancellation test through the stable application. Verify the worker `headSha` matches the web deployment, the target is development, callbacks succeed, cancelled work does not publish, and queue/final state reconcile. No additional Spotify playlist creation is included without its own specific approval.
+- Record the verified branch, ref, trust, alias and test evidence in the release record and the existing Vault note. Only then mark migration complete. Remove obsolete branch/trust entries only with their own applicable authorization and after no deployment or job depends on them.
+
+The new trust permits the named GitHub workflows on `preview` to pass protected Preview access checks; the application still requires its internal development secret. It must not grant access to Production or replace the application's authentication. Keep the old verified ref/alias available for a controlled rollback until the transition is proven.
+
+## Historical release state and evidence
+
+The following dated material predates the current state above. Keep its exact source/test attribution; statements that the PR #30 worker patch was not yet in Production describe that earlier checkpoint, not the current release. The cutover checklist is a reusable acceptance procedure; dated execution results belong in the release evidence and the existing project Vault note.
 
 Branch heads and Vercel aliases were rechecked on **2026-11-08 UTC**. Tests below were performed on **2026-11-07 UTC**. Recheck live state before another release; these identifiers are a recovery reference, not a moving "latest" pointer.
 
@@ -46,15 +72,15 @@ Rollout constraint: no schema, secret, callback payload or production endpoint c
 
 Local sanitized evidence on Hal is in `/Users/hal/Documents/Codex/2026-11-06/task-3/live-check/`: `preview-worker-completion.json`, `preview-e2e-github-result.json`, `preview-e2e-current.json`, `preview-e2e-callback-log.txt`, `preview-media-completed.png`, `preview-spotify-completion.json`, and `preview-spotify-connected.png`. These are local audit artifacts, not files expected in a fresh clone. Do not commit credentials, browser sessions, downloaded media, or raw diagnostic logs.
 
-## Architecture and environment map
+## Architecture and target environment map
 
 Vercel runs the Next.js control plane; GitHub Actions runs media work; Neon stores application, authentication and operation state. Production and Preview share one repository and existing Actions dispatch control. They have separate database branches and callback credentials.
 
 | Component | Production | Preview / development |
 | --- | --- | --- |
-| Web and dispatched worker ref | `remote-deployment` | `codex/preview-worker-isolation` |
+| Web and dispatched worker ref | `remote-deployment` | `preview`; see the migration baseline above for the previous worker ref |
 | `APP_BASE_URL` | `https://dj-setlist-generator.vercel.app` | `https://dj-setlist-generator-listened-preview.vercel.app` |
-| App dispatch target | `APP_ENVIRONMENT=production` | Explicit `APP_ENVIRONMENT=development` yields `deployment_target=development` |
+| App dispatch target | `APP_ENVIRONMENT=production` | Current `APP_ENVIRONMENT=preview` resolves to `deployment_target=development` |
 | Neon project/database | `late-haze-65748644` / `neondb` | Same project/database name, independent branch |
 | Neon branch | `production`, `br-blue-field-a412pexb` | `development`, `br-flat-cake-a4nsqzd6` |
 | Direct endpoint | `ep-rough-dust-a4q90lxc.us-east-1.aws.neon.tech` | `ep-autumn-bar-a4f9xp8v.us-east-1.aws.neon.tech` |
