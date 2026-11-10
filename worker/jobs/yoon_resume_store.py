@@ -12,9 +12,10 @@ import re
 import uuid
 from recognition_transport import RequestDeferred
 from worker.jobs.yoon_sources import JACKSON, reviewed_source
+from worker.jobs.yoon_sydka_allowance import window_attempt_limit
 
 from worker.jobs.yoon_resume_policy import (
-    CONTINUATION_LIMIT, WINDOW_ATTEMPT_LIMIT, may_reserve,
+    CONTINUATION_LIMIT, may_reserve,
 )
 
 
@@ -290,7 +291,9 @@ class ResumeStore:
                 raise RuntimeError('private_window_not_available')
             reason = may_reserve(state,now=row['db_now'],session_started=state['session_started'],
                                  session_requests=state['session_requests'],window_attempts=len(attempts),
-                                 next_allowed_at=data.get('next_allowed_at',0),windows=self.source.windows)
+                                 next_allowed_at=data.get('next_allowed_at',0),windows=self.source.windows,
+                                 window_attempt_limit=window_attempt_limit(state, run_id=self.run_id,
+                                     index=index, attempts=attempts))
             if reason:
                 raise QueuePause(reason)
             state['requests'] += 1
@@ -334,7 +337,9 @@ class ResumeStore:
             response['error_details'] = None
             data['response'] = response
             reason = 'retry_after_needs_review' if result.retry_after_format == 'invalid' else None
-            exhausted = not valid and len(attempts)>=WINDOW_ATTEMPT_LIMIT
+            limit = window_attempt_limit(state, run_id=self.run_id,
+                                         index=result.segment_index, attempts=attempts)
+            exhausted = not valid and len(attempts)>=limit
             cur.execute('''UPDATE ops.segment_hits SET recognized=%s,track_title=%s,artist=%s,
                 shazam_track_id=%s,raw_data=%s::jsonb WHERE id=%s''',
                 (bool(valid and result.recognized),result.track_title if valid else None,

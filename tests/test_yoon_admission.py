@@ -65,7 +65,9 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):a.lock(cur)
     def test_shared_pipeline_byte_identical(self):
         here=Path(__file__).resolve().parents[1]
-        pins={'worker/jobs/shared_recognition.py': '5b5944064c2402208cfbe83ecad8a4b467e0923dc755212eec0239c07cda672c', 'worker/jobs/yoon_resume.py': '478e98b5d19c56b1f694e6794f279ce9d6b01fe3c882729164fbf037fffc1f77', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': '5deb90a7f063df2910c910e5c434d0cb6bdf0f404d1a7eb60a4d2b82b90045f2', 'recognition_transport.py': 'efd802d7fc498eee4b6a4dd4b74e0fa00ef99b3a010ed85ea0a31040d971c63d', 'worker/jobs/yoon_resume_policy.py': '04baecc12247af2ec30dff543b6d50b25ef9175188b0fcd5f71689e13eeb66d2', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
+        # Shared engine bytes stay pinned; the reviewed Sydka-only admission
+        # parameter is reflected in the private budget module's current pin.
+        pins={'worker/jobs/shared_recognition.py': '5b5944064c2402208cfbe83ecad8a4b467e0923dc755212eec0239c07cda672c', 'worker/jobs/yoon_resume.py': '478e98b5d19c56b1f694e6794f279ce9d6b01fe3c882729164fbf037fffc1f77', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': '5deb90a7f063df2910c910e5c434d0cb6bdf0f404d1a7eb60a4d2b82b90045f2', 'recognition_transport.py': 'efd802d7fc498eee4b6a4dd4b74e0fa00ef99b3a010ed85ea0a31040d971c63d', 'worker/jobs/yoon_resume_policy.py': 'b0bf11d70ba4d7dc6929a39ec10e69233694a7d4bf8270cd9b0aa1dbbec6fde9', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
         for name,expected in pins.items():
             self.assertEqual(hashlib.sha256((here/name).read_bytes()).hexdigest(),expected,name)
     def test_per_run_workflow_group(self):
