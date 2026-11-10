@@ -6,6 +6,7 @@ Provider results and conflicts are staged in ops. An existing owner connector
 applies reviewed metadata separately; the worker needs no archive write grant.
 """
 from copy import deepcopy
+from discogs_matching import merge_discogs_metadata
 import json
 import os
 import re
@@ -94,9 +95,7 @@ def merge_metadata(old, new, index, verified):
             merged[field], matches[platform] = old_url, deepcopy(old_match)
         else:
             matches[platform] = deepcopy(new_match)
-    if old.get('discogs_url') and new.get('discogs_url') and old['discogs_url'] != new['discogs_url']:
-        conflicts.append(dict(index=index, platform='discogs',
-            previous=old['discogs_url'], proposed=new['discogs_url']))
+    merge_discogs_metadata(old, new, merged, matches, index, conflicts)
     merged['platform_matches'] = matches
     return merged, conflicts
 

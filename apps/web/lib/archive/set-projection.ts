@@ -41,6 +41,13 @@ export const mapSetTrack = (row: {
     ...trackMetadata,
     ...entryMetadata,
   };
+  // Rejected release metadata must not survive a hidden Discogs link.
+  if (links.linkStatus.discogs === "unverified") {
+    merged.discogs_styles = [];
+    merged.discogs_genres = [];
+    merged.discogs_label = null;
+    merged.discogs_label_url = null;
+  }
   const confidence = normalizeArchiveConfidence(row.confidence);
   const detailGenres = Array.from(
     new Set(
@@ -93,6 +100,7 @@ export const mapSetTrack = (row: {
     detailGenres,
     label: getString(merged.discogs_label),
     labelUrl: getString(merged.discogs_label_url),
+    labelScope: merged.discogs_metadata_scope === "release" ? "release" : null,
     ...links,
     detectionCount: Number(row.detectionCount ?? 0),
     clusterDensity: getNumber(row.clusterDensity),

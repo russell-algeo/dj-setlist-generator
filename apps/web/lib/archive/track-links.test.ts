@@ -62,3 +62,36 @@ describe("archive track link evidence", () => {
     expect(selectPrimaryTrackLink({ title: "Unknown Track", spotifyUrl, youtubeUrl, discogsUrl })).toBeNull();
   });
 });
+
+describe("Discogs tracklist evidence", () => {
+  const discogsUrl = "https://www.discogs.com/release/514557";
+  it("keeps historical Discogs links legacy while requiring new evidence", () => {
+    const legacy = resolveArchiveTrackLinks({ ...empty, entryMetadata: { discogs_url: discogsUrl, link_matching_version: 2 } });
+    expect(legacy.discogsUrl).toBe(discogsUrl);
+    expect(legacy.linkStatus.discogs).toBe("legacy");
+    for (const evidence of [undefined, { status: "no_match" }, { status: "matched", url: "wrong" }]) {
+      const links = resolveArchiveTrackLinks({ ...empty, entryMetadata: {
+        discogs_url: discogsUrl, discogs_matching_version: 1, platform_matches: { discogs: evidence },
+      } });
+      expect(links.discogsUrl).toBeNull();
+      expect(links.linkStatus.discogs).toBe("unverified");
+    }
+  });
+  it("confirms tracklist matches without affecting Spotify or YouTube priority", () => {
+    const links = resolveArchiveTrackLinks({ ...empty, entryMetadata: {
+      spotify_url: spotifyUrl, youtube_url: youtubeUrl, discogs_url: discogsUrl,
+      link_matching_version: 2, discogs_matching_version: 1,
+      platform_matches: { spotify: { status: "matched", url: spotifyUrl }, youtube: confirmedYoutube,
+        discogs: { status: "matched", url: discogsUrl, reason: "release_tracklist_artist_title_version" } },
+    } });
+    expect(links.linkStatus).toEqual({ spotify: "confirmed", youtube: "confirmed", discogs: "confirmed" });
+    expect(selectPrimaryTrackLink({ title: "Checker", ...links })).toBe("spotify");
+  });
+  it("never resurrects a revoked per-entry URL from canonical metadata", () => {
+    const links = resolveArchiveTrackLinks({ ...empty, discogsUrl, entryMetadata: {
+      discogs_url: null, discogs_matching_version: 1,
+      platform_matches: { discogs: { status: "no_match", reason: "reviewed_rejection", rejected_url: discogsUrl } },
+    }, trackMetadata: { discogs_url: discogsUrl, platform_matches: { discogs: { status: "matched", url: discogsUrl } } } });
+    expect(links.discogsUrl).toBeNull();
+  });
+});

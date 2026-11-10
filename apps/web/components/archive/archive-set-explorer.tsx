@@ -3373,7 +3373,7 @@ export function ArchiveSetExplorer({
                               ) : null}
                               {track.label ? (
                                 <div className="detail-item">
-                                  <span className="detail-k">Label</span>
+                                  <span className="detail-k">{track.labelScope === "release" ? "Release label" : "Label"}</span>
                                   <span className="detail-v">{track.label}</span>
                                 </div>
                               ) : null}

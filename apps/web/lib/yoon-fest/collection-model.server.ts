@@ -14,7 +14,7 @@ const archiveTrack = z.object({
   startFmt: z.string(), endFmt: z.string().nullable(), conf: z.enum(["HIGH", "MEDIUM", "LOW", "UNCERTAIN"]),
   albumArt: z.string().nullable(), previewUrl: z.string().nullable(), bpm: z.number().nullable(),
   energy: z.number().nullable(), dance: z.number().nullable(), key: z.string().nullable(),
-  genres: z.array(z.string()), detailGenres: z.array(z.string()), label: z.string().nullable(), labelUrl: z.string().nullable(),
+  genres: z.array(z.string()), detailGenres: z.array(z.string()), label: z.string().nullable(), labelUrl: z.string().nullable(), labelScope: z.literal("release").nullable().optional(),
   spotifyUrl: z.string().nullable(), youtubeUrl: z.string().nullable(), discogsUrl: z.string().nullable(),
   linkStatus: z.object({ spotify: z.enum(["confirmed", "legacy", "unverified"]), youtube: z.enum(["confirmed", "legacy", "unverified"]), discogs: z.enum(["confirmed", "legacy", "unverified"]) }),
   detectionCount: z.number(), clusterDensity: z.number().nullable(), clusterSpan: z.number().nullable(),
