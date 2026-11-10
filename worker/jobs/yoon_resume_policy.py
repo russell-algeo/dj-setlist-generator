@@ -4,6 +4,7 @@ Request pacing and retries belong to TrackRecognizer, shared with ordinary DJ
 runs. This module does not implement a private provider retry strategy.
 """
 from __future__ import annotations
+from worker.jobs.yoon_sources import CATALOG
 
 WORKFLOW_SECONDS = 60 * 60
 CONTINUATION_LIMIT = 32
@@ -18,10 +19,12 @@ def initial_state(now):
 
 
 def may_reserve(state, *, now, session_started, session_requests, window_attempts,
-                next_allowed_at=0):
+                next_allowed_at=0, windows=479):
+    if type(windows) is not int or windows not in {source.windows for source in CATALOG.values()}:
+        raise RuntimeError('private_window_budget_invalid')
     if now + 65 >= state['created_at'] + MAX_AGE_SECONDS:
         return 'lifetime_time_budget'
-    if state['requests'] >= TOTAL_REQUEST_LIMIT:
+    if state['requests'] >= windows * WINDOW_ATTEMPT_LIMIT:
         return 'lifetime_request_budget'
     if state['continuations'] > CONTINUATION_LIMIT:
         return 'continuation_budget'

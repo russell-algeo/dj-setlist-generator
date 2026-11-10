@@ -1,4 +1,4 @@
-"""Private Jackson durable queue using existing lease/hit tables, never events.
+"""Private reviewed-source durable queue using existing lease/hit tables, never events.
 
 All mutations serialize on the scoped private run. Public initialization,
 destructive requeue, callback publication and ordinary worker statuses are not
@@ -11,6 +11,7 @@ import json
 import re
 import uuid
 from recognition_transport import RequestDeferred
+from worker.jobs.yoon_sources import JACKSON, reviewed_source
 
 from worker.jobs.yoon_resume_policy import (
     CONTINUATION_LIMIT, WINDOW_ATTEMPT_LIMIT, may_reserve,
@@ -22,6 +23,7 @@ class QueuePause(RequestDeferred):
 
 
 class ResumeStore:
+    source = JACKSON
     def __init__(self, run_id, workflow_id, attempt, connect=None):
         from worker.db import connect as default_connect
         self.run_id = str(uuid.UUID(run_id))
@@ -29,6 +31,7 @@ class ResumeStore:
             raise RuntimeError('invalid_private_owner')
         self.owner = {'workflow_run_id': workflow_id, 'run_attempt': attempt}
         self.connect = connect or default_connect
+        self.source = JACKSON
 
     @contextmanager
     def locked(self, *, owner=True):
@@ -46,9 +49,18 @@ class ResumeStore:
                 raise RuntimeError('private_resume_scope_required')
             descriptor = row['source_metadata'].get('yoon_fixed_input')
             validate_descriptor(descriptor)
+            source = reviewed_source(descriptor)
+            self.source = source
             state = dict(row['source_metadata'].get('yoon_resume') or {})
             if descriptor.get('recognition_mode') != 'resumable' or state.get('version') != 1:
                 raise RuntimeError('private_resume_required')
+            if source != JACKSON and (state.get('initialization_mode') != 'fresh'
+                    or state.get('origin') or state.get('provenance_seeded')):
+                raise RuntimeError('private_fresh_source_required')
+            if source != JACKSON or 'source_id' in state:
+                if (state.get('source_id') != source.id
+                        or state.get('source_pins') != source.pins()):
+                    raise RuntimeError('private_resume_source_changed')
             cur.execute('''SELECT user_id,role FROM app.archive_collection_members
                 WHERE collection_id=%s ORDER BY user_id''', (row['collection_id'],))
             members = [{'user_id': str(r['user_id']), 'role': r['role']} for r in cur.fetchall()]
@@ -80,7 +92,7 @@ class ResumeStore:
             if state.get('review_required'):
                 raise QueuePause('private_resume_review_required')
             reason = may_reserve(state,now=row['db_now'],session_started=row['db_now'],
-                                 session_requests=0,window_attempts=0)
+                                 session_requests=0,window_attempts=0, windows=self.source.windows)
             if reason:
                 raise QueuePause(reason)
             # No automatic takeover of an uncertain live workflow. Only a clean
@@ -93,16 +105,38 @@ class ResumeStore:
                          session_requests=0,session_started=row['db_now'], reason=None,
                          recognition_mode='resumable', status='preparing', pacing_policy='shared-production-v2')
             state['used_owners'] = used + [identity]
+            if self.source != JACKSON:
+                state.update(expected_windows=self.source.windows,
+                             source_duration_seconds=self.source.duration, bounds=self.source.bounds)
+            fresh = self.source != JACKSON and not state.get('fresh_source_initialized')
+            if fresh:
+                self.require_empty_fresh_source(cur, state)
             # Reuse ordinary lease geometry/storage without destructive initializer.
             cur.execute('''INSERT INTO ops.set_run_leases
                 (set_run_id,slot_index,segment_start_index,segment_end_index,status)
-                SELECT %s,0,i,i,'pending' FROM generate_series(0,478) i
+                SELECT %s,0,i,i,'pending' FROM generate_series(0,%s) i
                 WHERE NOT EXISTS(SELECT 1 FROM ops.set_run_leases l
-                  WHERE l.set_run_id=%s AND l.segment_start_index=i)''', (self.run_id,self.run_id))
-            if not state.get('provenance_seeded'):
+                  WHERE l.set_run_id=%s AND l.segment_start_index=i)''', (self.run_id,self.source.windows-1,self.run_id))
+            if fresh:
+                state['fresh_source_initialized'] = True
+            elif self.source == JACKSON and not state.get('provenance_seeded'):
                 self.seed_valid_evidence(cur,row,state)
             self.save_state(cur,state)
             return row['source_metadata']['yoon_fixed_input']['source_url']
+
+    def require_empty_fresh_source(self, cur, state):
+        # Only explicit new catalog runs may start without a legacy origin.
+        if (state.get('initialization_mode') != 'fresh' or state.get('origin')
+                or state.get('provenance_seeded') or state.get('expected_audio_sha256')
+                or state.get('audio_sha256') or state['requests'] != 0
+                or state['continuations'] != 1):
+            raise RuntimeError('private_fresh_source_required')
+        cur.execute('SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s', (self.run_id,))
+        if cur.fetchone()['n']:
+            raise RuntimeError('private_fresh_requires_empty_hits')
+        cur.execute('SELECT count(*) AS n FROM ops.set_run_leases WHERE set_run_id=%s', (self.run_id,))
+        if cur.fetchone()['n']:
+            raise RuntimeError('private_fresh_requires_empty_leases')
 
     def seed_valid_evidence(self, cur, row, state):
         from worker.jobs.yoon_once import validate_descriptor
@@ -118,7 +152,8 @@ class ResumeStore:
         if not parent or parent['digest']!=origin['metadata_sha256']:
             raise RuntimeError('private_origin_changed')
         metadata = parent['source_metadata']
-        if validate_descriptor(metadata['yoon_fixed_input']) != validate_descriptor(row['source_metadata']['yoon_fixed_input']):
+        if (validate_descriptor(metadata['yoon_fixed_input']) != validate_descriptor(row['source_metadata']['yoon_fixed_input'])
+                or reviewed_source(metadata['yoon_fixed_input']) != self.source):
             raise RuntimeError('private_origin_source_changed')
         analysis = metadata.get('yoon_analysis') or {}
         if analysis.get('workflow_run_id')!=origin['workflow_run_id'] or analysis.get('status')!='partial':
@@ -135,7 +170,7 @@ class ResumeStore:
         seen = set()
         for response in analysis.get('raw_recognitions',[]):
             index = response.get('segment_index')
-            if type(index) is not int or not 0<=index<479 or index in seen:
+            if type(index) is not int or not 0<=index<self.source.windows or index in seen:
                 raise RuntimeError('private_origin_geometry_invalid')
             seen.add(index)
             if response.get('error_type') or response.get('was_rate_limited'):
@@ -170,7 +205,18 @@ class ResumeStore:
         # Adapter for the unchanged fixed-source prepare/transcode implementation.
         mismatch = False
         with self.locked() as (cur,_,state):
-            if payload.get('audio_sha256') and payload['audio_sha256']!=state['expected_audio_sha256']:
+            digest = payload.get('audio_sha256')
+            if digest and not re.fullmatch('[0-9a-f]{64}', digest):
+                raise RuntimeError('private_audio_digest_required')
+            if digest and not state.get('expected_audio_sha256'):
+                if (self.source == JACKSON or not state.get('fresh_source_initialized')
+                        or state.get('initialization_mode') != 'fresh' or state.get('origin')
+                        or state.get('provenance_seeded') or state.get('audio_sha256')
+                        or state['requests'] != 0 or state.get('status') != 'preparing'
+                        or payload.get('status') != 'prepared'):
+                    raise RuntimeError('private_audio_pin_required')
+                state['expected_audio_sha256'] = digest
+            if digest and digest != state['expected_audio_sha256']:
                 state.update(status='paused',reason='prepared_audio_changed',review_required=True)
                 self.save_state(cur,state,'private_resume_paused')
                 mismatch = True
@@ -186,8 +232,8 @@ class ResumeStore:
     def prepare_scheduler(self):
         """Persist the same scheduler geometry ordinary DJ runs use."""
         from worker.scheduler import build_scheduler_plan
-        plan = build_scheduler_plan(479)
         with self.locked() as (cur, _, state):
+            plan = build_scheduler_plan(self.source.windows)
             state['scheduler_plan'] = plan.as_metadata()
             self.save_state(cur, state)
         return plan
@@ -209,7 +255,7 @@ class ResumeStore:
                 AND mod(l.segment_start_index / %s, %s)=%s
                 AND coalesce(h.raw_data->'private_jackson_v2'->>'valid','false')<>'true'
                 ORDER BY l.segment_start_index LIMIT %s FOR UPDATE OF l SKIP LOCKED''',
-                (self.run_id,size,slots,slot_index,max(1,min(int(limit),479))))
+                (self.run_id,size,slots,slot_index,max(1,min(int(limit),self.source.windows))))
             candidates = [dict(r) for r in cur.fetchall()]
             due = max([state.get('next_allowed_at',0)] + [
                 ((r.get('raw_data') or {}).get('private_jackson_v2') or {}).get('next_allowed_at',0)
@@ -225,7 +271,7 @@ class ResumeStore:
             slots, size = self._slot(state, slot_index)
             if state.get('review_required'):
                 raise QueuePause('private_resume_review_required')
-            if type(index) is not int or not 0 <= index < 479 or (index // size) % slots != slot_index:
+            if type(index) is not int or not 0 <= index < self.source.windows or (index // size) % slots != slot_index:
                 raise RuntimeError('private_window_slot_mismatch')
             cur.execute('''SELECT l.id,l.status,h.raw_data FROM ops.set_run_leases l
                 LEFT JOIN ops.segment_hits h ON h.set_run_id=l.set_run_id
@@ -238,7 +284,7 @@ class ResumeStore:
                 raise RuntimeError('private_window_not_available')
             reason = may_reserve(state,now=row['db_now'],session_started=state['session_started'],
                                  session_requests=state['session_requests'],window_attempts=len(attempts),
-                                 next_allowed_at=data.get('next_allowed_at',0))
+                                 next_allowed_at=data.get('next_allowed_at',0),windows=self.source.windows)
             if reason:
                 raise QueuePause(reason)
             state['requests'] += 1
@@ -322,7 +368,7 @@ class ResumeStore:
                     now = row['db_now']
                     reason = may_reserve(state,now=now,session_started=state['session_started'],
                         session_requests=state['session_requests'],window_attempts=0,
-                        next_allowed_at=pending['due']) or reason
+                        next_allowed_at=pending['due'],windows=self.source.windows) or reason
                     if reason == 'cooldown':
                         reason = 'cooldown_pending'
             state.update(status='paused',reason=reason,review_required=bool(state.get('review_required') or uncertain))
@@ -332,7 +378,7 @@ class ResumeStore:
         cur.execute('''SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s
             AND raw_data->'private_jackson_v2'->>'valid'='true'
             AND raw_data->'private_jackson_v2'->>'in_flight'='false' ''',(self.run_id,))
-        return cur.fetchone()['n']==479
+        return cur.fetchone()['n']==self.source.windows
 
     def finalize_ready(self):
         # A clean paused run with every durable response can finish even when all
@@ -365,14 +411,14 @@ class ResumeStore:
         cur.execute('''SELECT segment_index,raw_data FROM ops.segment_hits
             WHERE set_run_id=%s ORDER BY segment_index''', (self.run_id,))
         hits = cur.fetchall()
-        if len(hits)!=479 or [r['segment_index'] for r in hits]!=list(range(479)):
+        if len(hits)!=self.source.windows or [r['segment_index'] for r in hits]!=list(range(self.source.windows)):
             raise RuntimeError('private_resume_incomplete')
         data = [r['raw_data']['private_jackson_v2'] for r in hits]
         if any(not d.get('valid') or d.get('in_flight') for d in data):
             raise RuntimeError('private_resume_incomplete')
         responses = [Recognition.from_checkpoint(d['response']) for d in data]
         tracks,_ = build_tracks_from_recognitions(responses)
-        state.update(status='complete',reason=None,valid_responses=479,
+        state.update(status='complete',reason=None,valid_responses=self.source.windows,
                      clustered_setlist=[asdict(t) for t in tracks])
         self.save_state(cur,state,'private_resume_complete')
 

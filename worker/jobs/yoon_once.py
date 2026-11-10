@@ -15,6 +15,7 @@ import urllib.request
 import uuid
 
 from worker.jobs.yoon_recognition import PrivateRecognitionSession, policy_for
+from worker.jobs.yoon_sources import JACKSON, reviewed_source
 
 SOURCE_SHA = 'aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae'
 SOURCE_BYTES = 4290463660
@@ -32,10 +33,7 @@ PRIVATE_GUARD = '''
 
 
 def validate_descriptor(value):
-    expected = dict(source_sha256=SOURCE_SHA, source_bytes=SOURCE_BYTES,
-                    source_start_seconds=START, source_end_seconds=END)
-    if not isinstance(value, dict) or any(value.get(k) != v for k, v in expected.items()):
-        raise RuntimeError('fixed_input_mismatch')
+    reviewed_source(value)
     url = value.get('source_url')
     if not isinstance(url, str) or not allowed_source(url):
         raise RuntimeError('invalid_source')
@@ -61,7 +59,7 @@ class Redirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def fetch(url, destination):
+def fetch(url, destination, source=JACKSON):
     if not allowed_source(url):
         raise RuntimeError('invalid_source')
     digest, size, started = hashlib.sha256(), 0, time.monotonic()
@@ -69,13 +67,13 @@ def fetch(url, destination):
         with urllib.request.build_opener(Redirects()).open(url, timeout=60) as response, destination.open('wb') as out:
             while chunk := response.read(1024 * 1024):
                 size += len(chunk)
-                if size > SOURCE_BYTES or time.monotonic() - started > 1200:
+                if size > source.bytes or time.monotonic() - started > 1200:
                     raise RuntimeError('download_budget')
                 digest.update(chunk)
                 out.write(chunk)
     except Exception:
         raise RuntimeError('source_download_failed') from None
-    if size != SOURCE_BYTES or digest.hexdigest() != SOURCE_SHA:
+    if size != source.bytes or digest.hexdigest() != source.sha256:
         raise RuntimeError('source_digest_mismatch')
 
 
@@ -108,6 +106,8 @@ class Store:
         row = self.read()
         descriptor = row['source_metadata'].get('yoon_fixed_input')
         source = validate_descriptor(descriptor)
+        if reviewed_source(descriptor) != JACKSON:
+            raise RuntimeError('resumable_source_required')
         if row['status'] != 'private_analysis_pending' or row['source_metadata'].get('yoon_analysis'):
             raise RuntimeError('run_not_fresh')
         policy = policy_for(descriptor.get('recognition_mode', 'probe'))
@@ -151,19 +151,20 @@ class Store:
 def prepare(store, root):
     source = store.claim()
     mode = store.require_owner()['recognition_mode']
+    source_spec = getattr(store, 'source', JACKSON)
     master = root / 'source.wav'
     audio = root / 'audio' / 'input.mp3'
     audio.parent.mkdir(parents=True, exist_ok=True)
     try:
         if shutil.disk_usage(root).free < 8_000_000_000:
             raise RuntimeError('disk_budget')
-        fetch(source, master)
-        subprocess.run(['ffmpeg', '-nostdin', '-y', '-v', 'error', '-ss', str(START),
-            '-i', str(master), '-t', str(END - START), '-vn', '-acodec', 'libmp3lame',
+        fetch(source, master, source_spec)
+        subprocess.run(['ffmpeg', '-nostdin', '-y', '-v', 'error', '-ss', str(source_spec.start),
+            '-i', str(master), '-t', str(source_spec.duration), '-vn', '-acodec', 'libmp3lame',
             '-ab', '128k', '-ar', '44100', str(audio)], check=True, timeout=600,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         from audio_segmenter import AudioSegmenter
-        if abs(AudioSegmenter.get_audio_duration_ffprobe(audio) - (END - START)) > .2:
+        if abs(AudioSegmenter.get_audio_duration_ffprobe(audio) - source_spec.duration) > .2:
             raise RuntimeError('duration_mismatch')
         with audio.open('rb') as f:
             digest = hashlib.file_digest(f, 'sha256').hexdigest()

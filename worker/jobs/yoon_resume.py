@@ -7,6 +7,7 @@ from pathlib import Path
 
 from worker.jobs.yoon_resume_policy import WORKFLOW_SECONDS
 from worker.jobs.yoon_resume_store import QueuePause
+from worker.jobs.yoon_sources import CATALOG, JACKSON
 
 
 async def recognize_resumable(store, audio: Path, *, slot_index=0):
@@ -16,13 +17,16 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
     from config import Config
 
     saved = store.require_owner()
-    with audio.open('rb') as source:
-        if hashlib.file_digest(source,'sha256').hexdigest()!=saved.get('audio_sha256'):
+    source = CATALOG.get(saved.get('source_id', JACKSON.id))
+    if source is None:
+        raise RuntimeError('fixed_input_mismatch')
+    with audio.open('rb') as source_file:
+        if hashlib.file_digest(source_file,'sha256').hexdigest()!=saved.get('audio_sha256'):
             raise RuntimeError('private_audio_digest_mismatch')
-    if abs(AudioSegmenter.get_audio_duration_ffprobe(audio)-7200)>.2:
+    if abs(AudioSegmenter.get_audio_duration_ffprobe(audio)-source.duration)>.2:
         raise RuntimeError('private_audio_duration_mismatch')
     if (Config.SEGMENT_DURATION!=30 or Config.SEGMENT_OVERLAP!=15
-            or AudioSegmenter().calculate_total_segments(7200)!=479):
+            or AudioSegmenter().calculate_total_segments(source.duration)!=source.windows):
         raise RuntimeError('private_audio_geometry_mismatch')
     cp = CheckpointManager('local:fixed-analysis','fixed-analysis')
     segmenter = AudioSegmenter(checkpoint_manager=cp)
@@ -74,7 +78,7 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
                     # together instead of serializing every extraction.
                     for first,end in ranges:
                         extracted.extend(await segmenter.create_segments_batch(audio,first,end,executor))
-                    task = asyncio.create_task(recognizer.recognize_batch(extracted,total_segments=479))
+                    task = asyncio.create_task(recognizer.recognize_batch(extracted,total_segments=source.windows))
                     try:
                         while True:
                             done,_ = await asyncio.wait({task},timeout=2)
