@@ -12,7 +12,7 @@ import re
 import uuid
 from recognition_transport import RequestDeferred
 from worker.jobs.yoon_sources import JACKSON, reviewed_source
-from worker.jobs.yoon_sydka_allowance import window_attempt_limit
+from worker.jobs.yoon_window_allowances import window_attempt_limit
 
 from worker.jobs.yoon_resume_policy import (
     CONTINUATION_LIMIT, may_reserve,
