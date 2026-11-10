@@ -335,6 +335,8 @@ jobs:
   private-prepare:
     outputs:
       complete: ${{ steps.private_prepare.outputs.complete }}
+      slot_matrix: ${{ steps.private_prepare.outputs.slot_matrix }}
+      effective_slot_count: ${{ steps.private_prepare.outputs.effective_slot_count }}
     needs: private-offline-tests
     # Publish on a reviewed, protected ref before dispatch; never execute PR code.
     if: ${{ github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
@@ -349,7 +351,7 @@ jobs:
       ENABLE_CHECKPOINTS: 'false'
       SEGMENT_DURATION: '30'
       SEGMENT_OVERLAP: '15'
-      CONCURRENT_RECOGNITIONS: '1'
+      CONCURRENT_RECOGNITIONS: '2'
       BATCH_SIZE: '10'
       QUOTA_COOLDOWN_DURATION: '60'
       ENABLE_SPOTIFY: 'false'
@@ -386,6 +388,10 @@ jobs:
   private-recognize:
     needs: private-prepare
     if: ${{ needs.private-prepare.outputs.complete != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        slot_index: ${{ fromJson(needs.private-prepare.outputs.slot_matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -393,11 +399,13 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
       PYTHONDONTWRITEBYTECODE: '1'
       PRIVATE_RUN_ID: ${{ github.event.inputs.set_run_id }}
+      PRIVATE_SLOT_INDEX: ${{ matrix.slot_index }}
+      PRIVATE_SLOT_COUNT: ${{ needs.private-prepare.outputs.effective_slot_count }}
       WORKER_DEPLOYMENT_TARGET: development
       ENABLE_CHECKPOINTS: 'false'
       SEGMENT_DURATION: '30'
       SEGMENT_OVERLAP: '15'
-      CONCURRENT_RECOGNITIONS: '1'
+      CONCURRENT_RECOGNITIONS: '2'
       BATCH_SIZE: '10'
       QUOTA_COOLDOWN_DURATION: '60'
       ENABLE_SPOTIFY: 'false'

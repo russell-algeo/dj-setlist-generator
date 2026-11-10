@@ -5,6 +5,9 @@ import concurrent.futures
 import random
 import time
 from datetime import datetime
+from contextvars import ContextVar
+
+from aiohttp_retry import JitterRetry
 from pathlib import Path
 from typing import Callable, TYPE_CHECKING
 
@@ -27,17 +30,49 @@ class TrackRecognizer:
     """Recognize tracks using Shazam with concurrent processing and checkpoint support."""
 
     def __init__(self, checkpoint_manager=None, *, single_attempt=False,
-                 max_attempts=None, max_retry_seconds=300, before_request=None):
+                 max_attempts=None, max_retry_seconds=300, before_request=None,
+                 before_attempt=None, on_attempt=None, quiet=False, continuation_deadline=None):
         self.checkpoint_manager = checkpoint_manager
         self.single_attempt = single_attempt
-        self.before_request = before_request
+        self._legacy_before_request = before_request
+        self.before_attempt = before_attempt
+        self.on_attempt = on_attempt
+        self.quiet = quiet
+        self._attempt_context = ContextVar('recognition_attempt_context', default=None)
+        self.before_request = self._authorize_request
         self.attempt_timeout = max(1, min(Config.RECOGNITION_TIMEOUT, 30)) if single_attempt else Config.RECOGNITION_TIMEOUT
         self.max_attempts = max(1, Config.MAX_RETRIES if max_attempts is None else max_attempts)
         self.max_retry_seconds = max(0, max_retry_seconds)
+        self.continuation_deadline = continuation_deadline
+        # Same retry curve and per-process concurrency as the production runner.
+        # Explicit attempts make each HTTP failure visible to durable adapters.
+        self.retry_options = JitterRetry(
+            attempts=self.max_attempts,
+            start_timeout=Config.BASE_DELAY,
+            max_timeout=Config.MAX_BACKOFF_DELAY,
+            random_interval_size=Config.JITTER_INTERVAL_SIZE,
+            statuses={429, 500, 502, 503, 504},
+        )
         self._quota_cooldown_until = 0
         self._throttle_lock = asyncio.Lock()
         self.transport = None
         self.shazam = self._create_shazam_client()
+
+    def _authorize_request(self):
+        """Reserve this exact request after SDK preparation, before transmission."""
+        if self._legacy_before_request is not None:
+            self._legacy_before_request()
+        current = self._attempt_context.get()
+        if self.before_attempt is not None:
+            if current is None:
+                raise RequestAuthorizationError('recognition_attempt_context_required')
+            current['ticket'] = self.before_attempt(current['segment'])
+        if current is not None:
+            current['attempted'] = True
+
+    def _log(self, message):
+        if not self.quiet:
+            print(message)
 
     def _create_shazam_client(self) -> Shazam:
         self.transport = SingleAttemptHTTP(timeout=self.attempt_timeout, before_request=self.before_request)
@@ -77,7 +112,7 @@ class TrackRecognizer:
             validate_response(result)
             elapsed = time.time() - start_time
 
-            print(f"  🔄 [{datetime.now().strftime('%H:%M:%S')}] Segment {segment['index']} took {elapsed:.1f}s")
+            self._log(f"  🔄 [{datetime.now().strftime('%H:%M:%S')}] Segment {segment['index']} took {elapsed:.1f}s")
 
             if 'track' in result:
                 track = result['track']
@@ -115,7 +150,7 @@ class TrackRecognizer:
 
             failure = classify_error(e)
             error_name = failure.error_type
-            print(f"  Recognition attempt failed: {error_name}")
+            self._log(f"  Recognition attempt failed: {error_name}")
 
             return Recognition(
                 timestamp=segment['timestamp'],
@@ -138,38 +173,78 @@ class TrackRecognizer:
                 self.transport.end(token)
 
     async def recognize_segment_with_backoff(self, segment: dict) -> Recognition:
-        """Bounded CLI retries; durable workers opt out and account each attempt."""
-        if self.single_attempt:
-            return await self.recognize_segment(segment)
+        """Production JitterRetry pacing, with observable attempts and finite time.
+
+        The original worker's retry group used JitterRetry with MAX_RETRIES,
+        followed by the process-local quota cooldown only after a 429 exhausted
+        that group. Keep that curve, initial jitter and concurrency. The approved
+        additions are valid-only completion, durable attempt callbacks, honoring
+        Retry-After and a continuation deadline instead of an endless quota loop.
+        """
         deadline = time.monotonic() + self.max_retry_seconds
+        if self.continuation_deadline is not None:
+            deadline = min(deadline, self.continuation_deadline)
         result = None
-        for attempt in range(self.max_attempts):
-            remaining = self._quota_cooldown_until - time.monotonic()
-            if remaining > max(0, deadline - time.monotonic()):
-                break
-            if not await self._wait_for_cooldown(deadline):
-                break
-            if time.monotonic() >= deadline:
-                break
-            await asyncio.sleep(min(random.uniform(0, Config.BASE_DELAY), max(0, deadline - time.monotonic())))
-            if not await self._wait_for_cooldown(deadline) or time.monotonic() >= deadline:
-                break
+        attempt = 0
+        initial_jitter = True
+        while True:
+            if not self.single_attempt:
+                if not await self._wait_for_cooldown(deadline) or time.monotonic() >= deadline:
+                    break
+                if initial_jitter:
+                    await asyncio.sleep(min(random.uniform(0, Config.BASE_DELAY),
+                                            max(0, deadline - time.monotonic())))
+                    initial_jitter = False
+                if not await self._wait_for_cooldown(deadline) or time.monotonic() >= deadline:
+                    break
+            current = {'segment': segment, 'ticket': None, 'attempted': False}
+            token = self._attempt_context.set(current)
             try:
-                result = await asyncio.wait_for(self.recognize_segment(segment), deadline - time.monotonic())
-            except asyncio.TimeoutError:
-                return Recognition(segment['timestamp'], None, None, None, None,
-                                   False, segment['index'], error_type='RequestTimeout')
-            if result.is_valid:
+                if self.single_attempt:
+                    result = await self.recognize_segment(segment)
+                else:
+                    # A timeout remains a failed attempt, never a valid no-match.
+                    try:
+                        result = await asyncio.wait_for(self.recognize_segment(segment),
+                                                        max(0, deadline-time.monotonic()))
+                    except asyncio.TimeoutError:
+                        result = Recognition(segment['timestamp'], None, None, None, None,
+                                             False, segment['index'], error_type='RequestTimeout')
+            finally:
+                self._attempt_context.reset(token)
+            attempt += 1
+            transient = (result.was_rate_limited or result.http_status in {500, 502, 503, 504}
+                         or (result.http_status is not None and result.http_status >= 500)
+                         or result.error_type in {'RequestTimeout', 'TransportError'})
+            can_retry = (not self.single_attempt and not result.is_valid and transient
+                         and result.retry_after_format != 'invalid')
+            delay = 0
+            quota_exhausted = False
+            if can_retry:
+                if attempt < self.max_attempts:
+                    delay = self.retry_options.get_timeout(attempt)
+                elif result.was_rate_limited:
+                    # The production outer retry loop starts another retry group
+                    # after quota cooldown. The continuation deadline now bounds it.
+                    quota_exhausted = True
+                    delay = Config.QUOTA_COOLDOWN_DURATION
+                    attempt = 0
+                    initial_jitter = True
+                else:
+                    can_retry = False
+                delay = max(delay, result.retry_after_seconds or 0)
+            elif result.retry_after_seconds is not None:
+                # Persist even a wait longer than this continuation can service.
+                delay = result.retry_after_seconds
+            if self.on_attempt is not None and current['attempted']:
+                self.on_attempt(result, current['ticket'], delay)
+            if result.is_valid or not can_retry:
                 return result
-            if result.error_type not in {'RateLimited', 'ProviderServerError',
-                                         'RequestTimeout', 'TransportError'}:
+            if quota_exhausted:
+                await self._trigger_quota_cooldown(delay)
+            if delay >= max(0, deadline-time.monotonic()):
                 return result
-            if result.retry_after_format == 'invalid':
-                return result
-            delay = max(Config.QUOTA_COOLDOWN_DURATION if result.was_rate_limited
-                        else min(Config.MAX_BACKOFF_DELAY, Config.BASE_DELAY * 2 ** attempt),
-                        result.retry_after_seconds or 0)
-            self._quota_cooldown_until = max(self._quota_cooldown_until, time.monotonic() + delay)
+            await asyncio.sleep(delay)
         return result or Recognition(segment['timestamp'], None, None, None, None,
                                      False, segment['index'], error_type='RetryBudgetExceeded')
 
@@ -203,7 +278,7 @@ class TrackRecognizer:
             if isinstance(result, (asyncio.CancelledError, RequestAuthorizationError)):
                 raise result
             if isinstance(result, Exception):
-                print(
+                self._log(
                     f"  ⚠️  [{global_idx}/{total}] "
                     f"Recognition attempt failed: {classify_error(result).error_type}"
                 )
@@ -229,7 +304,7 @@ class TrackRecognizer:
                 if result.recognized
                 else "Not recognized"
             )
-            print(f"  [{global_idx}/{total}] {segment['timestamp'] / 60:.1f}min {status} {track_info}")
+            self._log(f"  [{global_idx}/{total}] {segment['timestamp'] / 60:.1f}min {status} {track_info}")
 
             if cleanup_files:
                 try:

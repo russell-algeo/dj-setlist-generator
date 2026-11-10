@@ -148,6 +148,13 @@
       "when": 1794268800003,
       "tag": "0021_shared_recognition_continuation",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794268800004,
+      "tag": "0022_shared_recognition_parallel",
+      "breakpoints": true
     }
   ]
 }

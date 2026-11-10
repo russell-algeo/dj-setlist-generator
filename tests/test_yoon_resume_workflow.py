@@ -30,6 +30,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("needs.private-prepare.outputs.complete != 'true'",recognize)
         self.assertNotIn('always()',recognize.split('steps:',1)[0])
         self.assertIn('complete: ${{ steps.private_prepare.outputs.complete }}',prepare)
+    def test_private_matrix_uses_shared_scheduler_and_two_requests_per_slot(self):
+        prepare=self.jobs['private-prepare'];recognize=self.jobs['private-recognize']
+        self.assertIn('slot_matrix: ${{ steps.private_prepare.outputs.slot_matrix }}',prepare)
+        self.assertIn('fromJson(needs.private-prepare.outputs.slot_matrix)',recognize)
+        self.assertIn("CONCURRENT_RECOGNITIONS: '2'",recognize)
+        self.assertIn('PRIVATE_SLOT_INDEX: ${{ matrix.slot_index }}',recognize)
+        self.assertIn('fail-fast: false',recognize)
+        self.assertNotIn('strategy:',self.jobs['private-release'])
+
     def test_normal_paths_and_permissions_remain_separate(self):
         for name in ['bootstrap','recognize','publish','finalize']:
             self.assertIn("github.event.inputs.private_analysis != 'true'",self.jobs[name].split('runs-on:',1)[0])

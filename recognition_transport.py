@@ -60,6 +60,10 @@ class RequestAuthorizationError(Exception):
     """The pre-transmission fence refused this request; no HTTP call was made."""
 
 
+class RequestDeferred(RequestAuthorizationError):
+    """A deliberate pre-request budget/cooldown stop with a safe constant reason."""
+
+
 def classify_error(error):
     """Inspect both exception links cycle-safely; never inspect/return exception text."""
     from shazamio.exceptions import RateLimited
@@ -143,6 +147,8 @@ class SingleAttemptHTTP:
         if self.before_request is not None:
             try:
                 self.before_request()
+            except RequestDeferred:
+                raise
             except Exception:
                 raise RequestAuthorizationError('recognition_request_not_authorized') from None
         async with self.client.request('POST', url, **kwargs) as response:

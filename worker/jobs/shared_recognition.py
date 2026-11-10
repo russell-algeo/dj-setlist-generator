@@ -1,8 +1,8 @@
 """Durable ordinary-run recognition using the existing run, lease and hit queue.
 
 A committed reservation counts even if the process dies. Unknown outcomes are
-never retried automatically. All participating ordinary runs share a database
-pacing gate; private/legacy runners are deliberately outside this protocol.
+never retried automatically. Production-sized leases and concurrent per-window
+reservations preserve the production request pace. The common TrackRecognizer owns retry timing.
 """
 from __future__ import annotations
 
@@ -12,23 +12,23 @@ from dataclasses import asdict
 import hashlib
 import json
 import os
+import time
 import uuid
 
 from config import Config
+from recognition_transport import RequestDeferred
 
 VERSION = 1
-WORKFLOW_REQUESTS = 24
+POLICY_VERSION = 2
 WORKFLOW_SECONDS = 3600
 CONTINUATIONS = 256
 WINDOW_ATTEMPTS = 8
 MAX_REQUESTS = 8192
 MAX_AGE = 7 * 86400
 REQUEST_SECONDS = 65
-UNCERTAIN_COOLDOWN = 3600
-GATE_LOCK = 934725101  # One protocol-wide lock, always before run/lease locks.
 
 
-class RecognitionPause(RuntimeError):
+class RecognitionPause(RequestDeferred):
     """Safe constant reason, never a provider/SQL message."""
 
 
@@ -84,8 +84,6 @@ def budget_reason(state, now, *, request=True):
         return 'lifetime_request_budget'
     if now + 65 >= state['session_started'] + WORKFLOW_SECONDS:
         return 'workflow_time_budget'
-    if request and state['session_requests'] >= WORKFLOW_REQUESTS:
-        return 'workflow_request_budget'
     return None
 
 
@@ -108,9 +106,8 @@ class RecognitionStore:
             with self.connect() as conn, conn.transaction(), conn.cursor() as cur:
                 cur.execute("SET LOCAL lock_timeout='5s'")
                 cur.execute("SET LOCAL statement_timeout='15s'")
-                cur.execute('SELECT pg_advisory_xact_lock(%s)', (GATE_LOCK,))
-                # The following statement runs AFTER the lock, with a fresh READ
-                # COMMITTED snapshot. A lock CTE in this statement is not enough.
+                # Row locks serialize evidence changes for this run only; no
+                # database-wide provider mutex or delay is introduced.
                 cur.execute('''SELECT r.*,extract(epoch FROM clock_timestamp())::float8 AS db_now
                   FROM ops.set_runs r JOIN ops.submissions u ON u.id=r.submission_id
                   WHERE r.id=%s AND r.publication_visibility='public' AND u.visibility='public'
@@ -134,32 +131,42 @@ class RecognitionStore:
                     (json.dumps(state), self.run_id))
 
     def require_state(self, state):
-        if state.get('version') != VERSION or state.get('owner') != self.identity:
+        if (state.get('version') != VERSION or state.get('policy_version') != POLICY_VERSION
+                or state.get('owner') != self.identity):
             raise RecognitionFence('shared_continuation_owner_changed')
 
     def begin(self):
         """Count continuation before download; return None for legacy evidence."""
         reason = None
         with self.locked() as (cur, row, state):
+            cur.execute("SELECT obj_description('ops.claim_next_dispatchable_set_run(integer)'::regprocedure,'pg_proc') AS marker")
+            if cur.fetchone()['marker'] != 'shared-recognition-parallel-v2':
+                raise RecognitionFence('shared_recognition_migration_required')
             if not state:
-                cur.execute("SELECT obj_description('ops.claim_next_dispatchable_set_run(integer)'::regprocedure,'pg_proc') AS marker")
-                if cur.fetchone()['marker'] != 'shared-recognition-continuation-v1':
-                    raise RecognitionFence('shared_recognition_migration_required')
                 cur.execute('''SELECT (SELECT count(*) FROM ops.segment_hits WHERE set_run_id=%s)
                   +(SELECT count(*) FROM ops.set_run_leases WHERE set_run_id=%s) AS n''',
                             (self.run_id, self.run_id))
                 if cur.fetchone()['n']:
                     return None
-                state = dict(version=VERSION, created_at=row['db_now'], continuations=0,
-                    requests=0, session_requests=0, deadline=row['db_now']+MAX_AGE, spacing_seconds=30, next_allowed_at=0,
+                state = dict(version=VERSION, policy_version=POLICY_VERSION, created_at=row['db_now'], continuations=0,
+                    requests=0, session_requests=0, deadline=row['db_now']+MAX_AGE, next_allowed_at=0,
                     provider_next_allowed_at=0, consecutive_limits=0, in_flight=False, in_flight_until=0,
                     paused=False, review_required=False, used_owners=[], request_limit=MAX_REQUESTS)
             if state.get('version') != VERSION:
                 raise RecognitionFence('shared_policy_version_unknown')
             if self.identity in state.get('used_owners', []):
                 raise RecognitionFence('shared_continuation_replayed')
-            if state.get('in_flight') or state.get('review_required'):
+            cur.execute("SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s AND raw_data->'shared_recognition'->>'in_flight'='true'", (self.run_id,))
+            if state.get('in_flight') or state.get('review_required') or cur.fetchone()['n']:
                 raise RecognitionPause('recognition_requires_reconciliation')
+            if state.get('policy_version', 1) not in (1, POLICY_VERSION):
+                raise RecognitionFence('shared_policy_version_unknown')
+            # Clean legacy evidence remains immutable. Only the scheduling policy
+            # upgrades, never an unknown request or a completed response.
+            state['policy_version'] = POLICY_VERSION
+            state.pop('spacing_seconds', None)
+            state.pop('active_index', None)
+            state.pop('token', None)
             now = row['db_now']
             if self.complete(cur,state):
                 state.update(owner=self.identity, paused=False, reason=None)
@@ -185,7 +192,7 @@ class RecognitionStore:
             raise RecognitionPause(reason)
         return state
 
-    def prepared(self, context):
+    def prepared(self, context, *, slot_count=1, lease_size=1):
         fingerprint = audio_fingerprint(context.audio_file)
         geometry = dict(segment_duration=Config.SEGMENT_DURATION,
                         segment_overlap=Config.SEGMENT_OVERLAP, segment_count=context.total_segments)
@@ -203,16 +210,21 @@ class RecognitionStore:
             else:
                 state.update(audio_sha256=fingerprint, geometry=geometry, source_url=context.source_url,
                              request_limit=min(MAX_REQUESTS, context.total_segments * WINDOW_ATTEMPTS))
-                cur.execute('''INSERT INTO ops.set_run_leases
-                  (set_run_id,slot_index,segment_start_index,segment_end_index,status)
-                  SELECT %s,0,i,i,'pending' FROM generate_series(0,%s) i
-                  WHERE NOT EXISTS (SELECT 1 FROM ops.set_run_leases l
-                    WHERE l.set_run_id=%s AND l.segment_start_index=i)''',
-                            (self.run_id, context.total_segments-1, self.run_id))
+                cur.execute('SELECT count(*) AS n FROM ops.set_run_leases WHERE set_run_id=%s', (self.run_id,))
+                count = cur.fetchone()['n']
+                if not count:
+                    cur.execute("""INSERT INTO ops.set_run_leases
+                      (set_run_id,slot_index,segment_start_index,segment_end_index,status)
+                      SELECT %s,mod(ordinality-1, %s)::integer,i,least(i+%s-1,%s),'pending'
+                      FROM generate_series(0,%s,%s) WITH ORDINALITY AS series(i,ordinality)""",
+                      (self.run_id,max(1,slot_count),max(1,lease_size),context.total_segments-1,
+                       context.total_segments-1,max(1,lease_size)))
+                cur.execute('SELECT count(*) AS n FROM ops.set_run_leases WHERE set_run_id=%s', (self.run_id,))
+                count = cur.fetchone()['n']
             self.save(cur, state)
         if reason:
             raise RecognitionPause(reason)
-        return context.total_segments
+        return count
 
     def state(self):
         with self.locked() as (_, row, state):
@@ -241,151 +253,126 @@ class RecognitionStore:
         coverage=cur.fetchone()
         return total>0 and coverage['total']==total and coverage['valid']==total
 
-    def reserve(self):
-        """Commit exactly one window reservation, or return (None,wait,reason)."""
-        with self.locked() as (cur, row, state):
-            self.require_state(state)
-            if self.complete(cur, state):
-                state.update(paused=False, reason=None)
-                self.save(cur, state)
-                return None, 0, 'complete'
-            if state.get('in_flight') or state.get('review_required'):
-                return None, 0, 'recognition_requires_reconciliation'
-            if state.get('paused'):
-                return None, 0, state.get('reason') or 'paused'
-            reason = budget_reason(state, row['db_now'])
-            if reason:
-                return None, 0, reason
-            # Pacing survives clean continuations, concurrent slots, other runs,
-            # completed runs, and request failures. No new table/access required.
-            cur.execute('''SELECT
-              coalesce(max((source_metadata->'shared_recognition'->>'provider_next_allowed_at')::float8),0) AS due,
-              coalesce(max((source_metadata->'shared_recognition'->>'spacing_seconds')::float8),30) AS spacing,
-              (coalesce(bool_or(source_metadata->'shared_recognition'->>'in_flight'='true' AND
-                CASE WHEN jsonb_typeof(source_metadata->'shared_recognition'->'in_flight_until')='number'
-                  THEN (source_metadata->'shared_recognition'->>'in_flight_until')::numeric > %s
-                  ELSE true END),false)
-                OR EXISTS (SELECT 1 FROM ops.segment_hits h JOIN ops.set_runs r ON r.id=h.set_run_id
-                  WHERE r.publication_visibility='public'
-                    AND r.source_metadata->'shared_recognition'->>'version'='1'
-                    AND h.raw_data->'shared_recognition'->>'in_flight'='true'
-                    AND CASE WHEN jsonb_typeof(h.raw_data->'shared_recognition'->'attempts'->-1->'expires_at')='number'
-                      THEN (h.raw_data->'shared_recognition'->'attempts'->-1->>'expires_at')::numeric > %s
-                      ELSE true END)) AS busy
-              FROM ops.set_runs WHERE publication_visibility='public'
-                AND source_metadata->'shared_recognition'->>'version'='1' ''', (row['db_now'],row['db_now']))
-            gate = cur.fetchone()
-            if gate['busy']:
-                return None, 30, 'provider_busy'
-            wait = max(0, state['next_allowed_at']-row['db_now'], gate['due']-row['db_now'])
-            if wait:
-                return None, wait, 'cooldown_pending'
-            cur.execute('''SELECT l.id,l.segment_start_index AS segment_index,h.raw_data
-              FROM ops.set_run_leases l LEFT JOIN ops.segment_hits h
-                ON h.set_run_id=l.set_run_id AND h.segment_index=l.segment_start_index
-              WHERE l.set_run_id=%s AND l.status='pending'
-                AND coalesce(h.raw_data->'shared_recognition'->>'valid','false')<>'true'
-              ORDER BY l.segment_start_index LIMIT 1 FOR UPDATE OF l''', (self.run_id,))
-            candidate = cur.fetchone()
-            if not candidate:
-                return None, 0, 'recognition_requires_reconciliation'
-            data = dict((candidate.get('raw_data') or {}).get('shared_recognition') or {})
-            attempts = list(data.get('attempts') or [])
-            if data.get('in_flight') or len(attempts) >= WINDOW_ATTEMPTS:
-                return None, 0, 'window_attempt_budget'
-            index, token = candidate['segment_index'], str(uuid.uuid4())
-            attempts.append(dict(token=token, owner=self.identity, number=state['requests']+1,
-                                 started_at=row['db_now'], expires_at=row['db_now']+REQUEST_SECONDS+UNCERTAIN_COOLDOWN, outcome='in_flight'))
-            data.update(version=VERSION, valid=False, in_flight=True, attempts=attempts)
-            step = state['geometry']['segment_duration'] - state['geometry']['segment_overlap']
-            cur.execute('''INSERT INTO ops.segment_hits
-              (set_run_id,lease_id,segment_index,timestamp_seconds,recognized,raw_data)
-              VALUES(%s,%s,%s,%s,false,%s::jsonb) ON CONFLICT(set_run_id,segment_index)
-              DO UPDATE SET raw_data=excluded.raw_data''',
-                        (self.run_id,candidate['id'],index,index*step,json.dumps({'shared_recognition':data})))
-            cur.execute('''UPDATE ops.set_run_leases SET status='claimed',claimed_by=%s,
-              claimed_at=now(),updated_at=now() WHERE id=%s''', (token,candidate['id']))
-            state.update(requests=state['requests']+1,session_requests=state['session_requests']+1,
-                         spacing_seconds=max(state['spacing_seconds'],gate['spacing']),
-                         provider_next_allowed_at=row['db_now']+max(state['spacing_seconds'],gate['spacing']),
-                         in_flight=True, in_flight_until=row['db_now']+REQUEST_SECONDS+UNCERTAIN_COOLDOWN,
-                         request_deadline=row['db_now']+REQUEST_SECONDS, active_index=index, token=token)
-            self.save(cur,state)
-            return dict(index=index,token=token), 0, None
-
-    def authorize(self, reservation):
-        """Last gate at the actual POST, after extraction/signature preparation.
-
-        A late/stalled worker cannot transmit after its bounded reservation.
-        Already-sent work cannot be synchronously recalled by cancellation.
-        """
-        with self.locked() as (_,row,state):
-            self.require_state(state)
-            if (not reservation or not state.get('in_flight') or state.get('review_required')
-                    or state.get('token') != reservation['token']
-                    or state.get('active_index') != reservation['index']
-                    or row['db_now'] + max(1,min(Config.RECOGNITION_TIMEOUT,30)) >= state.get('request_deadline',0)
-                    or row['db_now'] + max(1,min(Config.RECOGNITION_TIMEOUT,30)) >= state['session_started']+WORKFLOW_SECONDS
-                    or row['db_now'] + max(1,min(Config.RECOGNITION_TIMEOUT,30)) >= state['created_at']+MAX_AGE):
-                raise RecognitionFence('shared_transmission_not_authorized')
-
-    def finish(self, reservation, result):
+    def claim_lease(self, worker_name):
         with self.locked() as (cur,row,state):
             self.require_state(state)
-            index = reservation['index']
-            if (not state.get('in_flight') or state.get('token')!=reservation['token']
-                    or state.get('active_index')!=index or result.segment_index!=index
-                    or result.timestamp!=index*(state['geometry']['segment_duration']-state['geometry']['segment_overlap'])):
+            if state.get('review_required'):
+                raise RecognitionPause('recognition_requires_reconciliation')
+            reason = budget_reason(state,row['db_now'])
+            if reason:
+                raise RecognitionPause(reason)
+            cur.execute("""SELECT * FROM ops.set_run_leases WHERE set_run_id=%s AND status='pending'
+                ORDER BY segment_start_index,id LIMIT 1 FOR UPDATE SKIP LOCKED""",(self.run_id,))
+            lease=cur.fetchone()
+            if lease:
+                cur.execute("""UPDATE ops.set_run_leases SET status='claimed',claimed_by=%s,
+                  claimed_at=now(),updated_at=now() WHERE id=%s""",(worker_name,lease['id']))
+            return lease
+
+    def missing_indices(self, lease):
+        with self.locked() as (cur,_,state):
+            self.require_state(state)
+            cur.execute("""SELECT segment_index FROM ops.segment_hits WHERE set_run_id=%s
+              AND raw_data->'shared_recognition'->>'valid'='true'
+              AND segment_index BETWEEN %s AND %s""",
+              (self.run_id,lease['segment_start_index'],lease['segment_end_index']))
+            valid={r['segment_index'] for r in cur.fetchall()}
+            return [i for i in range(lease['segment_start_index'],lease['segment_end_index']+1) if i not in valid]
+
+    def reserve(self, index, lease_id, worker_name):
+        """Reserve one actual HTTP attempt; other windows/leases remain concurrent."""
+        from recognition_transport import RequestAuthorizationError
+        with self.locked() as (cur,row,state):
+            self.require_state(state)
+            reason=budget_reason(state,row['db_now'])
+            if reason or state.get('review_required'):
+                raise RecognitionPause(reason or 'recognition_requires_reconciliation')
+            cur.execute("""SELECT id FROM ops.set_run_leases WHERE id=%s AND set_run_id=%s
+              AND status='claimed' AND claimed_by=%s AND %s BETWEEN segment_start_index AND segment_end_index
+              FOR UPDATE""",(lease_id,self.run_id,worker_name,index))
+            if not cur.fetchone():
+                raise RequestAuthorizationError('shared_lease_owner_changed')
+            cur.execute('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=%s FOR UPDATE',
+                        (self.run_id,index))
+            hit=cur.fetchone()
+            data=dict((hit['raw_data'] if hit else {}).get('shared_recognition') or {})
+            attempts=list(data.get('attempts') or [])
+            if data.get('valid') or data.get('in_flight'):
+                raise RequestAuthorizationError('shared_window_not_admissible')
+            if len(attempts)>=WINDOW_ATTEMPTS:
+                raise RecognitionPause('window_attempt_budget')
+            if row['db_now'] < data.get('next_allowed_at',0):
+                raise RecognitionPause('cooldown_pending')
+            token=str(uuid.uuid4())
+            attempts.append(dict(token=token,owner=self.identity,number=state['requests']+1,
+                                 started_at=row['db_now'],expires_at=row['db_now']+REQUEST_SECONDS,
+                                 outcome='in_flight'))
+            data.update(version=VERSION,policy_version=POLICY_VERSION,valid=False,in_flight=True,attempts=attempts)
+            step=state['geometry']['segment_duration']-state['geometry']['segment_overlap']
+            cur.execute("""INSERT INTO ops.segment_hits
+              (set_run_id,lease_id,segment_index,timestamp_seconds,recognized,raw_data)
+              VALUES(%s,%s,%s,%s,false,%s::jsonb) ON CONFLICT(set_run_id,segment_index)
+              DO UPDATE SET lease_id=excluded.lease_id,raw_data=excluded.raw_data""",
+              (self.run_id,lease_id,index,index*step,json.dumps({'shared_recognition':data})))
+            state.update(requests=state['requests']+1,session_requests=state['session_requests']+1,
+                         in_flight=True,in_flight_until=max(state.get('in_flight_until',0),row['db_now']+REQUEST_SECONDS))
+            self.save(cur,state)
+            return dict(index=index,token=token,lease_id=str(lease_id),worker_name=worker_name)
+
+    def finish(self, reservation, result, delay_seconds=0):
+        with self.locked() as (cur,row,state):
+            self.require_state(state)
+            index=reservation['index']
+            if (result.segment_index!=index or result.timestamp!=index*(state['geometry']['segment_duration']-state['geometry']['segment_overlap'])):
                 raise RecognitionFence('shared_response_owner_changed')
             cur.execute('SELECT lease_id,raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=%s FOR UPDATE',
                         (self.run_id,index))
-            hit = cur.fetchone()
-            data = dict(hit['raw_data']['shared_recognition'])
-            attempts = list(data['attempts'])
-            if not data['in_flight'] or data.get('valid') or attempts[-1]['token']!=reservation['token']:
+            hit=cur.fetchone()
+            if not hit or str(hit['lease_id'])!=reservation['lease_id']:
                 raise RecognitionFence('shared_response_reservation_changed')
-            valid = valid_result(result)
-            diagnostic = dict(http_status=result.http_status,error_type=result.error_type,
+            data=dict(hit['raw_data']['shared_recognition']); attempts=list(data['attempts'])
+            if (not data.get('in_flight') or data.get('valid') or attempts[-1]['token']!=reservation['token']
+                    or attempts[-1]['owner']!=self.identity):
+                raise RecognitionFence('shared_response_reservation_changed')
+            valid=valid_result(result)
+            diagnostic=dict(http_status=result.http_status,error_type=result.error_type,
                 was_rate_limited=result.was_rate_limited,retry_after_seconds=result.retry_after_seconds,
                 retry_after_format=result.retry_after_format)
             attempts[-1].update(finished_at=row['db_now'],outcome='valid' if valid else 'failed',diagnostic=diagnostic)
-            data.update(valid=valid,in_flight=False,attempts=attempts)
-            if valid:
-                data['response'] = asdict(result)
-            cur.execute('''UPDATE ops.segment_hits SET recognized=%s,track_title=%s,artist=%s,
-              shazam_track_id=%s,raw_data=%s::jsonb WHERE set_run_id=%s AND segment_index=%s''',
-                        (bool(valid and result.recognized),result.track_title if valid else None,
-                         result.artist if valid else None,result.shazam_track_id if valid else None,
-                         json.dumps({'shared_recognition':data}),self.run_id,index))
-            cur.execute('''UPDATE ops.set_run_leases SET status=%s,claimed_by=null,claimed_at=null,
-              completed_at=CASE WHEN %s THEN now() ELSE null END,updated_at=now() WHERE id=%s''',
-                        ('completed' if valid else 'pending',valid,hit['lease_id']))
-            reason = None
-            if result.was_rate_limited:
-                state['consecutive_limits'] += 1
-                state['spacing_seconds'] = min(180, state['spacing_seconds']*2)
-                delay = min(3600, 300 * 2**min(state['consecutive_limits']-1,4))
-                reason = 'sustained_rate_limit_pause' if state['consecutive_limits']>=4 else None
-            elif valid:
-                state['consecutive_limits'] = 0
-                delay = state['spacing_seconds']
-            else:
-                delay = max(300,state['spacing_seconds'])
-                reason = 'provider_error_pause'
-            if result.retry_after_seconds is not None:
-                delay = max(delay,result.retry_after_seconds)
-            if result.retry_after_format == 'invalid':
-                reason = 'retry_after_needs_review'
-                state['review_required'] = True
-            state.update(in_flight=False,in_flight_until=0,active_index=None,token=None,
-                next_allowed_at=row['db_now']+delay,
-                provider_next_allowed_at=max(state['provider_next_allowed_at'],row['db_now']+delay))
-            if len(attempts)>=WINDOW_ATTEMPTS and not valid:
-                reason = 'window_attempt_budget'
-            if reason:
-                state.update(paused=True,reason=reason)
+            delay=max(0,delay_seconds,result.retry_after_seconds or 0) if not valid else 0
+            data.update(valid=valid,in_flight=False,attempts=attempts,next_allowed_at=row['db_now']+delay)
+            if valid: data['response']=asdict(result)
+            cur.execute("""UPDATE ops.segment_hits SET recognized=%s,track_title=%s,artist=%s,
+              shazam_track_id=%s,raw_data=%s::jsonb WHERE set_run_id=%s AND segment_index=%s""",
+              (bool(valid and result.recognized),result.track_title if valid else None,
+               result.artist if valid else None,result.shazam_track_id if valid else None,
+               json.dumps({'shared_recognition':data}),self.run_id,index))
+            cur.execute("""SELECT count(*) AS n,coalesce(max((raw_data->'shared_recognition'->'attempts'->-1->>'expires_at')::float8),0) AS expires
+              FROM ops.segment_hits WHERE set_run_id=%s AND raw_data->'shared_recognition'->>'in_flight'='true'""",(self.run_id,))
+            active=cur.fetchone()
+            state.update(in_flight=active['n']>0,in_flight_until=active['expires'],
+                         next_allowed_at=max(state.get('next_allowed_at',0),row['db_now']+delay))
+            reason=None
+            if result.retry_after_format=='invalid':
+                reason='retry_after_needs_review';state['review_required']=True
+            if len(attempts)>=WINDOW_ATTEMPTS and not valid: reason='window_attempt_budget'
+            if reason: state.update(paused=True,reason=reason)
             self.save(cur,state)
             return reason
+
+    def settle_lease(self, lease, worker_name):
+        with self.locked() as (cur,_,state):
+            self.require_state(state)
+            cur.execute("""SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s
+              AND segment_index BETWEEN %s AND %s AND raw_data->'shared_recognition'->>'valid'='true'
+              AND raw_data->'shared_recognition'->>'in_flight'='false'""",
+              (self.run_id,lease['segment_start_index'],lease['segment_end_index']))
+            complete=cur.fetchone()['n']==lease['segment_end_index']-lease['segment_start_index']+1
+            cur.execute("""UPDATE ops.set_run_leases SET status=%s,claimed_by=null,claimed_at=null,
+              completed_at=CASE WHEN %s THEN now() ELSE null END,updated_at=now()
+              WHERE id=%s AND set_run_id=%s AND claimed_by=%s AND status='claimed'""",
+              ('completed' if complete else 'failed',complete,lease['id'],self.run_id,worker_name))
+            return complete
 
     def pause(self, reason, *, wait=0):
         with self.locked() as (cur,row,state):
@@ -393,67 +380,71 @@ class RecognitionStore:
             if self.complete(cur,state):
                 state.update(paused=False,reason=None)
             else:
-                state.update(paused=True,reason=reason,
+                # Other slots may still be making legitimate concurrent requests.
+                # Their in-flight evidence is not an error; finalization waits for
+                # the workflow and separately fences any genuinely unknown result.
+                state.update(paused=True,reason=state.get('reason') or reason,
                              next_allowed_at=max(state['next_allowed_at'],row['db_now']+wait))
-                if state.get('in_flight') or reason in ('recognition_requires_reconciliation','prepared_audio_changed',
-                                                       'retry_after_needs_review','worker_or_storage_error'):
-                    state['review_required'] = True
+                if reason in ('prepared_audio_changed','retry_after_needs_review'):
+                    state['review_required']=True
             self.save(cur,state)
 
 
-async def recognize_continuation(store, context, *, check_active):
-    """One SDK/client per continuation; cancellation wrapper remains in caller."""
+async def recognize_continuation(store, context, *, check_active, slot_index=0):
+    """Production lease fanout and shared recognition engine; durable evidence only."""
     from track_recognizer import TrackRecognizer
     from worker.pipeline.recognize import recognize_segment_range
-    _,state = store.state()
+    _,state=store.state()
     if (audio_fingerprint(context.audio_file)!=state.get('audio_sha256')
-            or state.get('geometry') != dict(segment_duration=Config.SEGMENT_DURATION,
+            or state.get('geometry')!=dict(segment_duration=Config.SEGMENT_DURATION,
                 segment_overlap=Config.SEGMENT_OVERLAP,segment_count=context.total_segments)):
-        store.pause('prepared_audio_changed')
-        raise RecognitionPause('prepared_audio_changed')
-    reservation = None
-    recognizer = TrackRecognizer(single_attempt=True, before_request=lambda: store.authorize(reservation))
-    completed = recognized = 0
-    reason, wait = 'workflow_time_budget', 0
+        store.pause('prepared_audio_changed');raise RecognitionPause('prepared_audio_changed')
+    worker_name=f'{store.identity}:slot-{slot_index}:{uuid.uuid4()}'
+    completed=recognized=0
+    reason='workflow_time_budget'
+    lease=None
+    recognizer=None
     try:
         while True:
             check_active()
+            lease=store.claim_lease(worker_name)
+            if not lease: break
             now,state=store.state()
-            # Completion is allowed after the final permitted request and before
-            # the next call to reserve checks the time/request budgets.
-            reservation,wait,reason=store.reserve()
-            if reason=='complete':
-                return dict(lease_count=completed,recognized_count=recognized)
-            if reservation is None:
-                if reason!='provider_busy' and wait and wait<=60 and now+wait+70<state['session_started']+WORKFLOW_SECONDS:
-                    await asyncio.sleep(min(wait,15))
-                    continue
-                break
-            received=[]
-            def persist(result):
-                store.finish(reservation,result)
-                received.append(result)
-            await asyncio.wait_for(recognize_segment_range(context,start_index=reservation['index'],
-                end_index=reservation['index'],on_result=persist,recognizer=recognizer),65)
-            if len(received)!=1:
-                raise RecognitionFence('shared_response_missing')
-            if valid_result(received[0]):
-                completed+=1
-                recognized+=int(received[0].recognized)
+            remaining=state['session_started']+WORKFLOW_SECONDS-now
+            recognizer=TrackRecognizer(
+                before_attempt=lambda segment:store.reserve(segment['index'],lease['id'],worker_name),
+                on_attempt=lambda result,ticket,delay:store.finish(ticket,result,delay),
+                max_retry_seconds=max(0,remaining-REQUEST_SECONDS),
+                continuation_deadline=time.monotonic()+max(0,remaining-REQUEST_SECONDS))
+            missing=store.missing_indices(lease)
+            # Retain every completed window, including holes within an old lease.
+            ranges=[]
+            for index in missing:
+                if ranges and index==ranges[-1][1]+1: ranges[-1]=(ranges[-1][0],index)
+                else: ranges.append((index,index))
+            for start,end in ranges:
+                def received(result):
+                    nonlocal recognized
+                    if valid_result(result): recognized+=int(result.recognized)
+                await recognize_segment_range(context,start_index=start,end_index=end,
+                                               on_result=received,recognizer=recognizer)
+            check_active()
+            if not store.settle_lease(lease,worker_name):
+                reason='recognition_retry_pending';break
+            completed+=1
+            await recognizer.close();recognizer=None
+    except RequestDeferred as exc:
+        reason=str(exc)
     except asyncio.CancelledError:
-        reason='cancelled_or_interrupted'
-        raise
+        reason='cancelled_or_interrupted';raise
     except Exception:
-        reason='worker_or_storage_error'
-        raise
+        reason='worker_or_storage_error';raise
     finally:
         try:
-            await recognizer.close()
+            if recognizer is not None: await recognizer.close()
         finally:
-            # Fences deliberately reject writes after cancellation/owner changes;
-            # the existing cancellation path owns terminal state in that case.
             try:
-                store.pause(reason or 'workflow_paused',wait=wait)
-            except RecognitionFence:
-                pass
+                if lease: store.settle_lease(lease,worker_name)
+                store.pause(reason)
+            except RecognitionFence: pass
     return dict(lease_count=completed,recognized_count=recognized)

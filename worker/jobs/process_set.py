@@ -396,13 +396,6 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
             lease_size=scheduler_plan.lease_size,
         )
         metadata_patch["scheduler_plan"] = scheduler_plan.as_metadata()
-        if durable_state is not None:
-            # One serial provider worker; ordinary lease storage/dispatcher remain
-            # in use. The database gate also coordinates separate ordinary runs.
-            metadata_patch.update(recognition_slot_count=1, lease_size=1)
-            metadata_patch["scheduler_plan"].update(slot_count=1, lease_size=1,
-                lease_count=context.total_segments, segments_per_slot=context.total_segments,
-                leases_per_slot=context.total_segments, mode="durable_shared")
         update_set_run_metadata(
             set_run_id,
             metadata_patch,
@@ -412,7 +405,8 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
         )
 
         if durable_state is not None:
-            lease_count = durable_store.prepared(context)
+            lease_count = durable_store.prepared(context, slot_count=scheduler_plan.slot_count,
+                                                  lease_size=scheduler_plan.lease_size)
         else:
             lease_count = initialize_set_run_leases(
                 set_run_id,
@@ -430,8 +424,8 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
             details={
                 "segment_count": context.total_segments,
                 "lease_count": lease_count,
-                "slot_count": 1 if durable_state is not None else scheduler_plan.slot_count,
-                "lease_size": 1 if durable_state is not None else scheduler_plan.lease_size,
+                "slot_count": scheduler_plan.slot_count,
+                "lease_size": scheduler_plan.lease_size,
                 "audio_file": str(context.audio_file),
             },
         )
@@ -439,8 +433,8 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
         return {
             "segment_count": context.total_segments,
             "lease_count": lease_count,
-            "slot_count": 1 if durable_state is not None else scheduler_plan.slot_count,
-            "lease_size": 1 if durable_state is not None else scheduler_plan.lease_size,
+            "slot_count": scheduler_plan.slot_count,
+            "lease_size": scheduler_plan.lease_size,
             "audio_file": context.audio_file,
         }
     except RunCancelledError:
@@ -472,13 +466,11 @@ async def _recognize_phase(set_run_id: str, *, slot_index: int) -> dict[str, int
 
     if (source_metadata.get("shared_recognition") or {}).get("version") == 1:
         from worker.jobs.shared_recognition import RecognitionStore, recognize_continuation
-        if slot_index != 0:
-            return {"lease_count": 0, "recognized_count": 0}
         result = {}
         async def run_continuation():
             nonlocal result
             result = await recognize_continuation(RecognitionStore(set_run_id), context,
-                                                   check_active=lambda: _assert_run_active(set_run_id))
+                                                   check_active=lambda: _assert_run_active(set_run_id), slot_index=slot_index)
         await _recognize_with_cancellation(set_run_id, run_continuation())
         return result
 

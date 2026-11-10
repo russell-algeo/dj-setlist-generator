@@ -292,12 +292,22 @@ def main():
                         output.write('complete=true\n')
                     return 0
                 prepare(store,root)
+                plan = store.prepare_scheduler()
+                with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+                    output.write('slot_matrix='+json.dumps(list(range(plan.slot_count)))+'\n')
+                    output.write('effective_slot_count='+str(plan.slot_count)+'\n')
                 return 0
-            return 0 if asyncio.run(recognize_resumable(store,root/'audio'/'input.mp3'))=='complete' else 1
+            result = asyncio.run(recognize_resumable(store,root/'audio'/'input.mp3',
+                slot_index=int(os.getenv('PRIVATE_SLOT_INDEX','0'))))
+            return 0 if result in ('complete','slot_complete','paused') else 1
         if sys.argv[1] == 'release':
             return 0
         if sys.argv[1] == 'prepare':
             prepare(store, root)
+            # Historical bounded probe/full modes remain one private job.
+            with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+                output.write('slot_matrix=[0]\n')
+                output.write('effective_slot_count=1\n')
             return 0
         return 0 if asyncio.run(recognize(store, root / 'audio' / 'input.mp3')) == 'complete' else 1
     except Exception:

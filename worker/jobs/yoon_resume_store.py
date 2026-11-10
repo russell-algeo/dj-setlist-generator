@@ -10,13 +10,14 @@ from dataclasses import asdict
 import json
 import re
 import uuid
+from recognition_transport import RequestDeferred
 
 from worker.jobs.yoon_resume_policy import (
-    CONTINUATION_LIMIT, WINDOW_ATTEMPT_LIMIT, after_response, may_reserve,
+    CONTINUATION_LIMIT, WINDOW_ATTEMPT_LIMIT, may_reserve,
 )
 
 
-class QueuePause(RuntimeError):
+class QueuePause(RequestDeferred):
     pass
 
 
@@ -90,7 +91,7 @@ class ResumeStore:
                 raise RuntimeError('uncertain_request_requires_reconciliation')
             state.update(self.owner, continuations=state['continuations']+1,
                          session_requests=0,session_started=row['db_now'], reason=None,
-                         recognition_mode='resumable', status='preparing')
+                         recognition_mode='resumable', status='preparing', pacing_policy='shared-production-v2')
             state['used_owners'] = used + [identity]
             # Reuse ordinary lease geometry/storage without destructive initializer.
             cur.execute('''INSERT INTO ops.set_run_leases
@@ -161,6 +162,8 @@ class ResumeStore:
 
     def require_owner(self):
         with self.locked() as (_,_,state):
+            if state.get('review_required'):
+                raise QueuePause('private_resume_review_required')
             return state
 
     def write(self, payload):
@@ -180,22 +183,50 @@ class ResumeStore:
         if mismatch:
             raise RuntimeError('prepared_audio_changed')
 
-    def next_window(self):
+    def prepare_scheduler(self):
+        """Persist the same scheduler geometry ordinary DJ runs use."""
+        from worker.scheduler import build_scheduler_plan
+        plan = build_scheduler_plan(479)
+        with self.locked() as (cur, _, state):
+            state['scheduler_plan'] = plan.as_metadata()
+            self.save_state(cur, state)
+        return plan
+
+    def _slot(self, state, slot_index):
+        plan = state.get('scheduler_plan') or {}
+        slots, size = int(plan.get('slot_count', 1)), int(plan.get('lease_size', 10))
+        if type(slot_index) is not int or not 0 <= slot_index < slots or size < 1:
+            raise RuntimeError('private_slot_invalid')
+        return slots, size
+
+    def next_windows(self, slot_index=0, limit=10):
         with self.locked() as (cur,row,state):
+            slots, size = self._slot(state, slot_index)
             cur.execute('''SELECT l.id,l.segment_start_index AS segment_index,h.raw_data
                 FROM ops.set_run_leases l LEFT JOIN ops.segment_hits h
                 ON h.set_run_id=l.set_run_id AND h.segment_index=l.segment_start_index
                 WHERE l.set_run_id=%s AND l.status='pending'
+                AND mod(l.segment_start_index / %s, %s)=%s
                 AND coalesce(h.raw_data->'private_jackson_v2'->>'valid','false')<>'true'
-                ORDER BY l.segment_start_index LIMIT 1 FOR UPDATE OF l SKIP LOCKED''', (self.run_id,))
-            candidate = cur.fetchone()
-            if not candidate:
-                return None, 0
-            wait = max(0,state['next_allowed_at']-row['db_now'])
-            return dict(candidate), wait
+                ORDER BY l.segment_start_index LIMIT %s FOR UPDATE OF l SKIP LOCKED''',
+                (self.run_id,size,slots,slot_index,max(1,min(int(limit),479))))
+            candidates = [dict(r) for r in cur.fetchall()]
+            due = max([state.get('next_allowed_at',0)] + [
+                ((r.get('raw_data') or {}).get('private_jackson_v2') or {}).get('next_allowed_at',0)
+                for r in candidates])
+            return candidates, max(0, due-row['db_now'])
 
-    def reserve(self, index):
+    def next_window(self):
+        rows,wait = self.next_windows(limit=1)
+        return (rows[0] if rows else None),wait
+
+    def reserve(self, index, slot_index=0):
         with self.locked() as (cur,row,state):
+            slots, size = self._slot(state, slot_index)
+            if state.get('review_required'):
+                raise QueuePause('private_resume_review_required')
+            if type(index) is not int or not 0 <= index < 479 or (index // size) % slots != slot_index:
+                raise RuntimeError('private_window_slot_mismatch')
             cur.execute('''SELECT l.id,l.status,h.raw_data FROM ops.set_run_leases l
                 LEFT JOIN ops.segment_hits h ON h.set_run_id=l.set_run_id
                   AND h.segment_index=l.segment_start_index
@@ -206,12 +237,15 @@ class ResumeStore:
             if not lease or lease['status'] != 'pending' or data.get('valid') or data.get('in_flight'):
                 raise RuntimeError('private_window_not_available')
             reason = may_reserve(state,now=row['db_now'],session_started=state['session_started'],
-                                 session_requests=state['session_requests'],window_attempts=len(attempts))
+                                 session_requests=state['session_requests'],window_attempts=len(attempts),
+                                 next_allowed_at=data.get('next_allowed_at',0))
             if reason:
                 raise QueuePause(reason)
             state['requests'] += 1
             state['session_requests'] += 1
-            record = dict(self.owner,number=state['requests'],started_at=row['db_now'],state='in_flight')
+            ticket = str(uuid.uuid4())
+            record = dict(self.owner,number=state['requests'],started_at=row['db_now'],state='in_flight',
+                          slot_index=slot_index,ticket=ticket)
             attempts.append(record)
             data.update(valid=False,in_flight=True,attempts=attempts)
             cur.execute('''INSERT INTO ops.segment_hits(set_run_id,lease_id,segment_index,timestamp_seconds,recognized,raw_data)
@@ -221,8 +255,10 @@ class ResumeStore:
             cur.execute("UPDATE ops.set_run_leases SET status='claimed',claimed_by=%s,claimed_at=now(),updated_at=now() WHERE id=%s",
                         (self.owner['workflow_run_id'],lease['id']))
             self.save_state(cur,state)
+            return ticket
 
-    def finish(self, result, diagnostic):
+    def finish(self, result, ticket, delay_seconds=0):
+        """Persist the common engine's attempt and due time; never choose pacing."""
         with self.locked() as (cur,row,state):
             cur.execute('''SELECT h.*,l.status AS lease_status,l.claimed_by FROM ops.segment_hits h
                 JOIN ops.set_run_leases l ON l.id=h.lease_id
@@ -231,20 +267,21 @@ class ResumeStore:
             data = dict((hit or {}).get('raw_data',{}).get('private_jackson_v2') or {})
             attempts = list(data.get('attempts') or [])
             if (not hit or hit['lease_status'] != 'claimed' or not data.get('in_flight')
-                or not attempts or any(attempts[-1].get(k)!=v for k,v in self.owner.items())):
+                or not attempts or any(attempts[-1].get(k)!=v for k,v in self.owner.items())
+                or attempts[-1].get('ticket') != ticket):
                 raise RuntimeError('private_attempt_owner_changed')
-            # Explicit status is required: provider exceptions never become no-matches.
-            valid = not result.error_type and not result.was_rate_limited and diagnostic.get('http_status') == 200
-            safe = {key:diagnostic[key] for key in ('http_status','retry_after_seconds','retry_after_format',
-                    'http_elapsed_seconds','outcome') if key in diagnostic}
-            attempts[-1].update(state='finished',finished_at=row['db_now'],diagnostic=safe)
-            data.update(valid=valid,in_flight=False,attempts=attempts)
+            valid = result.is_valid and result.http_status == 200
+            diagnostic = dict(http_status=result.http_status,retry_after_seconds=result.retry_after_seconds,
+                retry_after_format=result.retry_after_format,
+                outcome=('recognized' if result.recognized else 'no_match') if valid else result.error_type,
+                delay_seconds=delay_seconds)
+            attempts[-1].update(state='finished',finished_at=row['db_now'],diagnostic=diagnostic)
+            data.update(valid=valid,in_flight=False,attempts=attempts,
+                        next_allowed_at=row['db_now']+max(0,delay_seconds))
             response = asdict(result)
             response['error_details'] = None
             data['response'] = response
-            state,reason = after_response(state,now=row['db_now'],rate_limited=result.was_rate_limited,
-                valid=valid,retry_seconds=diagnostic.get('retry_after_seconds'),
-                retry_format=diagnostic.get('retry_after_format','absent'))
+            reason = 'retry_after_needs_review' if result.retry_after_format == 'invalid' else None
             exhausted = not valid and len(attempts)>=WINDOW_ATTEMPT_LIMIT
             cur.execute('''UPDATE ops.segment_hits SET recognized=%s,track_title=%s,artist=%s,
                 shazam_track_id=%s,raw_data=%s::jsonb WHERE id=%s''',
@@ -255,13 +292,13 @@ class ResumeStore:
                 claimed_at=null,completed_at=CASE WHEN %s THEN now() ELSE null END,updated_at=now()
                 WHERE id=%s''', ('completed' if valid else 'exhausted' if exhausted else 'pending',valid,hit['lease_id']))
             state.update(status='recognizing',reason=reason)
-            if reason == 'retry_after_needs_review':
+            if reason:
                 state['review_required'] = True
             self.save_state(cur,state)
             return reason
 
     def release(self, reason):
-        with self.locked() as (cur,_,state):
+        with self.locked() as (cur,row,state):
             if self.coverage_ready(cur):
                 self.complete_locked(cur,state)
                 return
@@ -269,6 +306,25 @@ class ResumeStore:
             cur.execute('''SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s
                 AND raw_data->'private_jackson_v2'->>'in_flight'='true' ''', (self.run_id,))
             uncertain = bool(cur.fetchone()['n'])
+            if uncertain:
+                reason = 'uncertain_request_requires_reconciliation'
+            else:
+                cur.execute('''SELECT count(*) FILTER (WHERE status='exhausted') AS exhausted,
+                    coalesce(max((h.raw_data->'private_jackson_v2'->>'next_allowed_at')::float8),0) AS due
+                    FROM ops.set_run_leases l LEFT JOIN ops.segment_hits h ON h.lease_id=l.id
+                    WHERE l.set_run_id=%s AND l.status<>'completed' ''',(self.run_id,))
+                pending = cur.fetchone()
+                if pending['exhausted']:
+                    reason = 'window_attempt_budget'
+                else:
+                    # Describe the actual retained budget/cooldown instead of
+                    # labelling every clean bounded pause as an interrupted job.
+                    now = row['db_now']
+                    reason = may_reserve(state,now=now,session_started=state['session_started'],
+                        session_requests=state['session_requests'],window_attempts=0,
+                        next_allowed_at=pending['due']) or reason
+                    if reason == 'cooldown':
+                        reason = 'cooldown_pending'
             state.update(status='paused',reason=reason,review_required=bool(state.get('review_required') or uncertain))
             self.save_state(cur,state,'private_resume_paused')
 

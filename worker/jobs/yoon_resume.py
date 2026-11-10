@@ -1,21 +1,23 @@
-"""Fixed Jackson continuation runner. No public publisher or automatic dispatch."""
+"""Private source/storage adapter around the ordinary shared recognition engine."""
 import asyncio
+import concurrent.futures
 import hashlib
+import time
 from pathlib import Path
 
-from worker.jobs.yoon_resume_policy import WORKFLOW_SECONDS, WORKFLOW_REQUEST_LIMIT
+from worker.jobs.yoon_resume_policy import WORKFLOW_SECONDS
 from worker.jobs.yoon_resume_store import QueuePause
 
 
-async def recognize_resumable(store, audio: Path):
+async def recognize_resumable(store, audio: Path, *, slot_index=0):
     from audio_segmenter import AudioSegmenter
     from checkpoint_manager import CheckpointManager
-    from worker.pipeline.recognize import PreparedSetContext, recognize_segment_range
-    from worker.jobs.yoon_recognition import Policy, PrivateRecognitionSession
+    from track_recognizer import TrackRecognizer
     from config import Config
+
     saved = store.require_owner()
-    with audio.open('rb') as f:
-        if hashlib.file_digest(f,'sha256').hexdigest()!=saved.get('audio_sha256'):
+    with audio.open('rb') as source:
+        if hashlib.file_digest(source,'sha256').hexdigest()!=saved.get('audio_sha256'):
             raise RuntimeError('private_audio_digest_mismatch')
     if abs(AudioSegmenter.get_audio_duration_ffprobe(audio)-7200)>.2:
         raise RuntimeError('private_audio_duration_mismatch')
@@ -23,67 +25,76 @@ async def recognize_resumable(store, audio: Path):
             or AudioSegmenter().calculate_total_segments(7200)!=479):
         raise RuntimeError('private_audio_geometry_mismatch')
     cp = CheckpointManager('local:fixed-analysis','fixed-analysis')
-    context = PreparedSetContext('local:fixed-analysis',None,{'duration':7200},cp,audio,479)
-    reason = 'workflow_time_budget'
-    index = None
-    # Keep one SDK/client identity and transport for the entire continuation.
-    # Durable database pacing, not client recreation, governs retries.
-    session = PrivateRecognitionSession(
-        Policy('resumable',479,WORKFLOW_REQUEST_LIMIT,WORKFLOW_SECONDS,spacing_seconds=0,retry_limit=0),
-        before_request=lambda: store.reserve(index))
+    segmenter = AudioSegmenter(checkpoint_manager=cp)
+    now,state = store.clock_state()
+    remaining = WORKFLOW_SECONDS-(now-state['session_started'])
+    if remaining < 65:
+        return 'paused'
+
+    def before_attempt(segment):
+        store.require_owner()
+        return store.reserve(segment['index'],slot_index)
+
+    def on_attempt(result,ticket,delay_seconds):
+        store.finish(result,ticket,delay_seconds)
+
+    # Same provider, classification, retry pacing, backoff and concurrency as an
+    # ordinary DJ worker. Only private source and durable storage are different.
+    recognizer = TrackRecognizer(before_attempt=before_attempt,on_attempt=on_attempt,
+                                 max_retry_seconds=remaining,continuation_deadline=time.monotonic()+remaining,quiet=True)
     try:
-        while True:
-            candidate,wait = store.next_window()
-            if candidate is None:
-                rollup,_ = store.summary()
-                if rollup['valid']==479 and rollup['total']==479:
-                    store.complete()
-                    return 'complete'
-                reason='window_attempts_need_review'; break
-            # Budget caps prohibit additional provider calls, not finalizing
-            # already-complete durable evidence on the last allowed request.
-            now,state = store.clock_state()
-            remaining = WORKFLOW_SECONDS-(now-state['session_started'])
-            if remaining < 65:
-                break
-            if state['session_requests']>=WORKFLOW_REQUEST_LIMIT:
-                reason='workflow_request_budget'; break
-            if wait:
-                if wait+65>=remaining:
-                    reason='cooldown_pending'; break
-                # Poll ownership/cancellation during waits, as the ordinary worker
-                # does during recognition; sleep does not reset durable cooldown.
-                await asyncio.sleep(min(wait,15))
-                continue
-            index = candidate['segment_index']
-            session.stopped = False
-            session.reason = None
-            response_reason = None
-            def received(result):
-                nonlocal response_reason
-                response_reason = store.finish(result,session.attempts[-1])
-            # Reuse the actual shared range extractor and recognition mapping.
-            # One-window leases preserve only missing work across continuations.
-            await asyncio.wait_for(recognize_segment_range(context,start_index=index,
-                end_index=index,on_result=received,recognizer=session),65)
-            if response_reason:
-                reason=response_reason; break
-    except QueuePause as exc:
-        reason=str(exc)
-    except asyncio.CancelledError:
-        reason='cancelled_or_interrupted'
-        raise
-    except Exception:
-        reason='worker_or_storage_pause'
-        raise
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(Config.BATCH_SIZE,4)) as executor:
+            while True:
+                candidates,wait = store.next_windows(slot_index,Config.BATCH_SIZE)
+                if not candidates:
+                    return 'slot_complete'
+                now,state = store.clock_state()
+                remaining = WORKFLOW_SECONDS-(now-state['session_started'])
+                if remaining < 65 or wait+65>=remaining:
+                    return 'paused'
+                if wait:
+                    # Check cancellation/owner throughout an inherited cooldown.
+                    await asyncio.sleep(min(wait,15))
+                    store.require_owner()
+                    continue
+                # Extract only missing windows. A seeded successful window is
+                # never sent again, including gaps inside a scheduler partition.
+                requests_before = state['requests']
+                extracted = []
+                try:
+                    ranges = []
+                    for candidate in candidates:
+                        index = candidate['segment_index']
+                        if ranges and ranges[-1][1] == index:
+                            ranges[-1] = (ranges[-1][0],index+1)
+                        else:
+                            ranges.append((index,index+1))
+                    # The ordinary segmenter's batch method fans FFmpeg out over
+                    # this same bounded executor. Keep contiguous missing windows
+                    # together instead of serializing every extraction.
+                    for first,end in ranges:
+                        extracted.extend(await segmenter.create_segments_batch(audio,first,end,executor))
+                    task = asyncio.create_task(recognizer.recognize_batch(extracted,total_segments=479))
+                    try:
+                        while True:
+                            done,_ = await asyncio.wait({task},timeout=2)
+                            store.require_owner()
+                            if done:
+                                await task
+                                break
+                    finally:
+                        if not task.done():
+                            task.cancel()
+                        await asyncio.gather(task,return_exceptions=True)
+                    _, after_state = store.clock_state()
+                    if after_state['requests'] == requests_before:
+                        return 'paused'
+                finally:
+                    for segment in extracted:
+                        segment['file'].unlink(missing_ok=True)
+    except QueuePause:
+        return 'paused'
     finally:
-        # A successful complete state cannot be re-opened by release. Any uncertain
-        # reservation remains explicit and prevents an automatic duplicate retry.
-        try:
-            await session.close()
-        finally:
-            try:
-                store.release(reason)
-            except RuntimeError:
-                pass
-    return 'paused'
+        await recognizer.close()
+        # The workflow's single private-release job owns release/finalization
+        # after every matrix slot ends. A finishing slot must not cancel peers.

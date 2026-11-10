@@ -5,86 +5,93 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from worker.jobs.yoon_resume import recognize_resumable
-from worker.jobs.yoon_resume_policy import initial_state,after_response
+from worker.jobs.yoon_resume_policy import initial_state
 from worker.pipeline.models import Recognition
 
 class FakeStore:
-    def __init__(self,digest,outcomes):
+    def __init__(self,digest):
         self.now=0;self.state=initial_state(0)|dict(session_started=0,session_requests=0,audio_sha256=digest,continuations=1)
-        self.valid=set(range(4));self.outcomes=list(outcomes);self.calls=[];self.releases=[];self.completed=False
+        self.valid=set(range(4));self.calls=[];self.completed=False;self.tickets={};self.finished=[];self.extractions=[]
     def require_owner(self):return self.state
     def clock_state(self):return self.now,self.state
-    def next_window(self):
-        if len(self.valid)==479:return None,0
-        return {'segment_index':next(i for i in range(479) if i not in self.valid)},max(0,self.state['next_allowed_at']-self.now)
-    def reserve(self,index):
-        assert index not in self.valid
-        assert self.now>=self.state['next_allowed_at']
-        self.calls.append((index,self.now));self.state['session_requests']+=1;self.state['requests']+=1
-    def finish(self,result,diagnostic):
-        valid=not result.error_type and not result.was_rate_limited
-        if valid:self.valid.add(result.segment_index)
-        self.state,reason=after_response(self.state,now=self.now,valid=valid,rate_limited=result.was_rate_limited,
-            retry_seconds=diagnostic.get('retry_after_seconds'),retry_format=diagnostic.get('retry_after_format','absent'))
-        return reason
-    def release(self,reason):
-        if self.completed:raise RuntimeError('already_complete')
-        self.releases.append(reason)
-    def summary(self):return {'valid':len(self.valid),'total':479},self.state
-    def complete(self):
-        assert len(self.valid)==479
-        self.completed=True
+    def next_windows(self,slot_index=0,limit=10):
+        return [{'segment_index':i} for i in range(479) if i not in self.valid and (i//20)%2==slot_index][:limit],0
+    def reserve(self,index,slot_index=0):
+        assert index not in self.valid and (index//20)%2==slot_index
+        ticket=f'{index}:{len(self.calls)}';self.tickets[index]=ticket
+        self.calls.append(index);self.state['session_requests']+=1;self.state['requests']+=1
+        return ticket
+    def finish(self,result,ticket,delay_seconds):
+        assert self.tickets[result.segment_index]==ticket
+        assert result.is_valid
+        self.valid.add(result.segment_index);self.finished.append((result.segment_index,ticket,delay_seconds))
 
 class Session:
-    def __init__(self,policy,before_request):self.before=before_request;self.attempts=[]
-    async def close(self):pass
+    instances=[]
+    def __init__(self,**kwargs):self.options=kwargs;self.closed=False;self.batches=[];self.instances.append(self)
+    async def close(self):self.closed=True
+    async def recognize_batch(self,segments,**kwargs):
+        self.batches.append([s['index'] for s in segments])
+        # Reserve concurrent attempts before finishing any, like the shared engine.
+        admitted=[(s,self.options['before_attempt'](s)) for s in segments]
+        for s,ticket in admitted:
+            result=Recognition(s['timestamp'],None,None,None,{'matches':[]},False,s['index'],http_status=200)
+            self.options['on_attempt'](result,ticket,0)
+        return []
 
 class RunnerTests(unittest.TestCase):
-    def run_case(self,outcomes,mutate=lambda s:None):
+    def run_case(self,slot_index=0,mutate=lambda s:None):
         with tempfile.TemporaryDirectory() as d:
             audio=Path(d)/'synthetic';audio.write_bytes(b'synthetic')
-            store=FakeStore(hashlib.sha256(b'synthetic').hexdigest(),outcomes);mutate(store)
-            async def sleep(seconds):store.now+=seconds
-            async def recognize(context,*,start_index,end_index,on_result,recognizer):
-                self.assertEqual(start_index,end_index)
-                recognizer.before();status,wait=store.outcomes.pop(0) if store.outcomes else (200,None)
-                recognizer.attempts.append({'http_status':status,'retry_after_seconds':wait,'retry_after_format':'absent' if wait is None else 'delta_seconds'})
-                on_result(Recognition(start_index*15,None,None,None,{'matches':[]} if status==200 else None,
-                    False,start_index,was_rate_limited=status==429,error_type=None if status==200 else 'RateLimited'))
-            with patch('worker.jobs.yoon_recognition.PrivateRecognitionSession',Session),patch('worker.pipeline.recognize.recognize_segment_range',recognize),patch('audio_segmenter.AudioSegmenter.get_audio_duration_ffprobe',return_value=7200),patch('worker.jobs.yoon_resume.asyncio.sleep',sleep):
-                result=asyncio.run(recognize_resumable(store,audio))
+            store=FakeStore(hashlib.sha256(b'synthetic').hexdigest());mutate(store)
+            async def extract(_self,_audio,start,end,_executor):
+                store.extractions.append((start,end))
+                paths=[]
+                for index in range(start,end):
+                    file=Path(d)/str(index);file.write_bytes(b'segment')
+                    paths.append(dict(index=index,timestamp=index*15,file=file))
+                return paths
+            with patch('track_recognizer.TrackRecognizer',Session),patch('audio_segmenter.AudioSegmenter.create_segments_batch',extract),patch('audio_segmenter.AudioSegmenter.get_audio_duration_ffprobe',return_value=7200):
+                result=asyncio.run(recognize_resumable(store,audio,slot_index=slot_index))
             return store,result
-    def test_skips_seeded_valid_windows_and_caps_requests(self):
-        store,result=self.run_case([])
-        self.assertEqual(result,'paused');self.assertEqual(len(store.calls),24)
-        self.assertEqual([i for i,_ in store.calls],list(range(4,28)))
-        self.assertEqual(store.releases,['workflow_request_budget'])
-    def test_rate_limit_retries_same_unfinished_window_after_persisted_cooldown(self):
-        store,_=self.run_case([(429,None),(200,None)])
-        self.assertEqual(store.calls[:2],[(4,0),(4,300)])
-        self.assertEqual(store.calls[2],(5,360))
-        self.assertIn(4,store.valid)
-    def test_long_provider_wait_pauses_without_truncation_or_second_request(self):
-        store,_=self.run_case([(429,9000)])
-        self.assertEqual(store.calls,[(4,0)]);self.assertEqual(store.state['next_allowed_at'],9000)
-        self.assertEqual(store.releases,['cooldown_pending'])
-    def test_four_consecutive_limits_pause_and_preserve_queue(self):
-        store,_=self.run_case([(429,None)]*4)
-        self.assertEqual(store.calls,[(4,0),(4,300),(4,900),(4,2100)])
-        self.assertEqual(store.releases,['sustained_rate_limit_pause']);self.assertNotIn(4,store.valid)
+    def test_skips_seeded_windows_and_processes_more_than_24(self):
+        store,result=self.run_case()
+        self.assertEqual(result,'slot_complete')
+        self.assertEqual(store.calls,[i for i in range(4,479) if (i//20)%2==0])
+        self.assertGreater(len(store.calls),24)
+        self.assertTrue(any(end-start>1 for start,end in store.extractions))
+        self.assertTrue(Session.instances[-1].closed)
+        self.assertTrue(Session.instances[-1].options['quiet'])
+    def test_other_slot_does_not_touch_peers_or_release_global_owner(self):
+        store,result=self.run_case(1)
+        self.assertEqual(store.calls,[i for i in range(4,479) if (i//20)%2==1])
+        self.assertEqual(result,'slot_complete')
     def test_elapsed_workflow_does_not_transmit(self):
-        store,_=self.run_case([],lambda s:setattr(s,'now',3590))
-        self.assertEqual(store.calls,[]);self.assertEqual(store.releases,['workflow_time_budget'])
-    def test_last_allowed_request_can_complete_at_lifetime_limit(self):
-        def setup(s):
-            s.valid=set(range(455));s.state.update(requests=744,continuations=32)
-        store,result=self.run_case([],setup)
-        self.assertEqual(result,'complete');self.assertTrue(store.completed)
-        self.assertEqual(len(store.calls),24);self.assertEqual(store.state['requests'],768)
-        self.assertEqual(store.releases,[])
-    def test_complete_evidence_finalizes_after_time_limit_without_request(self):
-        def setup(s):s.valid=set(range(479));s.now=4000
-        store,result=self.run_case([],setup)
-        self.assertEqual(result,'complete');self.assertEqual(store.calls,[])
+        store,result=self.run_case(mutate=lambda s:setattr(s,'now',3590))
+        self.assertEqual(store.calls,[]);self.assertEqual(result,'paused')
+    def test_digest_drift_rejected_before_engine_construction(self):
+        with self.assertRaisesRegex(RuntimeError,'private_audio_digest_mismatch'):
+            self.run_case(mutate=lambda s:s.state.update(audio_sha256='bad'))
 
 if __name__=='__main__':unittest.main()
+
+class ActualEnginePauseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_store_pause_reaches_runner_without_http_or_fake_response(self):
+        from types import SimpleNamespace
+        from track_recognizer import TrackRecognizer
+        from recognition_transport import SingleAttemptHTTP
+        from worker.jobs.yoon_resume_store import QueuePause
+        calls=[];receipts=[]
+        class HTTP:
+            def request(self,*args,**kwargs):
+                calls.append(True)
+                raise AssertionError('must not transmit')
+        def reserve(segment):
+            raise QueuePause('window_attempt_budget')
+        engine=TrackRecognizer(before_attempt=reserve,on_attempt=lambda *args:receipts.append(args),quiet=True)
+        engine.transport=SingleAttemptHTTP(session_factory=lambda **kwargs:HTTP(),before_request=engine.before_request)
+        async def recognize(_):return await engine.transport.request('POST','https://provider.invalid')
+        engine.shazam=SimpleNamespace(recognize=recognize)
+        with self.assertRaisesRegex(QueuePause,'window_attempt_budget'):
+            await engine.recognize_batch([dict(index=8,timestamp=120,file=Path('synthetic'))],cleanup_files=False)
+        self.assertEqual(calls,[]);self.assertEqual(receipts,[])

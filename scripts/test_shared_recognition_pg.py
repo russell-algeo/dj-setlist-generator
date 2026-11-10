@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from worker.jobs.shared_recognition import RecognitionStore, RecognitionPause, RecognitionFence, valid_coverage
 from worker.pipeline.models import Recognition
+from recognition_transport import RequestAuthorizationError
 
 class Cursor:
     def __enter__(self): return self
@@ -51,7 +52,7 @@ def check(value):
 def denies(fn):
     global checks
     try: fn()
-    except (RuntimeError,RecognitionPause,RecognitionFence): checks+=1
+    except (RuntimeError,RecognitionPause,RecognitionFence,RequestAuthorizationError): checks+=1
     else: raise AssertionError('expected refusal')
 RUN='a0000000-0000-4000-8000-000000000010'
 OTHER='a0000000-0000-4000-8000-000000000011'
@@ -69,108 +70,81 @@ with patch('socket.socket.connect',side_effect=AssertionError('network forbidden
     p=Path(tmp)/'synthetic-audio';p.write_bytes(b'synthetic fixture; never provider audio')
     context=SimpleNamespace(audio_file=p,total_segments=3,source_url='local:synthetic')
     a,b=store(),store(OTHER)
-    check(a.begin()['continuations']==1)
-    check(a.prepared(context)==3)
-    b.begin();b.prepared(context)
+    check(a.begin()['policy_version']==2)
+    check(a.prepared(context,slot_count=2,lease_size=2)==2)
+    b.begin();b.prepared(context,slot_count=2,lease_size=2)
     check(a.state()[1]['request_limit']==24)
-    check(query('SELECT count(*) AS n FROM ops.set_run_leases WHERE set_run_id=%s',(RUN,))[0]['n']==3)
     denies(a.begin)
     denies(lambda:store(workflow='9002').state())
-    first,wait,reason=a.reserve()
-    check(first['index']==0 and wait==0 and reason is None)
-    check(a.state()[1]['requests']==1)
-    a.authorize(first);check(True)
-    check(b.reserve()[2]=='provider_busy')
-    check(b.state()[1]['requests']==0)
-    # Outstanding reservation cannot be overwritten, even by same owner.
-    check(a.reserve()[0] is None)
+    lease=a.claim_lease('worker0');second=a.claim_lease('worker1')
+    check(lease['segment_start_index']==0 and lease['segment_end_index']==1)
+    check(second['segment_start_index']==2)
+    first=a.reserve(0,lease['id'],'worker0')
+    concurrent=a.reserve(1,lease['id'],'worker0')
+    across_slot=a.reserve(2,second['id'],'worker1')
+    check(a.state()[1]['requests']==3 and a.state()[1]['in_flight'])
+    other=b.claim_lease('other-worker')
+    cross_run=b.reserve(0,other['id'],'other-worker');check(cross_run['index']==0)
+    denies(lambda:a.reserve(0,lease['id'],'worker0'))
+    denies(lambda:a.reserve(1,lease['id'],'wrong-worker'))
+    denies(lambda:a.reserve(8,lease['id'],'worker0'))
     limited=Recognition(0,None,None,None,None,False,0,was_rate_limited=True,
                         error_type='RateLimited',http_status=429,retry_after_seconds=600,
                         retry_after_format='delta_seconds')
-    a.finish(first,limited)
-    _,state=a.state()
-    check(not state['in_flight'] and state['spacing_seconds']==60 and state['requests']==1)
-    check(a.reserve()[1]>595)
-    check(b.reserve()[1]>595) # Cross-run cooldown, not merely same-process sleeps.
-    a.pause('cooldown_pending')
-    reset_clock()
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{active_workflow_run_id}','\"9002\"') WHERE id=%s",(RUN,))
-    a2=store(workflow='9002');saved=a2.begin()
-    check(saved['continuations']==2 and saved['requests']==1 and saved['spacing_seconds']==60)
-    a2.prepared(context)
-    check(query('SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s',(RUN,))[0]['n']==1)
-    denies(a.state)
-    request,_,_=a2.reserve();check(request['index']==0)
-    a2.finish(request,result(0))
-    hit=query('SELECT * FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=0',(RUN,))[0]
-    evidence=hit['raw_data']['shared_recognition']
-    check(evidence['valid'] and len(evidence['attempts'])==2)
-    check([x['diagnostic']['http_status'] for x in evidence['attempts']]==[429,200])
-    denies(lambda:a2.finish(request,result(0)))
-    denies(lambda:query("UPDATE ops.segment_hits SET recognized=true WHERE set_run_id=%s AND segment_index=0",(RUN,)))
-    denies(lambda:query("DELETE FROM ops.segment_hits WHERE set_run_id=%s",(RUN,)))
-    denies(lambda:query("SELECT ops.initialize_set_run_leases(%s,3,1,1)",(RUN,)))
-    reset_clock();request,_,_=a2.reserve();check(request['index']==1)
-    a2.finish(request,result(1))
-    reset_clock();request,_,_=a2.reserve();check(request['index']==2)
-    a2.finish(request,result(2))
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(jsonb_set(source_metadata,'{shared_recognition,requests}','24'),'{shared_recognition,session_requests}','24') WHERE id=%s",(RUN,))
-    check(a2.reserve()[2]=='complete') # All-valid finalization precedes caps.
+    a.finish(first,limited,600)
+    a.finish(across_slot,result(2))
+    check(a.state()[1]['in_flight'])
+    a.finish(concurrent,result(1))
+    check(not a.state()[1]['in_flight'])
+    check(a.missing_indices(lease)==[0])
+    denies(lambda:a.reserve(0,lease['id'],'worker0'))
+    denies(lambda:a.finish(concurrent,result(1)))
+    check(a.settle_lease(second,'worker1'))
+    check(not a.settle_lease(lease,'worker0'))
+    a.pause('recognition_retry_pending')
+    state_a=a.state()[1]
+    check(state_a['next_allowed_at']>0 and state_a['paused'])
+    check('spacing_seconds' not in state_a)
+    # New v2 runs are not blocked by another run's active HTTP request.
+    check(query("SELECT ops.shared_recognition_dispatchable(%s,'{}'::jsonb) AS ok",(str(uuid.uuid4()),))[0]['ok'])
+    # An owner with unknown outcomes never redispatches, even after expiry.
+    check(not query('SELECT ops.shared_recognition_dispatchable(id,source_metadata) AS ok FROM ops.set_runs WHERE id=%s',(OTHER,))[0]['ok'])
+    denies(lambda:store(OTHER,attempt='2').begin())
+    b.finish(cross_run,result(0))
+    before=query('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=1',(RUN,))[0]['raw_data']
+    # Simulate clean app-finalizer requeue (no deletion of completed rows).
+    query("UPDATE ops.set_run_leases SET status='pending' WHERE set_run_id=%s AND status='failed'",(RUN,))
+    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(jsonb_set(source_metadata,'{active_workflow_run_id}','\"9002\"'),'{shared_recognition,next_allowed_at}','0') WHERE id=%s",(RUN,))
+    query("UPDATE ops.segment_hits SET raw_data=jsonb_set(raw_data,'{shared_recognition,next_allowed_at}','0') WHERE set_run_id=%s AND segment_index=0",(RUN,))
+    a2=store(workflow='9002');check(a2.begin()['continuations']==2)
+    check(a2.prepared(context,slot_count=2,lease_size=2)==2)
+    lease2=a2.claim_lease('worker2');check(a2.missing_indices(lease2)==[0])
+    again=a2.reserve(0,lease2['id'],'worker2');a2.finish(again,result(0))
+    check(a2.settle_lease(lease2,'worker2'))
+    check(a2.claim_lease('worker2') is None)
+    a2.pause('done');check(not a2.state()[1]['paused'])
+    after=query('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=1',(RUN,))[0]['raw_data']
+    check(before==after)
     hits=query('SELECT * FROM ops.segment_hits WHERE set_run_id=%s ORDER BY segment_index',(RUN,))
-    check(valid_coverage(hits,3,versioned=True))
-    check(not valid_coverage(hits[:2],3,versioned=True))
-    damaged=dict(hits[0]);damaged['raw_data']={'shared_recognition':dict(evidence,response={'bad':True})}
-    check(not valid_coverage([damaged,*hits[1:]],3,versioned=True))
-    check(not valid_coverage([dict(segment_index=0,raw_data={'error':'bad'})],1,versioned=False))
-    # Provenance mismatch survives a fresh workflow instead of deleting valid rows.
-    a2.pause('complete')
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{active_workflow_run_id}','\"9003\"') WHERE id=%s",(RUN,))
-    a3=store(workflow='9003');check(a3.begin()['requests']==24)
-    p.write_bytes(b'changed synthetic derivative')
-    denies(lambda:a3.prepared(context))
-    check(a3.state()[1]['review_required'])
-    check(query('SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s',(RUN,))[0]['n']==3)
-    # Capture an uncertain hardkill. Other runs cannot issue a duplicate/overlap.
-    reset_clock();request,_,_=b.reserve();check(request['index']==0)
-    b.pause('worker_or_storage_error')
-    check(b.state()[1]['in_flight'] and b.state()[1]['review_required'])
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{active_workflow_run_id}','\"9002\"') WHERE id=%s",(OTHER,))
-    denies(lambda:store(OTHER,'9002').begin())
-    # Cancellation/owner changes reject response writes atomically.
-    query('UPDATE ops.set_runs SET cancel_requested_at=now() WHERE id=%s',(OTHER,))
-    denies(lambda:b.finish(request,result(0)))
-    check(query("SELECT raw_data->'shared_recognition'->>'in_flight' AS v FROM ops.segment_hits WHERE set_run_id=%s",(OTHER,))[0]['v']=='true')
-    # Quarantine expires only for OTHER new work. The unknown window remains blocked.
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{shared_recognition,in_flight_until}','0') WHERE id=%s",(OTHER,))
-    query("UPDATE ops.segment_hits SET raw_data=jsonb_set(raw_data,'{shared_recognition,attempts,0,expires_at}','0') WHERE set_run_id=%s",(OTHER,))
-    reset_clock()
-    fresh='a0000000-0000-4000-8000-000000000012'
-    query("""INSERT INTO ops.set_runs(id,submission_id,requested_by,status,source_url,publication_visibility,source_metadata)
-      SELECT %s,submission_id,requested_by,'recognizing','local:synthetic','public',
-      '{"active_workflow_run_id":"9001","dispatch_generation":"g","segment_count":3}'::jsonb
-      FROM ops.set_runs WHERE id=%s""",(fresh,RUN))
-    c=store(fresh);c.begin();c.prepared(context)
-    next_request,_,_=c.reserve();check(next_request['index']==0)
-    c.authorize(next_request);check(True)
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{shared_recognition,request_deadline}','0') WHERE id=%s",(fresh,))
-    denies(lambda:c.authorize(next_request))
-    check(query("SELECT raw_data->'shared_recognition'->>'in_flight' AS v FROM ops.segment_hits WHERE set_run_id=%s",(OTHER,))[0]['v']=='true')
-    # Cancellation remains permanent even after provider quarantine expires.
-    denies(lambda:store(OTHER,'9002').begin())
-    # Known response may settle an expired reservation without ever sending again.
-    c.finish(next_request,result(0));reset_clock()
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{shared_recognition,session_requests}','24') WHERE id=%s",(fresh,))
-    check(c.reserve()[2]=='workflow_request_budget')
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(jsonb_set(source_metadata,'{shared_recognition,session_requests}','1'),'{shared_recognition,requests}','24') WHERE id=%s",(fresh,))
-    check(c.reserve()[2]=='lifetime_request_budget')
-    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{shared_recognition,requests}','1') WHERE id=%s",(fresh,))
-    exhausted={'shared_recognition':{'version':1,'valid':False,'in_flight':False,'attempts':[{'outcome':'failed'}]*8}}
-    query("""INSERT INTO ops.segment_hits(set_run_id,lease_id,segment_index,timestamp_seconds,recognized,raw_data)
-      SELECT %s,id,1,15,false,%s::jsonb FROM ops.set_run_leases WHERE set_run_id=%s AND segment_start_index=1""",
-      (fresh,json.dumps(exhausted),fresh))
-    check(c.reserve()[2]=='window_attempt_budget')
-    check(c.state()[1]['requests']==1)
-    # App UPDATE is not needed by the worker; full actual SQL succeeds with SELECT only.
-    with connect():
-        denies(lambda:query('SELECT * FROM app.sets FOR UPDATE'))
+    check(valid_coverage(hits,3,versioned=True,step=15))
+    evidence=hits[0]['raw_data']['shared_recognition']
+    check(len(evidence['attempts'])==2 and evidence['attempts'][0]['outcome']=='failed')
+    check(evidence['attempts'][1]['outcome']=='valid')
+    denies(lambda:query('UPDATE ops.segment_hits SET raw_data=%s::jsonb WHERE set_run_id=%s AND segment_index=1',('{}',RUN)))
+    denies(lambda:query('DELETE FROM ops.segment_hits WHERE set_run_id=%s',(RUN,)))
+    # A clean legacy v1 policy can upgrade without modifying valid evidence.
+    old_result=query('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=0',(OTHER,))[0]['raw_data']
+    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(jsonb_set(jsonb_set(source_metadata,'{active_workflow_run_id}','\"9002\"'),'{shared_recognition,policy_version}','1'),'{shared_recognition,spacing_seconds}','30') WHERE id=%s",(OTHER,))
+    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{shared_recognition,next_allowed_at}',to_jsonb(extract(epoch FROM now())+600)) WHERE id=%s",(OTHER,))
+    upgraded=store(OTHER,workflow='9002')
+    denies(upgraded.begin)
+    check(query("SELECT (source_metadata->'shared_recognition'->>'next_allowed_at')::float8 > extract(epoch FROM now())+590 AS kept FROM ops.set_runs WHERE id=%s",(OTHER,))[0]['kept'])
+    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{shared_recognition,next_allowed_at}','0') WHERE id=%s",(OTHER,))
+    check(upgraded.begin()['policy_version']==2)
+    check(old_result==query('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=0',(OTHER,))[0]['raw_data'])
+    b=upgraded
+    # A cancelled owner cannot reserve or settle more provider work.
+    pending=b.claim_lease('other2')
+    query("UPDATE ops.set_runs SET cancel_requested_at=now() WHERE id=%s",(OTHER,))
+    denies(lambda:b.reserve(2,pending['id'],'other2'))
 print(json.dumps({'done':True,'checks':checks}),file=sys.__stdout__,flush=True)

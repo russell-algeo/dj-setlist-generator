@@ -130,7 +130,7 @@ class Tests(unittest.TestCase):
             # Explicitly fresh env: no credentials, no inherited HOME/auth files, no DB config.
             env={'PATH':'/usr/bin:/bin','HOME':temp,'PYTHONDONTWRITEBYTECODE':'1','GITHUB_ACTIONS':'true',
                  'RUNNER_OS':'Linux','GITHUB_REPOSITORY':'russell-algeo/dj-setlist-generator',
-                 'WORKER_DEPLOYMENT_TARGET':'development','RUNNER_TEMP':temp,
+                 'WORKER_DEPLOYMENT_TARGET':'development','RUNNER_TEMP':temp,'GITHUB_OUTPUT':str(Path(temp)/'outputs'),
                  'PRIVATE_RUN_ID':'SYNTHETIC_PRIVATE_CAPABILITY','GITHUB_RUN_ID':'1','GITHUB_RUN_ATTEMPT':'1'}
             result=subprocess.run([sys.executable,'-m','worker.jobs.yoon_once','prepare'],cwd=root,env=env,capture_output=True)
             self.assertNotEqual(result.returncode,0); self.assertEqual(result.stdout,b''); self.assertEqual(result.stderr,b'')
@@ -140,7 +140,7 @@ class Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             env={'PATH':'/usr/bin:/bin','HOME':temp,'PYTHONDONTWRITEBYTECODE':'1','GITHUB_ACTIONS':'true',
                  'RUNNER_OS':'Linux','GITHUB_REPOSITORY':'russell-algeo/dj-setlist-generator',
-                 'WORKER_DEPLOYMENT_TARGET':'development','RUNNER_TEMP':temp,
+                 'WORKER_DEPLOYMENT_TARGET':'development','RUNNER_TEMP':temp,'GITHUB_OUTPUT':str(Path(temp)/'outputs'),
                  'PRIVATE_RUN_ID':'12345678-1234-1234-1234-123456789012','GITHUB_RUN_ID':'1','GITHUB_RUN_ATTEMPT':'1'}
             code = """import os, subprocess, sys
 from worker.jobs import yoon_once as j

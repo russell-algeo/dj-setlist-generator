@@ -1,20 +1,17 @@
-"""Bounded transport/session for the fixed private pilot only.
+"""Private pilot limits and diagnostics around the common DJ recognizer.
 
-No shared recognizer changes, provider rotation, implicit HTTP retries, or logs.
-Diagnostics are allowlisted and travel only with the private run checkpoint.
+The provider transport, response classification, retry timing and concurrency
+are implemented only by TrackRecognizer. This adapter owns no Shazam policy.
 """
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
-from datetime import timezone
-from email.utils import parsedate_to_datetime
 from importlib.metadata import PackageNotFoundError, version
-import math
 import platform
 import time
 
-from worker.pipeline.models import Recognition
+from config import Config
+from recognition_transport import RequestAuthorizationError, classify_error, retry_after
 
 
 @dataclass(frozen=True)
@@ -23,255 +20,133 @@ class Policy:
     window_limit: int
     request_limit: int
     seconds_limit: int
-    spacing_seconds: int = 8
-    retry_limit: int = 1  # Entire run, not per window.
-    retry_floor_seconds: int = 120
-    retry_wait_limit_seconds: int = 300
-    attempt_timeout_seconds: int = 60
+    retry_limit: int = 1  # Historical pilot cap, not a private retry strategy.
 
 
 def policy_for(mode):
     if mode == 'probe':
-        return Policy('probe', 5, 6, 600)
+        return Policy('probe',5,6,600)
     if mode == 'full':
-        return Policy('full', 479, 480, 80 * 60)
+        return Policy('full',479,480,80*60)
     raise RuntimeError('invalid_private_recognition_mode')
-
-
-def retry_after(value, now):
-    """Return parsed seconds + format, never a raw header. Never shorten a wait."""
-    if value is None:
-        return None, 'absent'
-    if not isinstance(value, str) or len(value) > 128:
-        return None, 'invalid'
-    value = value.strip()
-    if value.isascii() and value.isdigit():
-        seconds = int(value)
-        # Oversized positive values must cause a stop, not fall back to 120s.
-        return min(seconds, 10**12), 'delta_seconds'
-    try:
-        date = parsedate_to_datetime(value)
-        if date.tzinfo is None:
-            return None, 'invalid'
-        seconds = max(0, math.ceil(date.astimezone(timezone.utc).timestamp() - now))
-        return min(seconds, 10**12), 'http_date'
-    except (ValueError, TypeError, OverflowError):
-        return None, 'invalid'
-
-
-class PrivateHTTPError(Exception):
-    def __init__(self, status):
-        self.status = status
-        super().__init__('private_provider_http_error')
 
 
 class PrivateStop(Exception):
     pass
 
 
-def classify_error(error):
-    """Class identity/status, including wrapped exceptions, without message sniffing."""
-    from shazamio.exceptions import RateLimited
-    seen = set()
-    current = error
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, RateLimited) or getattr(current, 'status', None) == 429:
-            return 'RateLimited', True
-        current = current.__cause__ or current.__context__
-    if isinstance(error, (TimeoutError, asyncio.TimeoutError)):
-        return 'RequestTimeout', False
-    if isinstance(error, PrivateStop):
-        return 'PrivateBudgetStop', False
-    if isinstance(error, PrivateHTTPError):
-        return 'ProviderHTTPError', False
-    return 'RecognitionError', False
-
-
-class SingleAttemptHTTP:
-    """Shazam's injected HTTP interface: exactly one nonredirecting POST per attempt."""
-    def __init__(self, policy, *, before_request, clock=time.monotonic,
-                 wall_clock=time.time, sleep=asyncio.sleep, session_factory=None):
-        self.policy = policy
-        self.before_request = before_request
-        self.clock, self.wall_clock, self.sleep = clock, wall_clock, sleep
-        self.session_factory = session_factory
-        self.client = None
-        self.started = clock()
-        self.last_finished = None
-        self.requests = 0
-        self.record = None
-        self.used = False
-
-    def begin(self, record):
-        self.record = record
-        self.used = False
-
-    async def request(self, method, url, **kwargs):
-        import aiohttp
-        if self.used or method.upper() != 'POST' or self.requests >= self.policy.request_limit:
-            raise PrivateStop('request_budget')
-        self.used = True
-        if self.last_finished is not None:
-            delay = max(0, self.policy.spacing_seconds - (self.clock() - self.last_finished))
-            self.record['spacing_wait_seconds'] = round(delay, 3)
-            if delay:
-                await self.sleep(delay)
-        self.before_request()  # Recheck owner/cancellation after any pause, before transmission.
-        if self.client is None:
-            factory = self.session_factory or aiohttp.ClientSession
-            self.client = factory(timeout=aiohttp.ClientTimeout(total=30), trust_env=False)
-        self.requests += 1
-        self.record['http_request_number'] = self.requests
-        self.record['started_after_seconds'] = round(self.clock() - self.started, 3)
-        start = self.clock()
-        try:
-            # These override any downstream defaults. No HTTP redirects or retry client.
-            kwargs['allow_redirects'] = False
-            kwargs['timeout'] = aiohttp.ClientTimeout(total=30)
-            async with self.client.request('POST', url, **kwargs) as response:
-                self.record['http_status'] = response.status
-                seconds, kind = retry_after(response.headers.get('Retry-After'), self.wall_clock())
-                self.record['retry_after_seconds'] = seconds
-                self.record['retry_after_format'] = kind
-                if response.status != 200:
-                    raise PrivateHTTPError(response.status)
-                value = await response.json()
-                # A 200 error object is not a valid no-match response.
-                if not isinstance(value, dict) or not isinstance(value.get('matches'), list):
-                    raise ValueError('invalid_recognition_response')
-                if 'track' in value and not isinstance(value['track'], dict):
-                    raise ValueError('invalid_recognition_track')
-                if value['matches'] and 'track' not in value:
-                    raise ValueError('missing_recognition_track')
-                return value
-        finally:
-            self.last_finished = self.clock()
-            self.record['http_elapsed_seconds'] = round(self.last_finished - start, 3)
-
-    async def request_text(self, *args, **kwargs):
-        raise PrivateStop('unexpected_transport_operation')
-
-    async def close(self):
-        if self.client is not None:
-            await self.client.close()
-
-
 class PrivateRecognitionSession:
     def __init__(self, policy=None, *, before_request=lambda: None, clock=time.monotonic,
-                 wall_clock=time.time, sleep=asyncio.sleep, session_factory=None):
-        from shazamio import Shazam
+                 wall_clock=time.time, sleep=None, session_factory=None):
         from track_recognizer import TrackRecognizer
         self.policy = policy or policy_for('probe')
-        self.transport = SingleAttemptHTTP(self.policy, before_request=before_request,
-                clock=clock, wall_clock=wall_clock, sleep=sleep, session_factory=session_factory)
-        transport = self.transport
-        class PrivateTrackRecognizer(TrackRecognizer):
-            # Reuse the app's actual segment recognition and result mapping. Only
-            # this instance opts into typed classification and a bounded transport.
-            def _create_shazam_client(self):
-                return Shazam(http_client=transport, endpoint_country='US')
-
-            def _is_rate_limit_error(self, error):
-                self.last_error_kind, limited = classify_error(error)
-                return limited
-
-        self.recognizer = PrivateTrackRecognizer()
-        self.sleep = sleep
+        self.clock = clock
+        self.started = clock()
+        self.before_request = before_request
         self.stopped = False
         self.reason = None
+        self.requests = 0
         self.retries = 0
+        self.seen = set()
         self.attempts = []
-        self.lock = asyncio.Lock()
+        self.callbacks = {}
+        self.recognizer = TrackRecognizer(before_attempt=self._before_attempt,
+            on_attempt=self._on_attempt,max_retry_seconds=self.policy.seconds_limit,
+            continuation_deadline=time.monotonic()+self.policy.seconds_limit,quiet=True)
+        self.transport = self.recognizer.transport
+        if session_factory is not None:
+            self.transport.session_factory = session_factory
+        self.transport.wall_clock = wall_clock
         packages = {}
-        for package in ('shazamio', 'shazamio-core', 'aiohttp', 'aiohttp-retry'):
+        for package in ('shazamio','shazamio-core','aiohttp','aiohttp-retry'):
             try:
                 packages[package] = version(package)
             except PackageNotFoundError:
                 packages[package] = 'unavailable'
-        self.versions = {'python': platform.python_version(), **packages}
+        self.versions = {'python':platform.python_version(),**packages}
+
+    def _stop(self,reason):
+        self.stopped = True
+        self.reason = reason
+        raise PrivateStop(reason)
+
+    def _before_attempt(self, segment):
+        if self.stopped:
+            self._stop(self.reason or 'private_budget')
+        index = segment['index']
+        if self.requests >= self.policy.request_limit:
+            self._stop('request_budget')
+        if self.clock()-self.started >= self.policy.seconds_limit:
+            self._stop('workflow_time_budget')
+        if index not in self.seen and len(self.seen) >= self.policy.window_limit:
+            self._stop('window_budget')
+        if index in self.seen:
+            if self.retries >= self.policy.retry_limit:
+                self._stop('retry_budget')
+            self.retries += 1
+        self.before_request()
+        self.seen.add(index)
+        self.requests += 1
+        record = dict(segment_index=index,http_request_number=self.requests,
+                      started_after_seconds=round(self.clock()-self.started,3))
+        self.attempts.append(record)
+        return record
+
+    def _on_attempt(self,result,ticket,delay_seconds):
+        # A pre-transmission refusal is not a Shazam response and is never saved
+        # as no-match. Only allowlisted status data enters the private checkpoint.
+        ticket.update(http_status=result.http_status,retry_after_seconds=result.retry_after_seconds,
+            retry_after_format=result.retry_after_format,
+            outcome=result.error_type or ('recognized' if result.recognized else 'no_match'),
+            planned_retry_wait_seconds=delay_seconds)
+        callback = self.callbacks.get(result.segment_index)
+        if callback:
+            try:
+                callback(result)
+            except BaseException:
+                self.stopped = True
+                raise
 
     def diagnostics(self):
-        # No URLs, messages, full headers, fingerprints, bodies or source capabilities.
-        return {'versions': self.versions, 'mode': self.policy.mode, 'concurrency': 1,
-                'spacing_seconds': self.policy.spacing_seconds,
-                'request_limit': self.policy.request_limit, 'requests': self.transport.requests,
-                'retry_limit': self.policy.retry_limit, 'retries': self.retries,
-                'attempts': [dict(row) for row in self.attempts]}
+        return dict(versions=self.versions,mode=self.policy.mode,
+                    concurrency=Config.CONCURRENT_RECOGNITIONS,engine='shared-track-recognizer',
+                    request_limit=self.policy.request_limit,requests=self.requests,
+                    retry_limit=self.policy.retry_limit,retries=self.retries,
+                    attempts=[dict(row) for row in self.attempts])
 
     async def one(self, segment, on_result):
-        async with self.lock:
-            if self.stopped:
-                return
-            for attempt in range(1, 3):  # At most two tries for any window.
-                record = {'segment_index': segment['index'], 'attempt': attempt,
-                          'http_status': None, 'retry_after_seconds': None,
-                          'retry_after_format': 'unobserved'}
-                self.attempts.append(record)
-                self.transport.begin(record)
-                try:
-                    result = await asyncio.wait_for(self.recognizer.recognize_segment(segment),
-                                                  self.policy.attempt_timeout_seconds)
-                    if result.error_type:
-                        result.error_type = self.recognizer.last_error_kind
-                        result.error_details = None  # Shared mapper includes unsafe exception text.
-                        record['outcome'] = result.error_type
-                    else:
-                        record['outcome'] = 'recognized' if result.recognized else 'no_match'
-                except asyncio.CancelledError:
-                    record['outcome'] = 'cancelled'
-                    raise
-                except Exception as error:
-                    kind, limited = classify_error(error)
-                    result = Recognition(segment['timestamp'], None, None, None, None,
-                        False, segment['index'], was_rate_limited=limited, error_type=kind)
-                    record['outcome'] = kind
-                retry_delay = None
-                if result.was_rate_limited and self.retries < self.policy.retry_limit:
-                    if record['retry_after_format'] == 'invalid':
-                        self.reason = 'invalid_retry_after'
-                    else:
-                        retry_delay = max(self.policy.retry_floor_seconds,
-                                          record['retry_after_seconds'] or 0)
-                        if retry_delay > self.policy.retry_wait_limit_seconds:
-                            self.reason = 'retry_after_exceeds_budget'
-                            retry_delay = None
-                if retry_delay is not None:
-                    record['planned_retry_wait_seconds'] = retry_delay
-                try:
-                    on_result(result)  # Persist every response BEFORE waiting or proceeding.
-                except Exception:
-                    self.stopped = True
-                    raise
-                if not result.error_type and not result.was_rate_limited:
-                    return
-                if retry_delay is None:
-                    self.stopped = True
-                    self.reason = self.reason or ('rate_limited' if result.was_rate_limited else 'provider_error')
-                    return
-                self.retries += 1
-                await self.sleep(retry_delay)
+        if self.stopped:
+            return
+        self.callbacks[segment['index']] = on_result
+        try:
+            return await self.recognizer.recognize_segment_with_backoff(segment)
+        except (PrivateStop,RequestAuthorizationError):
             self.stopped = True
-            self.reason = 'rate_limited'
+            self.reason = self.reason or 'owner_or_budget_changed'
+        finally:
+            self.callbacks.pop(segment['index'],None)
 
     async def recognize_batch(self, batch_segments, *, total_segments=None, batch_start=0,
                               on_result=None, cleanup_files=True):
-        """Adapter for the shared range runner, with immediate private checkpoints."""
         rows = {}
         def persist(result):
             rows[result.segment_index] = result
             if on_result:
                 on_result(result)
+        for segment in batch_segments:
+            self.callbacks[segment['index']] = persist
         try:
-            for segment in batch_segments:
-                if self.stopped:
-                    break
-                await self.one(segment, persist)
+            await self.recognizer.recognize_batch(batch_segments,total_segments=total_segments,
+                batch_start=batch_start,cleanup_files=cleanup_files)
+        except (PrivateStop,RequestAuthorizationError):
+            self.stopped = True
+            self.reason = self.reason or 'owner_or_budget_changed'
         finally:
-            if cleanup_files:
-                for segment in batch_segments:
+            for segment in batch_segments:
+                self.callbacks.pop(segment['index'],None)
+                if cleanup_files:
                     segment['file'].unlink(missing_ok=True)
         return [rows[index] for index in sorted(rows)]
 
     async def close(self):
-        await self.transport.close()
+        await self.recognizer.close()
