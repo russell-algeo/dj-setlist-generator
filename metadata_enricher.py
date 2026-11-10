@@ -593,6 +593,9 @@ class MetadataEnricher:
         Returns:
             Dict with track URL, album art, preview, and primary artist identity fields.
         """
+        # Sanitized diagnostics distinguish catalog gaps from provider failures.
+        # No query text, credentials, source URLs, or raw exception messages.
+        self.last_spotify_diagnostic = {"status": "unavailable", "searches": []}
         if not self.spotify:
             return None
 
@@ -602,11 +605,13 @@ class MetadataEnricher:
             if re.fullmatch(r'[A-Z]{2}[A-Z0-9]{3}[0-9]{7}', normalized_isrc):
                 isrc_results = self.spotify.search(q=f'isrc:{normalized_isrc}', type='track', limit=5)
                 isrc_items = (isrc_results or {}).get('tracks', {}).get('items', [])
+                self.last_spotify_diagnostic['searches'].append({'kind': 'isrc', 'count': len(isrc_items)})
                 isrc_items = [item for item in isrc_items
                               if re.sub(r'[^A-Z0-9]', '', str((item.get('external_ids') or {}).get('isrc') or '').upper())
                               == normalized_isrc]
                 if isrc_items:
                     print(f"[Spotify] ✓ ISRC match ({isrc}): '{isrc_items[0]['artists'][0]['name']} - {isrc_items[0]['name']}'")
+                    self.last_spotify_diagnostic["status"] = "matched_isrc"
                     best = isrc_items[0]
                     album_images = best.get('album', {}).get('images', [])
                     primary_artist = (best.get('artists') or [{}])[0]
@@ -639,6 +644,7 @@ class MetadataEnricher:
             results = self.spotify.search(q=query, type='track', limit=5)
 
             primary_items = results['tracks']['items'] if results else []
+            self.last_spotify_diagnostic['searches'].append({'kind': 'artist_title', 'count': len(primary_items)})
             fallback_items = []
             if primary_items:
                 match = select_spotify_candidate(artist, title, primary_items, discogs_data=discogs_data)
@@ -648,6 +654,7 @@ class MetadataEnricher:
             if not match:
                 fallback = self.spotify.search(q=title, type='track', limit=5)
                 fallback_items = fallback['tracks']['items'] if fallback else []
+                self.last_spotify_diagnostic['searches'].append({'kind': 'title', 'count': len(fallback_items)})
                 enriched_fallback_items = []
                 for item in fallback_items:
                     candidate = dict(item)
@@ -671,9 +678,12 @@ class MetadataEnricher:
                     )
 
             if not match:
+                self.last_spotify_diagnostic["status"] = ("incomplete_provider_error"
+                    if self.last_spotify_diagnostic.get("profile_errors") else "no_verified_candidate")
                 print(f"[Spotify] ✗ No match for: '{query}', skipping")
                 return None
 
+            self.last_spotify_diagnostic['status'] = 'matched_candidate'
             evidence = {**match_evidence(match.item, match.reason),
                         'score': match.score, 'url': match.item['external_urls']['spotify']}
             if 'discogs_artist' in match.reason and discogs_data:
@@ -681,6 +691,10 @@ class MetadataEnricher:
                                              'title': discogs_data.get('title')}
             return {**spotify_data_from_item(match.item), 'match': evidence}
         except Exception as e:
+            status = getattr(e, "http_status", None)
+            self.last_spotify_diagnostic.update(status="error",
+                http_status=status if type(status) is int else None,
+                error_type=type(e).__name__)
             print(f"    [Spotify] Search error: {e}")
             return None
 
@@ -713,7 +727,13 @@ class MetadataEnricher:
             }
             self._artist_cache[artist_id] = profile
             return profile
-        except Exception:
+        except Exception as e:
+            diagnostic = getattr(self, 'last_spotify_diagnostic', None)
+            if isinstance(diagnostic, dict):
+                status = getattr(e, 'http_status', None)
+                diagnostic.setdefault('profile_errors', []).append({
+                    'http_status': status if type(status) is int else None,
+                    'error_type': type(e).__name__})
             return {'genres': [], 'image_url': None, 'url': None, 'name': None}
 
     def _search_spotify_artist_profile(self, artist_name: str) -> Optional[dict]:

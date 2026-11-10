@@ -65,7 +65,7 @@ for i in range(479):
     data={'private_jackson_v2':{'valid':True,'response':response,'attempts':[dict(state='finished',workflow_run_id='1',run_attempt='1',diagnostic=dict(http_status=200,outcome='no_match'))]}}
     query('INSERT INTO ops.segment_hits(set_run_id,segment_index,timestamp_seconds,recognized,raw_data) VALUES(%s,%s,%s,false,%s::jsonb)',(RUN,i,i*15,json.dumps(data)))
 expected=dict(target_set_id=sid,collection_id=col,submission_id=sub,requested_by='owner',source_digest=digest({}),cluster_digest=digest(tracks))
-s=object.__new__(Store);s.connect=connect;s.owner={'workflow_run_id':'1','run_attempt':'1'};s.expected=expected
+s=object.__new__(Store);s.run_id=RUN;s.connect=connect;s.owner={'workflow_run_id':'1','run_attempt':'1'};s.expected=expected
 before=query("SELECT row_to_json(s)::text AS data FROM app.sets s WHERE id=%s",(sid,))[0]['data']
 ticket,got=s.reserve();check(got==tracks);denies(s.reserve)
 denies(lambda:s.finish('wrong',[]))
@@ -74,6 +74,24 @@ query("UPDATE ops.submissions SET cancel_requested_at=now() WHERE id=%s",(sub,))
 denies(lambda:s.finish(ticket,[]))
 query("UPDATE ops.submissions SET cancel_requested_at=NULL WHERE id=%s",(sub,))
 s.finish(ticket,[]);check(s.reserve()==(None,tracks))
+check(query("SELECT row_to_json(s)::text AS data FROM app.sets s WHERE id=%s",(sid,))[0]['data']==before)
+check(query("SELECT source_metadata->'yoon_resume' AS state FROM ops.set_runs WHERE id=%s",(RUN,))[0]['state']==state)
+# Exercise the separate recheck receipt through the actual SQL engine. Synthetic
+# identity and result hash replace only the fixed finite-run pins in this test.
+from worker.jobs import yoon_spotify_recheck as recheck
+indices=sorted(list(recheck.INDICES)+[i for i in range(28) if i not in recheck.INDICES][:12])
+results=[{'index':i,'spotify_url':None if i in recheck.INDICES else 'synthetic-verified'} for i in indices]
+prior=dict(status='complete',input=expected,results=results,results_digest=digest(results))
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_spotify_enrichment}',%s::jsonb) WHERE id=%s",(json.dumps(prior),RUN))
+r=object.__new__(recheck.RecheckStore);r.run_id=RUN;r.connect=connect;r.expected=expected;r.owner=s.owner
+with patch.object(recheck,'DONALD_RUN',RUN),patch.object(recheck,'PRIOR_DIGEST',digest(results)):
+    ticket,got=r.reserve();check(got==tracks);denies(r.reserve)
+    denies(lambda:r.finish('wrong',[{'index':i} for i in recheck.INDICES]))
+    check(query("SELECT source_metadata->%s AS state FROM ops.set_runs WHERE id=%s",(KEY,RUN))[0]['state']==prior)
+    r.finish(ticket,[{'index':i,'diagnostic':{'status':'no_verified_candidate'}} for i in recheck.INDICES])
+    check(r.reserve()==(None,tracks))
+    check(query("SELECT source_metadata->%s AS state FROM ops.set_runs WHERE id=%s",(KEY,RUN))[0]['state']==prior)
+    check(query("SELECT source_metadata->%s->>'status' AS state FROM ops.set_runs WHERE id=%s",(recheck.RECHECK_KEY,RUN))[0]['state']=='complete')
 check(query("SELECT row_to_json(s)::text AS data FROM app.sets s WHERE id=%s",(sid,))[0]['data']==before)
 check(query("SELECT source_metadata->'yoon_resume' AS state FROM ops.set_runs WHERE id=%s",(RUN,))[0]['state']==state)
 denies(lambda:query("UPDATE app.sets SET visibility='public' WHERE id=%s",(sid,)))

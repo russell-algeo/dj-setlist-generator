@@ -103,6 +103,8 @@ def validate(row, state, hits, expected, origin=None):
 
 
 class Store:
+    key = KEY
+
     def __init__(self, expected, workflow, attempt, run_id=RUN):
         if run_id not in REVIEWED_RUNS:
             raise RuntimeError('reviewed_run_required')
@@ -150,12 +152,12 @@ class Store:
 
     def write(self, cur, value):
         cur.execute("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,"
-                    "'{yoon_spotify_enrichment}',%s::jsonb),updated_at=now() WHERE id=%s",
-                    (json.dumps(value), self.run_id))
+                    "%s::text[],%s::jsonb),updated_at=now() WHERE id=%s",
+                    ([self.key], json.dumps(value), self.run_id))
 
     def reserve(self):
         with self.locked() as (cur, row, tracks):
-            prior = row['source_metadata'].get(KEY)
+            prior = row['source_metadata'].get(self.key)
             if prior is not None:
                 if (prior.get('status') == 'complete' and prior.get('input') == self.expected
                         and digest(prior.get('results')) == prior.get('results_digest')):
@@ -168,7 +170,7 @@ class Store:
 
     def finish(self, ticket, results):
         with self.locked() as (cur, row, tracks):
-            prior = row['source_metadata'].get(KEY) or {}
+            prior = row['source_metadata'].get(self.key) or {}
             if (prior.get('status') != 'reserved' or prior.get('ticket') != ticket
                     or prior.get('input') != self.expected or prior.get('owner') != self.owner):
                 raise RuntimeError('enrichment_reservation_changed')
@@ -201,6 +203,9 @@ def main():
             or os.environ.get('PRIVATE_RUN_ID') not in REVIEWED_RUNS):
         raise RuntimeError('private_preview_only')
     expected = json.loads(os.environ['PRIVATE_ENRICHMENT_EXPECTED'])
+    recheck = expected.pop('recheck', False)
+    if type(recheck) is not bool:
+        raise RuntimeError('invalid_recheck_request')
     if set(expected) != {'target_set_id','collection_id','submission_id','requested_by',
                          'source_digest','cluster_digest'}:
         raise RuntimeError('expected_identity_required')
@@ -208,7 +213,11 @@ def main():
                       ENABLE_SPOTIFY_PLAYLISTS='false',ENABLE_CHECKPOINTS='false',NTFY_TOPIC='')
     from metadata_enricher import MetadataEnricher
     from spotipy.cache_handler import MemoryCacheHandler
-    store = Store(expected, os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'], os.environ['PRIVATE_RUN_ID'])
+    store_class = Store
+    if recheck:
+        from worker.jobs.yoon_spotify_recheck import RecheckStore
+        store_class = RecheckStore
+    store = store_class(expected, os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'], os.environ['PRIVATE_RUN_ID'])
     ticket, tracks = store.reserve()
     if ticket is None:
         return
@@ -216,7 +225,12 @@ def main():
     if not enricher.spotify_enabled or not enricher.spotify:
         raise RuntimeError('spotify_unavailable')
     enricher.spotify.auth_manager.cache_handler = MemoryCacheHandler()
-    store.finish(ticket, enrich(tracks,enricher))
+    if recheck:
+        from worker.jobs.yoon_spotify_recheck import enrich_selected
+        results = enrich_selected(tracks, enricher)
+    else:
+        results = enrich(tracks, enricher)
+    store.finish(ticket, results)
 
 
 if __name__ == '__main__':
