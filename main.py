@@ -9,6 +9,7 @@ from notifier import Notifier
 from audio_downloader import AudioDownloader
 from audio_segmenter import AudioSegmenter
 from track_recognizer import TrackRecognizer, Recognition
+from worker.pipeline.models import valid_checkpoint_coverage
 from setlist_builder import SetlistBuilder, CONFIDENCE_ICONS
 from metadata_enricher import MetadataEnricher
 from output_formatter import OutputFormatter, format_time
@@ -22,6 +23,20 @@ from detail_explorer_common import (
     STAGE_RECOGNIZED,
     STAGE_RECOGNIZING,
 )
+
+def complete_checkpoint_recognitions(checkpoint, segmenter, duration):
+    """Return ordered results only when every expected window has valid evidence."""
+    if not checkpoint or checkpoint.get('stage') != STAGE_RECOGNIZED or not duration or duration <= 0:
+        return None
+    geometry = checkpoint.get('data', {}).get('geometry')
+    if geometry is not None and geometry != {
+        'segment_duration': segmenter.segment_duration, 'segment_overlap': segmenter.overlap
+    }:
+        return None
+    return valid_checkpoint_coverage(checkpoint.get('data', {}).get('recognitions', []),
+        segmenter.calculate_total_segments(duration), segmenter.segment_duration - segmenter.overlap)
+
+
 
 class SetlistGenerator:
     """Main orchestrator for setlist generation."""
@@ -107,14 +122,10 @@ class SetlistGenerator:
 
             # Check if we have complete recognition data from a previous run
             # but still need to process and create a playlist
-            if checkpoint and checkpoint['stage'] == STAGE_RECOGNIZED:
-                print("\n✅ Found complete recognition data from previous run!")
-                print("   Skipping download, segmentation, and recognition...")
-
-                saved_recognitions = checkpoint['data'].get('recognitions', [])
-                recognitions = [Recognition.from_checkpoint(rec) for rec in saved_recognitions]
+            recognitions = complete_checkpoint_recognitions(checkpoint, segmenter, mix_info['duration'])
+            if recognitions is not None:
+                print("\n✅ Found complete, validated recognition data from previous run!")
                 print(f"   Loaded {len(recognitions)} recognition results")
-
                 audio_file = None
             else:
                 # Normal flow: download, then stream segment+recognize.
@@ -137,7 +148,7 @@ class SetlistGenerator:
                 # segment files to disk before recognition can begin.
                 print("\n[3/5] Streaming recognition (segment + recognize on-the-fly)...")
                 emit_progress("recognizing")
-                should_resume = bool(checkpoint and checkpoint['stage'] == STAGE_RECOGNIZING)
+                should_resume = bool(checkpoint and checkpoint['stage'] in {STAGE_RECOGNIZING, STAGE_RECOGNIZED})
                 recognitions = await recognizer.recognize_segments_streaming(
                     audio_file,
                     mix_duration=mix_info['duration'],
@@ -220,6 +231,8 @@ class SetlistGenerator:
             traceback.print_exc()
             print("\n💾 Progress has been saved. Run again with the same URL to resume.")
             raise
+        finally:
+            await recognizer.close()
 
 
 def _is_url(arg: str) -> bool:

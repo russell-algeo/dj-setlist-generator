@@ -120,6 +120,13 @@
       "when": 1777165320000,
       "tag": "0017_user_set_listen_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794340800000,
+      "tag": "0018_shared_recognition_throttle",
+      "breakpoints": true
     }
   ]
 }
