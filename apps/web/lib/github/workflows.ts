@@ -61,3 +61,17 @@ export const dispatchProcessSetWorkflow = async (
 
 export const dispatchDiscoverArtistWorkflow = async (submissionId: string) =>
   dispatchWorkflow(env.githubWorkflowDiscoverArtist, { submission_id: submissionId });
+
+// Separate private route. Never allow a configurable public workflow/ref to
+// receive private set identities or execute a production job by default.
+export const dispatchPrivateYoonWorkflow = async (
+  setRunId: string,
+  inputs: { dispatch_generation?: string; resume_mode?: "private_queue" },
+) => {
+  if (env.deploymentTarget !== "development" || env.githubOwner !== "russell-algeo"
+    || env.githubRepo !== "dj-setlist-generator" || env.githubWorkflowRef !== "preview"
+    || env.githubWorkflowProcessSet !== "process-set.yml") {
+    return { dispatched: false, reason: "private_configuration_required" } as const;
+  }
+  return dispatchWorkflow("process-set.yml", { set_run_id: setRunId, private_analysis: "true", ...inputs });
+};

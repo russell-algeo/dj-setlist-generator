@@ -97,7 +97,7 @@ class WorkerIsolationTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/process-set.yml").read_text()
         template = re.search(r"^  group: (.+)$", text, re.MULTILINE).group(1)
 
-        expected = "${{ github.event.inputs.private_analysis == 'true' && format('process-set-private-analysis-{0}', github.event.inputs.set_run_id) || format('process-set-{0}-{1}-{2}', github.ref, github.event.inputs.deployment_target, github.event.inputs.set_run_id) }}"
+        expected = "${{ github.event.inputs.resume_mode == 'private_queue' && 'process-set-private-queue-preview' || github.event.inputs.private_analysis == 'true' && format('process-set-private-analysis-{0}', github.event.inputs.set_run_id) || format('process-set-{0}-{1}-{2}', github.ref, github.event.inputs.deployment_target, github.event.inputs.set_run_id) }}"
         self.assertEqual(template, expected)
         def group(branch, target, private=False):
             return "process-set-private-analysis-same-set-id" if private else f"process-set-{branch}-{target}-same-set-id"
@@ -105,6 +105,7 @@ class WorkerIsolationTests(unittest.TestCase):
         self.assertNotEqual(group("refs/heads/preview", "development", True), group("refs/heads/preview", "development"))
         self.assertIn("cancel-in-progress: ${{ github.event.inputs.private_analysis != 'true' }}", text)
 
+        self.assertNotEqual("process-set-private-queue-preview", group("refs/heads/preview", "development", True))
         production = group("refs/heads/remote-deployment", "production")
         self.assertNotEqual(production, group("refs/heads/remote-deployment", "development"))
         self.assertNotEqual(production, group("refs/heads/codex/preview-worker-isolation", "production"))

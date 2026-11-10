@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 import json
 import math
+import os
 import re
 import uuid
 from recognition_transport import RequestDeferred
@@ -135,7 +136,10 @@ class ResumeStore:
         from worker.jobs.yoon_once import validate_descriptor
         with self.locked(owner=False, admission=True) as (cur,row,state):
             from worker.jobs.yoon_admission import check
-            check(cur, self.run_id, row["target_set_id"])
+            generation = os.getenv('SET_LIST_DISPATCH_GENERATION') or None
+            from worker.jobs.yoon_queue import consume
+            check(cur, self.run_id, row["target_set_id"], generation=generation)
+            consume(cur, row, state, self.owner, generation)
             cur.execute("SELECT obj_description('ops.cleanup_expired_ops_data()'::regprocedure,'pg_proc') AS marker")
             if cur.fetchone()['marker']!='private-recognition-retention-v1':
                 raise RuntimeError('private_retention_migration_required')
@@ -470,12 +474,33 @@ class ResumeStore:
         # A clean paused run with every durable response can finish even when all
         # provider budgets are exhausted. No ownership takeover or provider call.
         with self.locked(owner=False) as (cur,row,state):
+            # A queue-owned worker must recheck explicit review/pause fences
+            # after dispatch, including its complete-coverage fast path. Legacy
+            # nonqueued finalization retains its existing behavior.
+            from worker.jobs.yoon_queue import completion_block_reason, assert_completion_certain, validate_identity, KEY, SAFE_PAUSES
+            if KEY in row['source_metadata']:
+                queue = row['source_metadata'][KEY]
+                validate_identity(row, state, queue)
+                reason = completion_block_reason(row, state)
+                if reason or queue.get('status') == 'blocked':
+                    raise RuntimeError(reason or 'private_queue_requires_review')
+                if row['status'] == 'private_resume_complete' and queue.get('status') != 'complete':
+                    raise RuntimeError('private_queue_completion_changed')
+                assert_completion_certain(cur, self.run_id, state)
             if row['status']=='private_resume_complete':
                 return True
             if row['status'] not in ('private_resume_paused','private_resume_pending'):
                 return False
             if not self.coverage_ready(cur):
+                if (KEY in row['source_metadata'] and row['status'] == 'private_resume_paused'
+                        and state.get('reason') not in SAFE_PAUSES):
+                    raise RuntimeError('pause_requires_review')
                 return False
+            from worker.jobs.yoon_queue import consume, KEY, save
+            queue = row['source_metadata'].get(KEY)
+            if queue is not None:
+                consume(cur, row, state, self.owner, os.getenv('SET_LIST_DISPATCH_GENERATION'))
+                save(cur, self.run_id, {**queue, 'status': 'complete', 'owner': self.owner})
             self.complete_locked(cur,state)
             return True
 

@@ -17,7 +17,7 @@ class WorkflowTests(unittest.TestCase):
         expr=re.search(r'if: \$\{\{ (.*?) \}\}',job).group(1)
         for enrichment,private,target,ref,tests in itertools.product(['true','false',''],['true','false',''],['development','production'],['refs/heads/preview','refs/heads/remote-deployment'],['success','failure','cancelled','skipped']):
             value=expr
-            for key,replacement in {'github.event.inputs.private_enrichment_only':enrichment,'github.event.inputs.private_analysis':private,'github.event.inputs.deployment_target':target,'github.ref':ref,'github.repository':'russell-algeo/dj-setlist-generator','needs.private-offline-tests.result':tests}.items():
+            for key,replacement in {'github.event.inputs.private_enrichment_only':enrichment,'github.event.inputs.private_analysis':private,'github.event.inputs.deployment_target':target,'github.ref':ref,'github.repository':'russell-algeo/dj-setlist-generator','needs.private-offline-tests.result':tests,'github.event.inputs.resume_mode':'full'}.items():
                 value=value.replace(key,repr(replacement))
             actual=eval(value.replace('always()','True').replace('&&',' and '),{'__builtins__':{}},{})
             self.assertEqual(actual,enrichment!='true' and private=='true' and target=='development' and ref=='refs/heads/preview' and tests=='success')
