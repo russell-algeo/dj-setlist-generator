@@ -7,6 +7,10 @@ from worker.pipeline.models import Recognition
 
 
 def recognitions_from_segment_hits(segment_hits: list[dict[str, object]]) -> list[Recognition]:
+    segment_hits = [dict(row, raw_data=row["raw_data"]["shared_recognition"]["response"]["raw_data"])
+                    if isinstance(row.get("raw_data"), dict) and
+                       row["raw_data"].get("shared_recognition", {}).get("valid") is True
+                    else row for row in segment_hits]
     return [
         Recognition(
             timestamp=float(row["timestamp_seconds"]),

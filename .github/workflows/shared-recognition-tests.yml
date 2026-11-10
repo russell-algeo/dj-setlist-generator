@@ -1,0 +1,40 @@
+name: shared-recognition-tests
+on:
+  pull_request:
+  push:
+    branches: [preview, remote-deployment]
+permissions:
+  contents: read
+jobs:
+  offline-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: Synthetic Python regressions (provider and database sockets blocked)
+        run: python scripts/test-recognition-offline.py
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.8.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm --filter web test
+      - run: pnpm --filter web exec tsc --noEmit
+      - name: Lint web with installed Next ESLint peers
+        run: NODE_PATH="$(dirname "$(realpath apps/web/node_modules/eslint-config-next)")" pnpm --filter web lint
+      - name: Actual PostgreSQL-engine regressions with synthetic fixtures
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/pg-tests" @electric-sql/pglite@0.5.15 drizzle-orm@0.45.1
+          export PGLITE_PACKAGE_ROOT="$RUNNER_TEMP/pg-tests/node_modules/@electric-sql/pglite"
+          export NODE_PATH="$RUNNER_TEMP/pg-tests/node_modules"
+          export PYTHON="$(command -v python)"
+          node scripts/test-shared-recognition-store-pglite.mjs
+          node scripts/test-shared-continuation-pglite.mjs

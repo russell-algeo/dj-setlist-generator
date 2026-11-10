@@ -5,12 +5,17 @@ import concurrent.futures
 import random
 import time
 from datetime import datetime
-from pathlib import Path
-from typing import Callable, Optional, TYPE_CHECKING
+from contextvars import ContextVar
 
 from aiohttp_retry import JitterRetry
-from shazamio import HTTPClient, Shazam
+from pathlib import Path
+from typing import Callable, TYPE_CHECKING
 
+from shazamio import Shazam
+from recognition_transport import (SingleAttemptHTTP, RequestAuthorizationError, classify_error,
+                                   validate_response)
+
+from recognition_retry_policy import RetryDirective, throttle_delay
 from config import Config
 from worker.pipeline.models import Recognition
 
@@ -18,84 +23,97 @@ if TYPE_CHECKING:
     from audio_segmenter import AudioSegmenter
 
 
+class RecognitionIncomplete(RuntimeError):
+    """Recognition is resumable but cannot be published as a completed set."""
+
+
 class TrackRecognizer:
     """Recognize tracks using Shazam with concurrent processing and checkpoint support."""
 
-    def __init__(self, checkpoint_manager=None):
+    def __init__(self, checkpoint_manager=None, *, single_attempt=False,
+                 max_attempts=None, max_retry_seconds=300, before_request=None,
+                 before_attempt=None, on_attempt=None, quiet=False, continuation_deadline=None):
         self.checkpoint_manager = checkpoint_manager
-        self._quota_cooldown_until = 0  # Unix timestamp when cooldown ends
-        self._throttle_lock = asyncio.Lock()
-        self.shazam = self._create_shazam_client()
-
-    def _create_shazam_client(self) -> Shazam:
-        """Create a Shazam client with throttle-aware retry settings.
-
-        Uses JitterRetry for exponential backoff with randomness to prevent
-        thundering herd when multiple requests retry simultaneously.
-        """
-        retry_options = JitterRetry(
-            attempts=Config.MAX_RETRIES,
+        self.single_attempt = single_attempt
+        self._legacy_before_request = before_request
+        self.before_attempt = before_attempt
+        self.on_attempt = on_attempt
+        self.quiet = quiet
+        self._attempt_context = ContextVar('recognition_attempt_context', default=None)
+        self.before_request = self._authorize_request
+        self.attempt_timeout = max(1, min(Config.RECOGNITION_TIMEOUT, 30)) if single_attempt else Config.RECOGNITION_TIMEOUT
+        self.max_attempts = max(1, Config.MAX_RETRIES if max_attempts is None else max_attempts)
+        self.max_retry_seconds = max(0, max_retry_seconds)
+        self.continuation_deadline = continuation_deadline
+        # Same retry curve and per-process concurrency as the production runner.
+        # Explicit attempts make each HTTP failure visible to durable adapters.
+        self.retry_options = JitterRetry(
+            attempts=self.max_attempts,
             start_timeout=Config.BASE_DELAY,
             max_timeout=Config.MAX_BACKOFF_DELAY,
             random_interval_size=Config.JITTER_INTERVAL_SIZE,
             statuses={429, 500, 502, 503, 504},
         )
+        self._quota_cooldown_until = 0
+        self._throttle_lock = asyncio.Lock()
+        self.transport = None
+        self.shazam = self._create_shazam_client()
 
-        http_client = HTTPClient(
-            retry_options=retry_options,
-        )
+    def _authorize_request(self):
+        """Reserve this exact request after SDK preparation, before transmission."""
+        if self._legacy_before_request is not None:
+            self._legacy_before_request()
+        current = self._attempt_context.get()
+        if self.before_attempt is not None:
+            if current is None:
+                raise RequestAuthorizationError('recognition_attempt_context_required')
+            current['ticket'] = self.before_attempt(current['segment'])
+        if current is not None:
+            current['attempted'] = True
 
-        return Shazam(
-            http_client=http_client,
-            endpoint_country='US'
-            )
+    def _log(self, message):
+        if not self.quiet:
+            print(message)
+
+    def _create_shazam_client(self) -> Shazam:
+        self.transport = SingleAttemptHTTP(timeout=self.attempt_timeout, before_request=self.before_request)
+        return Shazam(http_client=self.transport, endpoint_country='US')
+
+    async def close(self):
+        if self.transport is not None:
+            await self.transport.close()
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
-        """Check if an error indicates rate limiting (429)."""
-        error_str = str(error).lower()
-        cause_str = str(error.__cause__).lower() if error.__cause__ else ""
-        return "429" in error_str or "429" in cause_str
+        return classify_error(error).was_rate_limited
 
-    async def _trigger_quota_cooldown(self):
-        """Trigger a quota cooldown period."""
-        # Only trigger if not already in cooldown
-        if time.time() >= self._quota_cooldown_until:
-            self._quota_cooldown_until = time.time() + Config.QUOTA_COOLDOWN_DURATION
-            print(f"\n  🛑 QUOTA EXHAUSTED! Entering cooldown for {Config.QUOTA_COOLDOWN_DURATION}s")
+    async def _trigger_quota_cooldown(self, seconds=None):
+        self._quota_cooldown_until = max(self._quota_cooldown_until,
+            time.monotonic() + max(Config.QUOTA_COOLDOWN_DURATION, seconds or 0))
 
-    async def _wait_for_cooldown(self):
-        """Wait if we're in a quota cooldown period."""
+    async def _wait_for_cooldown(self, deadline=None):
         async with self._throttle_lock:
             while True:
-                remaining = self._quota_cooldown_until - time.time()
+                remaining = self._quota_cooldown_until - time.monotonic()
                 if remaining <= 0:
-                    return
-
-                # Show countdown every 30 seconds
-                if remaining > 30:
-                    print(f"  ⏸️  Quota cooldown: {remaining:.0f}s remaining...")
-                    await asyncio.sleep(30)
-                else:
-                    print(f"  ⏸️  Quota cooldown: {remaining:.0f}s remaining...")
-                    await asyncio.sleep(remaining)
+                    return True
+                if deadline is not None and remaining >= deadline - time.monotonic():
+                    return False
+                await asyncio.sleep(remaining)
 
     async def recognize_segment(self, segment: dict) -> Recognition:
-        """
-        Recognize a single audio segment.
-
-        Uses aiohttp's built-in timeout handling instead of asyncio.wait_for
-        to ensure proper connection cleanup.
-
-        Returns:
-            Recognition with was_rate_limited=True if request failed due to 429
-            after exhausting retries.
-        """
+        """One bounded provider attempt, returning only sanitized failure diagnostics."""
         start_time = time.time()
+        token = self.transport.begin() if self.transport is not None else None
         try:
-            result = await self.shazam.recognize(str(segment['file']))
+            if self.transport is not None:
+                result = await asyncio.wait_for(self.shazam.recognize(str(segment['file'])),
+                                                self.attempt_timeout)
+            else:
+                result = await self.shazam.recognize(str(segment['file']))
+            validate_response(result)
             elapsed = time.time() - start_time
 
-            print(f"  🔄 [{datetime.now().strftime('%H:%M:%S')}] Segment {segment['index']} took {elapsed:.1f}s")
+            self._log(f"  🔄 [{datetime.now().strftime('%H:%M:%S')}] Segment {segment['index']} took {elapsed:.1f}s")
 
             if 'track' in result:
                 track = result['track']
@@ -107,7 +125,8 @@ class TrackRecognizer:
                     raw_data=result,
                     recognized=True,
                     segment_index=segment['index'],
-                    was_rate_limited=False
+                    was_rate_limited=False,
+                    http_status=200,
                 )
             else:
                 return Recognition(
@@ -118,22 +137,21 @@ class TrackRecognizer:
                     raw_data=result,
                     recognized=False,
                     segment_index=segment['index'],
-                    was_rate_limited=False
+                    was_rate_limited=False,
+                    http_status=200,
                 )
 
+        except RequestAuthorizationError:
+            raise
         except Exception as e:
             elapsed = time.time() - start_time
 
             # Check if this was a rate limit error
             was_rate_limited = self._is_rate_limit_error(e)
 
-            # Enhanced error logging for debugging
-            error_name = type(e).__name__
-            cause = e.__cause__
-            error_details = f"{e} | Cause: {type(cause).__name__}: {cause}" if cause else str(e)
-
-            # Log elapsed time to see if retries happened before failure
-            print(f"  ⚠️  [{datetime.now().strftime('%H:%M:%S')}] Error on segment {segment['index']} after {elapsed:.1f}s: {error_name}: {error_details}")
+            failure = classify_error(e)
+            error_name = failure.error_type
+            self._log(f"  Recognition attempt failed: {error_name}")
 
             return Recognition(
                 timestamp=segment['timestamp'],
@@ -145,18 +163,95 @@ class TrackRecognizer:
                 segment_index=segment['index'],
                 was_rate_limited=was_rate_limited,
                 error_type=error_name,
-                error_details=error_details,
+                error_details=None,
+                http_status=failure.http_status,
+                retry_after_seconds=failure.retry_after_seconds,
+                retry_after_format=failure.retry_after_format,
             )
 
+        finally:
+            if token is not None:
+                self.transport.end(token)
+
     async def recognize_segment_with_backoff(self, segment: dict) -> Recognition:
-        """Recognize a segment and keep retrying through quota cooldowns."""
+        """Shared retry engine with durable exponential HTTP-429 backoff.
+
+        Preserve JitterRetry for non-throttle failures, initial jitter and
+        concurrency. Actual HTTP429 uses exponential backoff; adapter callbacks
+        persist and return its cross-workflow delay. A bounded continuation
+        returns incomplete evidence, never a manufactured successful no-match.
+        """
+        deadline = time.monotonic() + self.max_retry_seconds
+        if self.continuation_deadline is not None:
+            deadline = min(deadline, self.continuation_deadline)
+        result = None
+        attempt = 0
+        consecutive_throttles = 0
+        initial_jitter = True
         while True:
-            await self._wait_for_cooldown()
-            await asyncio.sleep(random.uniform(0, Config.BASE_DELAY))
-            result = await self.recognize_segment(segment)
-            if not result.was_rate_limited:
+            if not self.single_attempt:
+                if not await self._wait_for_cooldown(deadline) or time.monotonic() >= deadline:
+                    break
+                if initial_jitter:
+                    await asyncio.sleep(min(random.uniform(0, Config.BASE_DELAY),
+                                            max(0, deadline - time.monotonic())))
+                    initial_jitter = False
+                if not await self._wait_for_cooldown(deadline) or time.monotonic() >= deadline:
+                    break
+            current = {'segment': segment, 'ticket': None, 'attempted': False}
+            token = self._attempt_context.set(current)
+            try:
+                if self.single_attempt:
+                    result = await self.recognize_segment(segment)
+                else:
+                    # A timeout remains a failed attempt, never a valid no-match.
+                    try:
+                        result = await asyncio.wait_for(self.recognize_segment(segment),
+                                                        max(0, deadline-time.monotonic()))
+                    except asyncio.TimeoutError:
+                        result = Recognition(segment['timestamp'], None, None, None, None,
+                                             False, segment['index'], error_type='RequestTimeout')
+            finally:
+                self._attempt_context.reset(token)
+            attempt += 1
+            transient = (result.was_rate_limited or result.http_status in {500, 502, 503, 504}
+                         or (result.http_status is not None and result.http_status >= 500)
+                         or result.error_type in {'RequestTimeout', 'TransportError'})
+            can_retry = (not self.single_attempt and not result.is_valid and transient
+                         and result.retry_after_format != 'invalid')
+            delay = 0
+            quota_exhausted = False
+            if result.http_status == 429:
+                consecutive_throttles += 1
+            else:
+                consecutive_throttles = 0
+            if can_retry:
+                if result.http_status == 429:
+                    # Actual throttles have no lifetime attempt cap. Durable
+                    # adapters return the persisted streak's delay below.
+                    quota_exhausted = True
+                    delay = throttle_delay(consecutive_throttles, result.retry_after_seconds)
+                    attempt = 0
+                elif attempt < self.max_attempts:
+                    delay = self.retry_options.get_timeout(attempt)
+                else:
+                    can_retry = False
+                delay = max(delay, result.retry_after_seconds or 0)
+            elif result.retry_after_seconds is not None:
+                delay = result.retry_after_seconds
+            if self.on_attempt is not None and current['attempted']:
+                directive = self.on_attempt(result, current['ticket'], delay)
+                if isinstance(directive, RetryDirective):
+                    delay = max(delay, directive.delay_seconds)
+            if result.is_valid or not can_retry:
                 return result
-            await self._trigger_quota_cooldown()
+            if quota_exhausted:
+                await self._trigger_quota_cooldown(delay)
+            if delay >= max(0, deadline-time.monotonic()):
+                return result
+            await asyncio.sleep(delay)
+        return result or Recognition(segment['timestamp'], None, None, None, None,
+                                     False, segment['index'], error_type='RetryBudgetExceeded')
 
     async def recognize_batch(
         self,
@@ -185,10 +280,12 @@ class TrackRecognizer:
         for index, (segment, result) in enumerate(zip(batch_segments, batch_results)):
             global_idx = batch_start + index + 1
 
+            if isinstance(result, (asyncio.CancelledError, RequestAuthorizationError)):
+                raise result
             if isinstance(result, Exception):
-                print(
+                self._log(
                     f"  ⚠️  [{global_idx}/{total}] "
-                    f"Unexpected exception: {type(result).__name__}: {result}"
+                    f"Recognition attempt failed: {classify_error(result).error_type}"
                 )
                 result = Recognition(
                     timestamp=segment["timestamp"],
@@ -198,8 +295,8 @@ class TrackRecognizer:
                     raw_data=None,
                     recognized=False,
                     segment_index=segment["index"],
-                    error_type=type(result).__name__,
-                    error_details=str(result),
+                    error_type=classify_error(result).error_type,
+                    error_details=None,
                 )
 
             recognitions.append(result)
@@ -212,7 +309,7 @@ class TrackRecognizer:
                 if result.recognized
                 else "Not recognized"
             )
-            print(f"  [{global_idx}/{total}] {segment['timestamp'] / 60:.1f}min {status} {track_info}")
+            self._log(f"  [{global_idx}/{total}] {segment['timestamp'] / 60:.1f}min {status} {track_info}")
 
             if cleanup_files:
                 try:
@@ -229,164 +326,67 @@ class TrackRecognizer:
         segmenter: 'AudioSegmenter',
         resume_from_checkpoint: bool = False,
     ) -> list[Recognition]:
-        """Streaming recognition: create, recognize, then discard each batch of segments.
+        """Recognize missing windows with valid-only checkpoints; fail closed if incomplete.
 
-        Instead of buffering all segment files to disk before recognition begins,
-        this method processes one batch at a time:
-          1. Extract BATCH_SIZE segments via FFmpeg (parallel subprocesses, no RAM load).
-          2. Recognize the batch concurrently with the Shazam semaphore.
-          3. Delete the segment files immediately after recognition.
-          4. Save a 'recognizing' checkpoint and move to the next batch.
-
-        Peak disk usage is limited to roughly 3×BATCH_SIZE × ~0.5 MB of segment files
-        (one batch being recognised, one queued, one being extracted) rather than
-        the full 500 MB+ that writing all segments up-front requires.
-
-        Checkpoint resumption works by inspecting how many recognitions are already
-        stored; segment creation restarts from that index using the still-present
-        audio file.
-
-        Args:
-            audio_file: Path to the downloaded MP3 (must already exist on disk).
-            mix_duration: Audio duration in seconds (from video metadata).  Falls
-                          back to ffprobe if 0 or unavailable.
-            segmenter: AudioSegmenter instance (carries segment_duration, overlap,
-                       assets_dir, mix_id settings).
-            resume_from_checkpoint: If True, look for a 'recognizing' checkpoint and
-                                    skip already-processed segments.
-
-        Returns:
-            Ordered list of Recognition results, one per segment.
+        Extract one bounded batch at a time and discard its files after recognition.
+        Saved no-match responses count as complete; transport/extraction errors never do.
         """
-        recognitions: list[Recognition] = []
-        start_index = 0
-
-        # --- Checkpoint resume -----------------------------------------------
-        if resume_from_checkpoint and self.checkpoint_manager:
-            checkpoint = self.checkpoint_manager.load_checkpoint()
-            if checkpoint and checkpoint.get('stage') == 'recognizing':
-                saved = checkpoint['data'].get('recognitions', [])
-                if saved:
-                    recognitions = [Recognition.from_checkpoint(r) for r in saved]
-                    start_index = len(recognitions)
-                    print(f"📂 Resuming streaming recognition from segment {start_index}")
-
-        # --- Determine total segment count ------------------------------------
-        # Use yt-dlp reported duration; fall back to ffprobe if unavailable.
         actual_duration = mix_duration if mix_duration and mix_duration > 0 else 0
         if actual_duration <= 0:
-            print("  Duration not available from metadata; probing audio file...")
             actual_duration = segmenter.get_audio_duration_ffprobe(audio_file)
-
         total = segmenter.calculate_total_segments(actual_duration)
-
-        if start_index >= total:
-            print("All segments already processed")
-            return recognitions
-
-        if start_index == 0:
-            print(
-                f"\n🚀 Streaming recognition: {total} segments "
-                f"({segmenter.segment_duration}s each, {segmenter.overlap}s overlap, "
-                f"concurrency: {Config.CONCURRENT_RECOGNITIONS})..."
-            )
-        else:
-            print(
-                f"\n🚀 Continuing streaming recognition from segment "
-                f"{start_index}/{total} (concurrency: {Config.CONCURRENT_RECOGNITIONS})..."
-            )
-
-        # --- Semaphore + per-segment recognize helper ------------------------
-        # --- Batch loop (producer-consumer pipeline) --------------------------
-        # The producer extracts FFmpeg segments for batch N+1 while the
-        # consumer is recognising batch N with Shazam, hiding the FFmpeg
-        # overhead inside the (much longer) network-bound recognition phase.
-        # maxsize=1 limits the queue to one pre-extracted batch, but because
-        # the producer completes extraction before blocking on queue.put(), a
-        # third batch's files can land on disk while waiting for queue space.
-        # Peak disk usage is therefore ~3×BATCH_SIZE segment files.
-        max_ffmpeg_workers = min(Config.BATCH_SIZE, 4)
-        total_batches = (total - start_index + Config.BATCH_SIZE - 1) // Config.BATCH_SIZE
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_ffmpeg_workers) as executor:
-            queue: asyncio.Queue = asyncio.Queue(maxsize=1)
-
-            async def _producer() -> None:
-                for batch_start in range(start_index, total, Config.BATCH_SIZE):
-                    batch_end = min(batch_start + Config.BATCH_SIZE, total)
-                    batch_num = (batch_start - start_index) // Config.BATCH_SIZE + 1
-                    print(
-                        f"\n⚙️  [Batch {batch_num}/{total_batches}] "
-                        f"Extracting segments {batch_start}–{batch_end - 1}..."
-                    )
-                    try:
-                        segments = await segmenter.create_segments_batch(
-                            audio_file, batch_start, batch_end, executor
-                        )
-                        await queue.put(('ok', batch_start, batch_end, segments))
-                    except Exception as e:
-                        print(
-                            f"  ⚠️  Segment extraction failed for batch "
-                            f"{batch_start}–{batch_end - 1}: {e}"
-                        )
-                        await queue.put(('error', batch_start, batch_end, e))
-                await queue.put(None)  # sentinel: no more batches
-
-            producer_task = asyncio.create_task(_producer())
-
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-
-                kind, batch_start, batch_end, payload = item
-                batch_size = batch_end - batch_start
-
-                if kind == 'error':
-                    # Record failed recognitions so indices stay aligned.
-                    for i in range(batch_start, batch_end):
-                        info = segmenter._segment_info(i)
-                        recognitions.append(Recognition(
-                            timestamp=info['timestamp'],
-                            track_title=None,
-                            artist=None,
-                            shazam_track_id=None,
-                            raw_data=None,
-                            recognized=False,
-                            segment_index=i,
-                            was_rate_limited=False,
-                        ))
-                    if self.checkpoint_manager:
-                        self.checkpoint_manager.save_recognition_checkpoint(
-                            recognitions, stage='recognizing'
-                        )
-                    continue
-
-                batch_segments = payload
-
-                batch_results = await self.recognize_batch(
-                    batch_segments,
-                    total_segments=total,
-                    batch_start=batch_start,
-                )
-                batch_recognized = sum(1 for result in batch_results if result.recognized)
-                recognitions.extend(batch_results)
-
-                # Save incremental checkpoint.
-                if self.checkpoint_manager:
-                    self.checkpoint_manager.save_recognition_checkpoint(
-                        recognitions, stage='recognizing'
-                    )
-
-                print(f"💾 Batch complete: {batch_recognized}/{batch_size} recognized")
-
-            await producer_task
-
-        # --- Finalise ---------------------------------------------------------
-        recognized_count = sum(1 for r in recognitions if r.recognized)
-        print(f"\n✅ Streaming recognition complete: {recognized_count}/{total} segments recognized")
-
+        completed = {}
+        geometry = {'segment_duration': getattr(segmenter, 'segment_duration', Config.SEGMENT_DURATION),
+                    'segment_overlap': getattr(segmenter, 'overlap', Config.SEGMENT_OVERLAP)}
         if self.checkpoint_manager:
-            self.checkpoint_manager.save_recognition_checkpoint(recognitions, stage='recognized')
+            self.checkpoint_manager.recognition_geometry = geometry
+        if resume_from_checkpoint and self.checkpoint_manager:
+            checkpoint = self.checkpoint_manager.load_checkpoint()
+            if (checkpoint and checkpoint.get('stage') in {'recognizing', 'recognized'}
+                    and checkpoint.get('data', {}).get('geometry', geometry) == geometry):
+                for saved in checkpoint.get('data', {}).get('recognitions', []):
+                    try:
+                        result = Recognition.from_checkpoint(saved)
+                        if (result.is_valid and type(result.segment_index) is int and 0 <= result.segment_index < total
+                                and result.timestamp == result.segment_index * (geometry['segment_duration'] - geometry['segment_overlap'])):
+                            completed[result.segment_index] = result
+                    except (TypeError, ValueError, KeyError):
+                        continue
 
-        return recognitions
+        def save(stage='recognizing'):
+            if self.checkpoint_manager:
+                self.checkpoint_manager.save_recognition_checkpoint(
+                    [completed[i] for i in sorted(completed)], stage=stage)
+
+        # Extract only missing contiguous ranges. Never infer completion from list length.
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(Config.BATCH_SIZE, 4)) as executor:
+                index = 0
+                while index < total:
+                    if index in completed:
+                        index += 1
+                        continue
+                    end = index + 1
+                    while end < total and end - index < Config.BATCH_SIZE and end not in completed:
+                        end += 1
+                    try:
+                        segments = await segmenter.create_segments_batch(audio_file, index, end, executor)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        save()
+                        raise RecognitionIncomplete('segment_extraction_failed') from None
+                    results = await self.recognize_batch(segments, total_segments=total, batch_start=index)
+                    for result in results:
+                        if result.is_valid and index <= result.segment_index < end:
+                            completed[result.segment_index] = result
+                    save()
+                    if any(i not in completed for i in range(index, end)):
+                        raise RecognitionIncomplete('recognition_incomplete_resume_required')
+                    index = end
+            if len(completed) != total:
+                raise RecognitionIncomplete('recognition_incomplete_resume_required')
+            save('recognized')
+            return [completed[i] for i in range(total)]
+        finally:
+            await self.close()

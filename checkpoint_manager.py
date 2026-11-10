@@ -129,12 +129,23 @@ class CheckpointManager:
         serializable_recognitions = []
         for rec in recognitions:
             rec_dict = asdict(rec)
+            # Keep only validated response shape, not full provider headers, URLs,
+            # metadata or opaque payloads. Historical stripped rows remain ambiguous.
             rec_dict['raw_data'] = None
+            if rec.is_valid:
+                rec_dict['raw_data'] = {'matches': [{}] if rec.raw_data['matches'] else []}
+                if 'track' in rec.raw_data:
+                    rec_dict['raw_data']['track'] = {
+                        'title': rec.track_title, 'subtitle': rec.artist, 'key': rec.shazam_track_id,
+                    }
             serializable_recognitions.append(rec_dict)
 
         self.save_checkpoint(stage, {
             'recognitions': serializable_recognitions,
-            'count': len(recognitions)
+            'count': len(recognitions),
+            'geometry': getattr(self, 'recognition_geometry', {
+                'segment_duration': Config.SEGMENT_DURATION, 'segment_overlap': Config.SEGMENT_OVERLAP,
+            }),
         })
 
     def load_checkpoint(self) -> Optional[dict]:
