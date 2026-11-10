@@ -36,6 +36,7 @@ import {
   normalizeSearchText,
 } from "@/lib/archive/utils";
 
+import { ArchiveHeroEmpty, ArchiveRecognitionStat } from "./archive-recognition-stat";
 import styles from "./archive-set-explorer.module.css";
 
 type JourneyMetric = "bpm" | "energy" | "dance";
@@ -2568,7 +2569,7 @@ export function ArchiveSetExplorer({
                       </div>
                     </div>
                   ) : (
-                    <div className="set-hero-side-empty">No track cards available.</div>
+                    <ArchiveHeroEmpty privateRecording={Boolean(privateContext)} trackCount={model.tracks.length} />
                   )}
                 </div>
               </div>
@@ -2579,10 +2580,11 @@ export function ArchiveSetExplorer({
                 <span className="stat-value">{detail.stats.totalTracks}</span>
                 <span className="stat-label">Tracks</span>
               </div>
-              <div className="stat">
-                <span className="stat-value">{model.identificationRate}%</span>
-                <span className="stat-label">Identified</span>
-              </div>
+              <ArchiveRecognitionStat
+                privateRecording={Boolean(privateContext)}
+                recognitionRate={detail.recognitionRate}
+                cardIdentificationRate={model.identificationRate}
+              />
               <div className="stat">
                 <span className="stat-value">{model.confidenceRate}%</span>
                 <span className="stat-label">High / Medium</span>
