@@ -12,7 +12,15 @@ import uuid
 from contextlib import contextmanager
 
 RUN = '80d8f052-2222-45e5-a164-6cfb197ec5d7'
-KEY = 'yoon_spotify_enrichment'
+DONALD_RUN = '63c98e06-08e8-4073-972d-4861a59f5f8d'
+REVIEWED_RUNS = frozenset((RUN, DONALD_RUN))
+DONALD_SCOPE = dict(target_set_id='0ce1797e-e55e-41c7-b665-c593c217d218',
+    collection_id='1d50c599-3150-43f9-a7e9-50d00fc996b7',
+    submission_id='6b6671d9-dc59-48c7-84a4-6e19b0a54940',
+    requested_by='65c06333-323d-48a8-9389-f03946d32264')
+DONALD_MEMBERS = [dict(user_id=DONALD_SCOPE['requested_by'],role='manager'),
+    dict(user_id='d8e3668b-7bf1-4b7e-8530-109c38bb6d89',role='viewer')]
+KEY = 'yoon_spotify_enrichment' 
 
 
 def digest(value):
@@ -21,17 +29,31 @@ def digest(value):
 
 
 def validate(row, state, hits, expected, origin=None):
-    if row['id'].__str__() != RUN or row['status'] != 'private_resume_complete':
+    if str(row['id']) not in REVIEWED_RUNS or row['status'] != 'private_resume_complete':
         raise RuntimeError('completed_private_run_required')
     for key in ('target_set_id', 'collection_id', 'submission_id', 'requested_by'):
         if str(row[key]) != expected[key]:
             raise RuntimeError('private_identity_changed')
     if digest(row['source_metadata']['yoon_fixed_input']) != expected['source_digest']:
         raise RuntimeError('source_changed')
+    donald = str(row['id']) == DONALD_RUN
+    if donald:
+        from worker.jobs.yoon_sources import DONALD, reviewed_source
+        descriptor = row['source_metadata']['yoon_fixed_input']
+        if (reviewed_source(descriptor) != DONALD or origin is not None
+                or any(str(row[k]) != v for k,v in DONALD_SCOPE.items())
+                or state.get('initialization_mode') != 'fresh'
+                or state.get('fresh_source_initialized') is not True
+                or state.get('origin') or state.get('provenance_seeded')
+                or state.get('source_id') != DONALD.id or state.get('source_pins') != DONALD.pins()
+                or state.get('members') != DONALD_MEMBERS
+                or not re.fullmatch('[0-9a-f]{64}', str(state.get('audio_sha256', '')))
+                or state.get('audio_sha256') != state.get('expected_audio_sha256')):
+            raise RuntimeError('reviewed_fresh_source_required')
     tracks = state.get('clustered_setlist')
     if (state.get('status') != 'complete' or state.get('valid_responses') != 479
             or state.get('review_required') or state.get('in_flight')
-            or not isinstance(tracks, list) or len(tracks) != 28
+            or not isinstance(tracks, list) or (not 1 <= len(tracks) <= 479 if donald else len(tracks) != 28)
             or digest(tracks) != expected['cluster_digest']):
         raise RuntimeError('completed_cluster_changed')
     from worker.pipeline.models import Recognition
@@ -46,6 +68,8 @@ def validate(row, state, hits, expected, origin=None):
                 or r.timestamp != h['segment_index'] * 15):
             raise RuntimeError('window_evidence_changed')
         attempts = d.get('attempts') or []
+        if donald and (d.get('origin') or r.http_status != 200):
+            raise RuntimeError('fresh_window_evidence_changed')
         if d.get('origin'):
             pin = state.get('origin') or {}
             original = (origin or {}).get('source_metadata', {}).get('yoon_analysis', {})
@@ -74,7 +98,10 @@ def validate(row, state, hits, expected, origin=None):
 
 
 class Store:
-    def __init__(self, expected, workflow, attempt):
+    def __init__(self, expected, workflow, attempt, run_id=RUN):
+        if run_id not in REVIEWED_RUNS:
+            raise RuntimeError('reviewed_run_required')
+        self.run_id = run_id
         from worker.db import connect
         if not workflow.isdecimal() or not attempt.isdecimal():
             raise RuntimeError('invalid_owner')
@@ -96,7 +123,7 @@ class Store:
                 AND s.collection_id=r.collection_id AND u.collection_id=r.collection_id
                 AND r.requested_by=u.requested_by AND r.cancel_requested_at IS NULL
                 AND u.cancel_requested_at IS NULL AND r.create_playlist=false
-                AND u.create_playlist=false FOR UPDATE OF r,u""", (RUN,))
+                AND u.create_playlist=false FOR UPDATE OF r,u""", (self.run_id,))
             row = cur.fetchone()
             if not row:
                 raise RuntimeError('private_scope_required')
@@ -107,7 +134,7 @@ class Store:
             if len(members)!=2 or members!=state.get('members'):
                 raise RuntimeError('private_audience_changed')
             cur.execute('SELECT segment_index,raw_data FROM ops.segment_hits '
-                        'WHERE set_run_id=%s ORDER BY segment_index FOR SHARE', (RUN,))
+                        'WHERE set_run_id=%s ORDER BY segment_index FOR SHARE', (self.run_id,))
             hits = cur.fetchall()
             origin = None
             if state.get('origin'):
@@ -119,7 +146,7 @@ class Store:
     def write(self, cur, value):
         cur.execute("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,"
                     "'{yoon_spotify_enrichment}',%s::jsonb),updated_at=now() WHERE id=%s",
-                    (json.dumps(value), RUN))
+                    (json.dumps(value), self.run_id))
 
     def reserve(self):
         with self.locked() as (cur, row, tracks):
@@ -166,7 +193,7 @@ def main():
     if (os.environ.get('WORKER_DEPLOYMENT_TARGET') != 'development'
             or os.environ.get('GITHUB_REF') != 'refs/heads/preview'
             or os.environ.get('GITHUB_REPOSITORY') != 'russell-algeo/dj-setlist-generator'
-            or os.environ.get('PRIVATE_RUN_ID') != RUN):
+            or os.environ.get('PRIVATE_RUN_ID') not in REVIEWED_RUNS):
         raise RuntimeError('private_preview_only')
     expected = json.loads(os.environ['PRIVATE_ENRICHMENT_EXPECTED'])
     if set(expected) != {'target_set_id','collection_id','submission_id','requested_by',
@@ -176,7 +203,7 @@ def main():
                       ENABLE_SPOTIFY_PLAYLISTS='false',ENABLE_CHECKPOINTS='false',NTFY_TOPIC='')
     from metadata_enricher import MetadataEnricher
     from spotipy.cache_handler import MemoryCacheHandler
-    store = Store(expected, os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
+    store = Store(expected, os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'], os.environ['PRIVATE_RUN_ID'])
     ticket, tracks = store.reserve()
     if ticket is None:
         return
