@@ -2,7 +2,9 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
-import {readFileSync} from 'node:fs';
+import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {preparePrivateMigrationStage} from './private-migration-stage.mjs';
 const require=createRequire(import.meta.url);
@@ -31,14 +33,45 @@ const priorSql=readFileSync(root+'drizzle/migrations/'+priorEntry.tag+'.sql','ut
 await db.exec(priorSql);
 await db.query('INSERT INTO public.__drizzle_migrations(hash,created_at) VALUES($1,$2)',[createHash('sha256').update(priorSql).digest('hex'),priorEntry.when]);
 const before=await rows();
-await migrate(orm,options(root+'drizzle/migrations'));
+const journal=JSON.parse(readFileSync(root+'drizzle/migrations/meta/_journal.json','utf8'));
+const cutoff=journal.entries.findIndex(e=>e.tag==='0022_shared_recognition_parallel');
+assert.notEqual(cutoff,-1);
+const stage=mkdtempSync(join(tmpdir(),'shared-migration-v2-'));
+try {
+mkdirSync(join(stage,'meta'));
+for(const entry of journal.entries.slice(0,cutoff+1)) {
+  copyFileSync(root+'drizzle/migrations/'+entry.tag+'.sql',join(stage,entry.tag+'.sql'));
+}
+writeFileSync(join(stage,'meta/_journal.json'),JSON.stringify({...journal,entries:journal.entries.slice(0,cutoff+1)}));
+await migrate(orm,options(stage));
 const after=await rows();
 assert.equal(after.length,before.length+1);
 assert.equal(after.at(-2).hash,createHash('sha256').update(readFileSync(root+'drizzle/migrations/0021_shared_recognition_continuation.sql')).digest('hex'));
 assert.equal((await db.query("SELECT obj_description('ops.claim_next_dispatchable_set_run(integer)'::regprocedure,'pg_proc') AS marker")).rows[0].marker,'shared-recognition-parallel-v2');
 assert.equal((await db.query("SELECT obj_description('ops.cleanup_expired_ops_data()'::regprocedure,'pg_proc') AS marker")).rows[0].marker,'private-recognition-retention-v1');
 assert.equal(after.at(-1).hash,createHash('sha256').update(readFileSync(root+'drizzle/migrations/0022_shared_recognition_parallel.sql')).digest('hex'));
-await migrate(orm,options(root+'drizzle/migrations'));
+assert.deepEqual(after.slice(0,-1),before);
+assert.equal(Number(after.at(-1).created_at),journal.entries[cutoff].when);
+await migrate(orm,options(stage));
 assert.deepEqual(await rows(),after);
-console.log('PASS actual Drizzle 0021-to-0022 upgrade, exact migration hash, private marker preservation and idempotence.');
-await db.close();
+// Upgrade the already-applied v2 stage, without rewriting its journal or SQL.
+const claimBody=(await db.query("SELECT pg_get_functiondef('ops.claim_next_dispatchable_set_run(integer)'::regprocedure) AS body")).rows[0].body;
+const finalEntry=journal.entries[cutoff+1];
+assert.equal(finalEntry.tag,'0023_shared_recognition_throttle');
+assert.equal(journal.entries.length,cutoff+2);
+await migrate(orm,options(root+'drizzle/migrations'));
+const final=await rows();
+assert.equal(final.length,after.length+1);
+assert.deepEqual(final.slice(0,-1),after);
+assert.equal(final.at(-1).hash,createHash('sha256').update(readFileSync(root+'drizzle/migrations/'+finalEntry.tag+'.sql')).digest('hex'));
+assert.equal(Number(final.at(-1).created_at),finalEntry.when);
+assert.equal((await db.query("SELECT obj_description('ops.claim_next_dispatchable_set_run(integer)'::regprocedure,'pg_proc') AS marker")).rows[0].marker,'shared-recognition-throttle-v3');
+assert.equal((await db.query("SELECT pg_get_functiondef('ops.claim_next_dispatchable_set_run(integer)'::regprocedure) AS body")).rows[0].body,claimBody);
+assert.equal((await db.query("SELECT obj_description('ops.cleanup_expired_ops_data()'::regprocedure,'pg_proc') AS marker")).rows[0].marker,'private-recognition-retention-v1');
+await migrate(orm,options(root+'drizzle/migrations'));
+assert.deepEqual(await rows(),final);
+console.log('PASS actual Drizzle 0021-to-0022-to-0023 upgrades, exact journal hashes/timestamps, v2/v3 markers, claim-body/private-marker preservation and per-stage idempotence.');
+} finally {
+  await db.close();
+  rmSync(stage,{recursive:true,force:true});
+}
