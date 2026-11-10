@@ -9,8 +9,6 @@ from email.utils import parsedate_to_datetime
 import math
 import time
 
-import aiohttp
-
 
 def retry_after(value, now=None):
     """Parse Retry-After without clamping positive waits to a shorter duration."""
@@ -66,6 +64,7 @@ class RequestDeferred(RequestAuthorizationError):
 
 def classify_error(error):
     """Inspect both exception links cycle-safely; never inspect/return exception text."""
+    import aiohttp
     from shazamio.exceptions import RateLimited
     stack, seen, errors = [error], set(), []
     while stack:
@@ -120,6 +119,9 @@ def validate_response(value):
 class SingleAttemptHTTP:
     """One nonredirecting POST per recognition, including concurrent SDK calls."""
     def __init__(self, *, timeout=30, session_factory=None, wall_clock=time.time, before_request=None):
+        # Release/aggregation jobs use the lightweight exception types above
+        # without installing the recognition-only HTTP/SDK dependencies.
+        import aiohttp
         self.timeout = timeout
         self.before_request = before_request
         self.session_factory = session_factory or aiohttp.ClientSession
@@ -134,6 +136,7 @@ class SingleAttemptHTTP:
         self._attempt.reset(token)
 
     async def request(self, method, url, **kwargs):
+        import aiohttp
         attempt = self._attempt.get()
         if attempt is None or attempt['used'] or method.upper() != 'POST':
             raise RequestBudgetExceeded()
