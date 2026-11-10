@@ -13,11 +13,13 @@ from contextlib import contextmanager
 
 RUN = '80d8f052-2222-45e5-a164-6cfb197ec5d7'
 DONALD_RUN = '63c98e06-08e8-4073-972d-4861a59f5f8d'
-REVIEWED_RUNS = frozenset((RUN, DONALD_RUN))
+HALO_RUN = 'd157e002-f047-4afe-a560-c7b837d4bdc9'
+REVIEWED_RUNS = frozenset((RUN, DONALD_RUN, HALO_RUN))
 DONALD_SCOPE = dict(target_set_id='0ce1797e-e55e-41c7-b665-c593c217d218',
     collection_id='1d50c599-3150-43f9-a7e9-50d00fc996b7',
     submission_id='6b6671d9-dc59-48c7-84a4-6e19b0a54940',
     requested_by='65c06333-323d-48a8-9389-f03946d32264')
+HALO_SCOPE = dict(DONALD_SCOPE, target_set_id='b8dcffbe-a858-4306-aad4-9cb7cbf0e757', submission_id='db078f27-682b-49ad-ab21-6d9b8ed94332')
 DONALD_MEMBERS = [dict(user_id=DONALD_SCOPE['requested_by'],role='manager'),
     dict(user_id='d8e3668b-7bf1-4b7e-8530-109c38bb6d89',role='viewer')]
 KEY = 'yoon_spotify_enrichment' 
@@ -36,28 +38,31 @@ def validate(row, state, hits, expected, origin=None):
             raise RuntimeError('private_identity_changed')
     if digest(row['source_metadata']['yoon_fixed_input']) != expected['source_digest']:
         raise RuntimeError('source_changed')
-    donald = str(row['id']) == DONALD_RUN
-    if donald:
-        from worker.jobs.yoon_sources import DONALD, reviewed_source
+    fresh = str(row['id']) != RUN
+    windows = 359 if str(row['id']) == HALO_RUN else 479
+    if fresh:
+        from worker.jobs.yoon_sources import DONALD, HALO, reviewed_source
+        source = HALO if str(row['id']) == HALO_RUN else DONALD
+        scope = HALO_SCOPE if str(row['id']) == HALO_RUN else DONALD_SCOPE
         descriptor = row['source_metadata']['yoon_fixed_input']
-        if (reviewed_source(descriptor) != DONALD or origin is not None
-                or any(str(row[k]) != v for k,v in DONALD_SCOPE.items())
+        if (reviewed_source(descriptor) != source or origin is not None
+                or any(str(row[k]) != v for k,v in scope.items())
                 or state.get('initialization_mode') != 'fresh'
                 or state.get('fresh_source_initialized') is not True
                 or state.get('origin') or state.get('provenance_seeded')
-                or state.get('source_id') != DONALD.id or state.get('source_pins') != DONALD.pins()
+                or state.get('source_id') != source.id or state.get('source_pins') != source.pins()
                 or state.get('members') != DONALD_MEMBERS
                 or not re.fullmatch('[0-9a-f]{64}', str(state.get('audio_sha256', '')))
                 or state.get('audio_sha256') != state.get('expected_audio_sha256')):
             raise RuntimeError('reviewed_fresh_source_required')
     tracks = state.get('clustered_setlist')
-    if (state.get('status') != 'complete' or state.get('valid_responses') != 479
+    if (state.get('status') != 'complete' or state.get('valid_responses') != windows
             or state.get('review_required') or state.get('in_flight')
-            or not isinstance(tracks, list) or (not 1 <= len(tracks) <= 479 if donald else len(tracks) != 28)
+            or not isinstance(tracks, list) or (not 1 <= len(tracks) <= windows if fresh else len(tracks) != 28)
             or digest(tracks) != expected['cluster_digest']):
         raise RuntimeError('completed_cluster_changed')
     from worker.pipeline.models import Recognition
-    if len(hits) != 479 or [h['segment_index'] for h in hits] != list(range(479)):
+    if len(hits) != windows or [h['segment_index'] for h in hits] != list(range(windows)):
         raise RuntimeError('window_coverage_changed')
     seeded = 0
     for h in hits:
@@ -68,7 +73,7 @@ def validate(row, state, hits, expected, origin=None):
                 or r.timestamp != h['segment_index'] * 15):
             raise RuntimeError('window_evidence_changed')
         attempts = d.get('attempts') or []
-        if donald and (d.get('origin') or r.http_status != 200):
+        if fresh and (d.get('origin') or r.http_status != 200):
             raise RuntimeError('fresh_window_evidence_changed')
         if d.get('origin'):
             pin = state.get('origin') or {}
