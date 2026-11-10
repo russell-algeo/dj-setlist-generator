@@ -308,3 +308,57 @@ describe("Spotify interruption at a recording seam", () => {
     expect(controller.isPlayRequested()).toBe(true);
   });
 });
+
+describe("warm native resume", () => {
+  function setup() {
+    const audio = { src: "/part-a", readyState: 4, paused: true, currentTime: 3122.25,
+      load: vi.fn(), pause: vi.fn(), play: vi.fn().mockResolvedValue(undefined) };
+    const controller = createNativeAudioController(audio, 20, vi.fn(), [
+      { src: "/part-a", startSeconds: 3120, durationSeconds: 10 },
+      { src: "/part-b", startSeconds: 20, durationSeconds: 10 },
+    ]);
+    return { audio, controller };
+  }
+  it("resumes exact paused position without seek, load, or another pause", () => {
+    const { audio, controller } = setup();
+    const setTime = vi.fn(); let seconds = audio.currentTime;
+    Object.defineProperty(audio, "currentTime", { get: () => seconds, set: value => { setTime(value); seconds = value; } });
+    controller.resume();
+    expect(audio.play).toHaveBeenCalledOnce();
+    expect(setTime).not.toHaveBeenCalled(); expect(audio.load).not.toHaveBeenCalled(); expect(audio.pause).not.toHaveBeenCalled();
+    expect(controller.position()).toBe(2.25); expect(controller.isPlayRequested()).toBe(true);
+  });
+  it("preserves a pending cross-file seek rather than resuming the wrong file", () => {
+    const { audio, controller } = setup();
+    controller.seek(12, false); controller.resume(); controller.ready();
+    expect(audio.src).toBe("/part-b"); expect(audio.currentTime).toBe(22); expect(controller.isPlayRequested()).toBe(true);
+  });
+  it("crosses a file boundary and replays only at the final set endpoint", () => {
+    const { audio, controller } = setup(); audio.currentTime = 3130;
+    controller.resume(); controller.ready();
+    expect(audio.src).toBe("/part-b"); expect(audio.currentTime).toBe(20);
+    audio.currentTime = 30; controller.pause(); controller.resume(); controller.ready();
+    expect(audio.src).toBe("/part-a"); expect(audio.currentTime).toBe(3120);
+  });
+  it("applies the source window when Play is the first action", () => {
+    const { audio, controller } = setup(); audio.currentTime = 0;
+    controller.resume(); expect(audio.currentTime).toBe(3120);
+  });
+  it("does not revive disposed audio", () => {
+    const { audio, controller } = setup(); controller.dispose(); controller.resume();
+    expect(audio.play).not.toHaveBeenCalled();
+  });
+});
+
+it("does not automatically replay an ended recording when the displayed clock was stale", () => {
+  const audio = { src: "/recording", readyState: 4, paused: true, currentTime: 0,
+    load: vi.fn(), pause: vi.fn(), play: vi.fn().mockResolvedValue(undefined) };
+  const controller = createNativeAudioController(audio, 20, vi.fn());
+  controller.seek(19.9, true);
+  audio.currentTime = 20; // Reaches end before the displayed UI/ended event catches up.
+  controller.pause(); audio.play.mockClear();
+  controller.resume(false);
+  expect(audio.play).not.toHaveBeenCalled(); expect(audio.currentTime).toBe(20);
+  controller.resume(); // A subsequent explicit Play may replay.
+  expect(audio.play).toHaveBeenCalledOnce(); expect(audio.currentTime).toBe(0);
+});

@@ -10,6 +10,7 @@ import { ArchiveHeader } from "@/components/archive/archive-header";
 import { RecordedSetControls } from "@/components/archive/recorded-set-controls";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { SpotifyTrackPreview } from "@/components/archive/spotify-track-preview";
+import { traceAudioTiming } from "@/lib/archive/audio-timing";
 import { createSetAudioFocus } from "@/lib/archive/audio-focus";
 import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
 import {
@@ -980,6 +981,8 @@ export function ArchiveSetExplorer({
   const playbackStartedRef = useRef(false);
   const playerReadyRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
+  const seekOnPlayRef = useRef<number | null>(null);
+  const awaitingPlaybackProgressRef = useRef(false);
   const pendingAutoplayRef = useRef(false);
   const restoredPlaybackTimeRef = useRef<number | null>(null);
   const seekLockUntilRef = useRef(0);
@@ -1391,6 +1394,8 @@ export function ArchiveSetExplorer({
   };
 
   const selectTrackAtTime = (track: UiTrack, scroll: boolean) => {
+    audioFocus.setIntent();
+    seekOnPlayRef.current = track.start;
     currentTimeRef.current = track.start;
     activeIdxRef.current = track.idx;
     setCurrentTime(track.start);
@@ -1495,6 +1500,7 @@ export function ArchiveSetExplorer({
     soundCloudWarmupFinishingRef.current = false;
     pendingSeekRef.current = null;
     pendingAutoplayRef.current = false;
+    seekOnPlayRef.current = null;
     setPlayerReadyState(false, updateReactState);
 
     if (ytPlayerRef.current?.destroy) {
@@ -1750,7 +1756,11 @@ export function ArchiveSetExplorer({
   };
 
   const seekPlayer = (seconds: number, scroll: boolean, autoplay: boolean) => {
+    traceAudioTiming("seek-command", activeSource.kind);
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
+    seekOnPlayRef.current = null;
+    pendingSeekRef.current = null;
+    pendingAutoplayRef.current = false;
     playbackStartedRef.current = true;
     lastListenSampleRef.current = null;
     updateFromTime(safeSeconds, scroll);
@@ -1835,11 +1845,13 @@ export function ArchiveSetExplorer({
   };
 
   const jumpTo = (seconds: number, scroll: boolean, autoplay: boolean) => {
-    audioFocus.setIntent();
-    seekPlayer(seconds, scroll, autoplay);
+    if (autoplay) audioFocus.requestSetPlayback(() => seekPlayer(seconds, scroll, true));
+    else { audioFocus.setIntent(); seekPlayer(seconds, scroll, false); }
   };
 
   const pausePlayer = (reason: "user" | "preview" = "user") => {
+    traceAudioTiming("pause-command", activeSource.kind);
+    awaitingPlaybackProgressRef.current = false;
     if (reason === "user") audioFocus.setIntent();
     pendingAutoplayRef.current = false;
     isPlayingRef.current = false;
@@ -1872,15 +1884,25 @@ export function ArchiveSetExplorer({
     persistPlaybackPositionForTime(currentTimeRef.current, true);
   };
 
-  const playPlayer = (reason: "user" | "preview" = "user") => {
-    if (reason === "user") audioFocus.setIntent();
+  const playPlayer = (reason: "user" | "preview" = "user", replayAtEnd = true) => {
+    if (reason === "user") {
+      traceAudioTiming("user-play-request", activeSource.kind);
+      audioFocus.requestSetPlayback(() => playPlayer("preview"));
+      return;
+    }
+    traceAudioTiming("play-command", activeSource.kind);
+    awaitingPlaybackProgressRef.current = true;
     playbackStartedRef.current = true;
-    updateFromTime(currentTimeRef.current, false);
+    const startAtSeconds = clamp(pendingSeekRef.current ?? seekOnPlayRef.current ?? currentTimeRef.current, 0, Math.max(0, detail.duration));
+    updateFromTime(startAtSeconds, false);
     publishNowPlayingMetadata();
-    const startAtSeconds = clamp(currentTimeRef.current, 0, Math.max(0, detail.duration));
     if (activeSource.kind === "native-audio") {
       setNativeAudioError(null);
-      seekPlayer(startAtSeconds >= detail.duration ? 0 : startAtSeconds, false, true);
+      if (seekOnPlayRef.current !== null || pendingSeekRef.current !== null || !nativeControllerRef.current) {
+        seekPlayer(startAtSeconds >= detail.duration ? 0 : startAtSeconds, false, true);
+      } else {
+        nativeControllerRef.current.resume(replayAtEnd);
+      }
       return;
     }
 
@@ -1891,10 +1913,10 @@ export function ArchiveSetExplorer({
       }
 
       if (ytPlayerRef.current?.playVideo && playerReadyRef.current) {
-        if (startAtSeconds > 0 && ytPlayerRef.current.seekTo) {
-          ytPlayerRef.current.seekTo(startAtSeconds, true);
-        }
-        ytPlayerRef.current.playVideo();
+        if (seekOnPlayRef.current !== null || pendingSeekRef.current !== null) {
+          pendingSeekRef.current = null;
+          seekPlayer(startAtSeconds, false, true);
+        } else ytPlayerRef.current.playVideo();
       } else {
         pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
@@ -1909,12 +1931,14 @@ export function ArchiveSetExplorer({
       }
 
       if (scWidgetRef.current?.play && playerReadyRef.current) {
-        if (startAtSeconds > 0 && scWidgetRef.current.seekTo) {
-          scWidgetRef.current.seekTo(startAtSeconds * 1000);
+        if (seekOnPlayRef.current !== null || pendingSeekRef.current !== null) {
+          pendingSeekRef.current = null;
+          seekPlayer(startAtSeconds, false, true);
+        } else {
+          setIsPlaying(true);
+          startPlayerPoll();
+          scWidgetRef.current.play();
         }
-        setIsPlaying(true);
-        startPlayerPoll();
-        scWidgetRef.current.play();
       } else {
         pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
@@ -1941,13 +1965,15 @@ export function ArchiveSetExplorer({
       pausePlayer("preview");
     },
     resumeSet: () => {
-      if (detail.duration > 0 && currentTimeRef.current >= detail.duration) return;
-      playPlayer("preview");
+      const position = activeSource.kind === "native-audio"
+        ? nativeControllerRef.current?.position() ?? currentTimeRef.current
+        : currentTimeRef.current;
+      if (detail.duration > 0 && position >= detail.duration) return;
+      playPlayer("preview", false);
     },
   };
 
   const togglePlay = () => {
-    audioFocus.setIntent();
     if (activeSource.kind === "native-audio") {
       if (nativeControllerRef.current?.isPlayRequested()) pausePlayer();
       else playPlayer();
@@ -1966,7 +1992,7 @@ export function ArchiveSetExplorer({
       }
 
       if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
-        seekPlayer(0, false, true);
+        jumpTo(0, false, true);
         return;
       }
 
@@ -1981,7 +2007,7 @@ export function ArchiveSetExplorer({
       }
 
       if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
-        seekPlayer(0, false, true);
+        jumpTo(0, false, true);
         return;
       }
 
@@ -1995,7 +2021,7 @@ export function ArchiveSetExplorer({
     }
 
     if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
-      seekPlayer(0, false, true);
+      jumpTo(0, false, true);
       return;
     }
 
@@ -2242,6 +2268,7 @@ export function ArchiveSetExplorer({
                   const YT = playerWindow.YT;
                   const playing = event?.data === YT?.PlayerState?.PLAYING;
                   if (playing) {
+                    traceAudioTiming("playing-event", "youtube");
                     if (audioFocus.guardSetPlayback()) return;
                     playbackStartedRef.current = true;
                     publishNowPlayingMetadata();
@@ -2344,6 +2371,7 @@ export function ArchiveSetExplorer({
             if (soundCloudWarmupActiveRef.current) {
               return;
             }
+            traceAudioTiming("playing-event", "soundcloud");
             if (audioFocus.guardSetPlayback()) return;
             playbackStartedRef.current = true;
             publishNowPlayingMetadata();
@@ -2380,6 +2408,10 @@ export function ArchiveSetExplorer({
               if (soundCloudWarmupActiveRef.current) {
                 finishSoundCloudWarmup(widget);
                 return;
+              }
+              if (awaitingPlaybackProgressRef.current) {
+                traceAudioTiming("first-progress-event", "soundcloud");
+                awaitingPlaybackProgressRef.current = false;
               }
               if (!playbackStartedRef.current) {
                 playbackStartedRef.current = true;
@@ -2712,11 +2744,12 @@ export function ArchiveSetExplorer({
                         playbackStartedRef.current = true; setNativeAudioError(null); setIsPlaying(true);
                       }}
                       onPlaying={(event) => {
+                        traceAudioTiming("playing-event", "native-audio");
                         if (event.currentTarget.paused || !nativeControllerRef.current?.isPlayRequested()) return;
                         if (audioFocus.guardSetPlayback()) return;
                         setNativeAudioBuffering(false); setIsPlaying(true);
                       }}
-                      onWaiting={() => setNativeAudioBuffering(true)}
+                      onWaiting={() => { traceAudioTiming("waiting-event", "native-audio"); setNativeAudioBuffering(true); }}
                       onStalled={() => { if (nativeControllerRef.current?.isPlayRequested()) setNativeAudioBuffering(true); }}
                       onLoadStart={() => { setPlayerReadyState(false); setNativeAudioBuffering(true); }}
                       onCanPlay={() => setNativeAudioBuffering(false)}

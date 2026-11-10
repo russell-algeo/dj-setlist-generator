@@ -110,6 +110,21 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
   };
   const position = () => pending?.seconds ?? Math.max(offsets[activeIndex]!, Math.min(offsets[activeIndex]! + segments[activeIndex]!.durationSeconds,
     offsets[activeIndex]! + audio.currentTime - segments[activeIndex]!.startSeconds));
+  const resume = (replayAtEnd = true) => {
+    if (disposed) return;
+    // A normal pause keeps the decoder, buffer and exact media position.
+    // Seeking to our displayed (polled) clock would discard that warm state.
+    const part = segments[activeIndex]!;
+    const target = position();
+    if (target >= duration && !replayAtEnd) { pause(); return; }
+    if (pending || awaitingMetadata || audio.readyState < 1 || audio.ended || audio.currentTime < part.startSeconds ||
+      audio.currentTime >= part.startSeconds + part.durationSeconds) {
+      seek(target >= duration ? 0 : target, true);
+      return;
+    }
+    playRequested = true;
+    startPlayback(++version);
+  };
   const ended = () => {
     if (disposed) return duration;
     // ended events can already be queued when a user or Spotify pauses us.
@@ -121,6 +136,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
   };
   return {
     seek,
+    resume,
     position,
     ended,
     isPlayRequested: () => playRequested,

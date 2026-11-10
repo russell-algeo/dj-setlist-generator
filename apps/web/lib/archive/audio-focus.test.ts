@@ -155,3 +155,129 @@ describe("documented Spotify playback state", () => {
     expect(spotifyPlaybackState({ data: {} } as never)).toBeNull();
   });
 });
+
+describe("low-latency handoff without overlapping audio", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  it("resumes synchronously after the only preview reports stopped", () => {
+    const { focus, port, closeB } = setup(); closeB();
+    focus.playing("a"); focus.stopped("a");
+    expect(port.resumeSet).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("resumes synchronously when the only active preview is destroyed", () => {
+    const { focus, port, closeA, closeB } = setup(); closeB();
+    focus.playing("a"); closeA();
+    expect(port.resumeSet).toHaveBeenCalledOnce();
+  });
+  it("waits for actual Spotify silence on direct Play, then skips the handover timer", () => {
+    const { focus, port } = setup();
+    const pause = vi.fn(); focus.register("a", pause);
+    focus.playing("a"); const play = vi.fn();
+    focus.requestSetPlayback(play);
+    expect(pause).toHaveBeenCalledOnce();
+    expect(play).not.toHaveBeenCalled();
+    focus.playing("a"); // delayed update from the requested pause
+    expect(port.pauseSet).toHaveBeenCalledOnce();
+    focus.stopped("a");
+    expect(play).toHaveBeenCalledOnce();
+    expect(port.resumeSet).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("direct Play needs no wait if Spotify was already stopped", () => {
+    const { focus } = setup(false); const play = vi.fn();
+    focus.requestSetPlayback(play); expect(play).toHaveBeenCalledOnce();
+  });
+  it.each(["setIntent", "reset", "dispose"] as const)("%s cancels a return still awaiting Spotify", (action) => {
+    const { focus } = setup(); focus.register("a", vi.fn());
+    focus.playing("a"); const play = vi.fn(); focus.requestSetPlayback(play);
+    focus[action](); focus.stopped("a");
+    expect(play).not.toHaveBeenCalled();
+  });
+  it("repeated Play replaces, rather than duplicates, the pending request", () => {
+    const { focus } = setup(); focus.register("a", vi.fn()); focus.playing("a");
+    const old = vi.fn(), latest = vi.fn();
+    focus.requestSetPlayback(old); focus.requestSetPlayback(latest); focus.stopped("a");
+    expect(old).not.toHaveBeenCalled(); expect(latest).toHaveBeenCalledOnce();
+  });
+  it("closing the paused preview satisfies an explicit pending return", () => {
+    const { focus } = setup(); const close = focus.register("a", vi.fn());
+    focus.playing("a"); const play = vi.fn(); focus.requestSetPlayback(play); close();
+    expect(play).toHaveBeenCalledOnce();
+  });
+  it("a later different Spotify preview cancels the pending direct Play", () => {
+    const { focus } = setup(); focus.register("a", vi.fn());
+    focus.playing("a"); const play = vi.fn(); focus.requestSetPlayback(play);
+    focus.playing("b"); focus.stopped("a");
+    expect(play).not.toHaveBeenCalled();
+  });
+});
+
+describe("reviewed delayed acknowledgement races", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  function asynchronousPreview() {
+    const state = setup();
+    state.port.pauseSet.mockImplementation(() => state.port.isSetPlaying.mockReturnValue(false));
+    const closeA = state.focus.register("a", vi.fn());
+    state.focus.playing("a"); state.focus.setPaused(); state.focus.playing("b");
+    return { ...state, closeA };
+  }
+  it("closing the new preview waits for the previous preview to acknowledge pause", () => {
+    const { focus, port, closeB } = asynchronousPreview();
+    closeB(); expect(port.resumeSet).not.toHaveBeenCalled();
+    focus.stopped("a"); expect(port.resumeSet).toHaveBeenCalledOnce();
+    focus.stopped("a"); vi.runAllTimers(); expect(port.resumeSet).toHaveBeenCalledOnce();
+  });
+  it("even an expired handover timer cannot overlap an unacknowledged preview", () => {
+    const { focus, port } = asynchronousPreview();
+    focus.stopped("b"); vi.advanceTimersByTime(150);
+    expect(port.resumeSet).not.toHaveBeenCalled();
+    focus.stopped("a"); expect(port.resumeSet).toHaveBeenCalledOnce();
+  });
+  it("destroying the last pending preview safely releases the automatic return", () => {
+    const { port, closeA, closeB } = asynchronousPreview();
+    closeB();
+    expect(port.resumeSet).not.toHaveBeenCalled(); closeA();
+    expect(port.resumeSet).toHaveBeenCalledOnce();
+  });
+  it("a source embedded Play then Pause cancels the old automatic timer", () => {
+    const { focus, port } = setup();
+    focus.playing("a"); focus.setPaused(); focus.stopped("a");
+    expect(focus.guardSetPlayback()).toBe(false);
+    focus.setPaused(); vi.advanceTimersByTime(150);
+    expect(port.resumeSet).not.toHaveBeenCalled();
+  });
+  it("a stale source Play before its pause acknowledgement keeps the return pending", () => {
+    const { focus, port } = setup();
+    focus.playing("a"); focus.stopped("a");
+    expect(focus.guardSetPlayback()).toBe(true);
+    focus.setPaused(); vi.advanceTimersByTime(150);
+    expect(port.resumeSet).toHaveBeenCalledOnce();
+  });
+  it("an embedded user takeover waits for Spotify silence, then resumes exactly once", () => {
+    const { focus, port } = setup(); focus.register("a", vi.fn());
+    focus.playing("a"); focus.setPaused();
+    expect(focus.guardSetPlayback()).toBe(true);
+    expect(port.resumeSet).not.toHaveBeenCalled();
+    focus.stopped("a"); expect(port.resumeSet).toHaveBeenCalledOnce();
+  });
+});
+
+it("never manufactures a return from a stale source Play after explicit Pause", () => {
+  const { focus, port } = setup(); focus.register("a", vi.fn());
+  focus.playing("a"); // Source pause is still unacknowledged.
+  focus.setIntent(); // User explicitly pauses.
+  expect(focus.guardSetPlayback()).toBe(true); // Old source PLAY was queued.
+  focus.setPaused(); focus.stopped("a");
+  expect(port.resumeSet).not.toHaveBeenCalled();
+});
+
+it("preserves an explicit pending seek while a stale source Play arrives", () => {
+  const { focus, port } = setup(); focus.register("a", vi.fn());
+  focus.playing("a"); focus.setPaused();
+  const seek = vi.fn(); focus.requestSetPlayback(seek);
+  expect(focus.guardSetPlayback()).toBe(true);
+  focus.stopped("a");
+  expect(seek).toHaveBeenCalledOnce(); expect(port.resumeSet).not.toHaveBeenCalled();
+});

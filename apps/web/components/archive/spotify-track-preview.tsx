@@ -1,5 +1,6 @@
 "use client";
 
+import { traceAudioTiming } from "@/lib/archive/audio-timing";
 import { useEffect, useRef, useState } from "react";
 import { loadSpotifyIframeApi, spotifyPlaybackState, type SpotifyEmbedController, type SpotifyPlaybackEvent } from "@/lib/archive/spotify-iframe";
 
@@ -22,9 +23,11 @@ export function SpotifyTrackPreview({ trackId, title, onRegister, onPlaying, onS
     let cancelled = false;
     let controller: SpotifyEmbedController | undefined;
     let unregister: (() => void) | undefined;
+    let previousState: string | null = null;
     const listener = (event: SpotifyPlaybackEvent) => {
       if (cancelled) return;
       const state = spotifyPlaybackState(event);
+      if (state !== previousState) { traceAudioTiming(state ?? "unknown", "spotify"); previousState = state; }
       if (state === "playing") callbacks.current.onPlaying();
       if (state === "stopped") callbacks.current.onStopped();
       // Buffering is not a pause: keep the set silent until Spotify stops.
@@ -37,7 +40,7 @@ export function SpotifyTrackPreview({ trackId, title, onRegister, onPlaying, onS
       api.createController(placeholder, { uri: `spotify:track:${trackId}`, width: "100%", height: 80 }, (created) => {
         if (cancelled) { created.destroy(); return; }
         controller = created;
-        unregister = callbacks.current.onRegister(() => created.pause());
+        unregister = callbacks.current.onRegister(() => { traceAudioTiming("pause-command", "spotify"); created.pause(); });
         created.addListener("playback_update", listener);
         const iframe = root.querySelector("iframe");
         if (iframe) iframe.title = title;
