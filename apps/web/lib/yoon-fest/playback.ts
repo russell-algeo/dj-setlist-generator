@@ -37,7 +37,7 @@ export function locateRecordingTime(spans: RecordingSpan[], seconds: number) {
 }
 
 export type NativeAudioSegment = { src: string; startSeconds: number; durationSeconds: number };
-export type NativeAudioPort = Pick<HTMLAudioElement, "src" | "load" | "paused" | "currentTime" | "readyState" | "play" | "pause">;
+export type NativeAudioPort = Pick<HTMLAudioElement, "src" | "load" | "paused" | "currentTime" | "readyState" | "play" | "pause"> & { readonly ended?: boolean };
 
 // The set clock spans original files. Only the selected source window is played;
 // source URLs are same-origin authorized redirects, never bearer URLs in props.
@@ -112,6 +112,9 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     offsets[activeIndex]! + audio.currentTime - segments[activeIndex]!.startSeconds));
   const ended = () => {
     if (disposed) return duration;
+    // ended events can already be queued when a user or Spotify pauses us.
+    // They cannot grant a new autoplay request after that pause.
+    if (!playRequested) return position();
     if (activeIndex < segments.length - 1) { seek(offsets[activeIndex + 1]!, true); return position(); }
     seek(duration, false);
     return duration;
@@ -129,6 +132,9 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       // newer play just because metadata/seek completed before play settled.
       if (attempt?.version === observedVersion) await attempt.settled;
       if (disposed || observedVersion !== version || !audio.paused || (pending && playRequested)) return;
+      // Native media emits pause before ended at a natural file boundary.
+      // Preserve intent for that transition, but never undo an explicit pause.
+      if (audio.ended && playRequested) return;
       pause();
       onPaused();
     },

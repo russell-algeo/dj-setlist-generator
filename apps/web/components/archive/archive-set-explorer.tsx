@@ -9,6 +9,8 @@ import { buildArtistHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { RecordedSetControls } from "@/components/archive/recorded-set-controls";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { SpotifyTrackPreview } from "@/components/archive/spotify-track-preview";
+import { createSetAudioFocus } from "@/lib/archive/audio-focus";
 import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
 import {
   mergeListenIntervals,
@@ -992,6 +994,24 @@ export function ArchiveSetExplorer({
   const prevTrackPressTsRef = useRef(0);
   const ytPlayerRef = useRef<YouTubePlayer | null>(null);
   const scWidgetRef = useRef<SoundCloudWidget | null>(null);
+  const audioFocusPort = useRef({
+    isSetPlaying: (): boolean => false,
+    pauseSet: () => {},
+    resumeSet: () => {},
+  });
+  const [audioFocus] = useState(() => createSetAudioFocus({
+    isSetPlaying: () => audioFocusPort.current.isSetPlaying(),
+    pauseSet: () => audioFocusPort.current.pauseSet(),
+    resumeSet: () => audioFocusPort.current.resumeSet(),
+  }));
+
+  // Reset ownership before passive child cleanup: closing a preview during
+  // navigation/source replacement must never start an old/new set.
+  useLayoutEffect(() => {
+    audioFocus.reset();
+    setOpenSpotifyIdxs([]);
+    return () => audioFocus.reset();
+  }, [audioFocus, detail.id, activeSource.kind, activeSource.sourceUrl, privateContext?.audio.revision, privateContext?.audio.segments]);
 
   useEffect(() => {
     setQuery(initialQuery);
@@ -1815,10 +1835,14 @@ export function ArchiveSetExplorer({
   };
 
   const jumpTo = (seconds: number, scroll: boolean, autoplay: boolean) => {
+    audioFocus.setIntent();
     seekPlayer(seconds, scroll, autoplay);
   };
 
-  const pausePlayer = () => {
+  const pausePlayer = (reason: "user" | "preview" = "user") => {
+    if (reason === "user") audioFocus.setIntent();
+    pendingAutoplayRef.current = false;
+    isPlayingRef.current = false;
     if (activeSource.kind === "native-audio") {
       nativeControllerRef.current?.pause();
       setNativeAudioBuffering(false);
@@ -1848,7 +1872,8 @@ export function ArchiveSetExplorer({
     persistPlaybackPositionForTime(currentTimeRef.current, true);
   };
 
-  const playPlayer = () => {
+  const playPlayer = (reason: "user" | "preview" = "user") => {
+    if (reason === "user") audioFocus.setIntent();
     playbackStartedRef.current = true;
     updateFromTime(currentTimeRef.current, false);
     publishNowPlayingMetadata();
@@ -1901,7 +1926,28 @@ export function ArchiveSetExplorer({
     startFallbackProgress();
   };
 
+  audioFocusPort.current = {
+    isSetPlaying: () => {
+      if (activeSource.kind === "native-audio") return nativeControllerRef.current?.isPlayRequested() ?? false;
+      if (activeSource.kind === "youtube" && playerReadyRef.current && ytPlayerRef.current?.getPlayerState) {
+        return ytPlayerRef.current.getPlayerState() === (window as PlayerWindow).YT?.PlayerState?.PLAYING || pendingAutoplayRef.current;
+      }
+      return isPlayingRef.current || pendingAutoplayRef.current;
+    },
+    pauseSet: () => {
+      if (activeSource.kind === "native-audio" && nativeControllerRef.current) {
+        updateFromPolledTime(nativeControllerRef.current.position());
+      }
+      pausePlayer("preview");
+    },
+    resumeSet: () => {
+      if (detail.duration > 0 && currentTimeRef.current >= detail.duration) return;
+      playPlayer("preview");
+    },
+  };
+
   const togglePlay = () => {
+    audioFocus.setIntent();
     if (activeSource.kind === "native-audio") {
       if (nativeControllerRef.current?.isPlayRequested()) pausePlayer();
       else playPlayer();
@@ -2196,6 +2242,7 @@ export function ArchiveSetExplorer({
                   const YT = playerWindow.YT;
                   const playing = event?.data === YT?.PlayerState?.PLAYING;
                   if (playing) {
+                    if (audioFocus.guardSetPlayback()) return;
                     playbackStartedRef.current = true;
                     publishNowPlayingMetadata();
                     setIsPlaying(true);
@@ -2209,6 +2256,7 @@ export function ArchiveSetExplorer({
                     event?.data === YT?.PlayerState?.ENDED ||
                     event?.data === YT?.PlayerState?.CUED;
                   if (paused) {
+                    audioFocus.setPaused();
                     setIsPlaying(false);
                     pollPlayerTime();
                     persistLatestPlayerPosition(true);
@@ -2296,6 +2344,7 @@ export function ArchiveSetExplorer({
             if (soundCloudWarmupActiveRef.current) {
               return;
             }
+            if (audioFocus.guardSetPlayback()) return;
             playbackStartedRef.current = true;
             publishNowPlayingMetadata();
             setIsPlaying(true);
@@ -2307,6 +2356,7 @@ export function ArchiveSetExplorer({
               restoreSoundCloudAfterWarmup(widget, enableSoundCloudControls);
               return;
             }
+            audioFocus.setPaused();
             setIsPlaying(false);
             pollPlayerTime();
             persistLatestPlayerPosition(true);
@@ -2658,10 +2708,12 @@ export function ArchiveSetExplorer({
                       }}
                       onPlay={(event) => {
                         if (event.currentTarget.paused || !nativeControllerRef.current?.isPlayRequested()) return;
+                        if (audioFocus.guardSetPlayback()) return;
                         playbackStartedRef.current = true; setNativeAudioError(null); setIsPlaying(true);
                       }}
                       onPlaying={(event) => {
                         if (event.currentTarget.paused || !nativeControllerRef.current?.isPlayRequested()) return;
+                        if (audioFocus.guardSetPlayback()) return;
                         setNativeAudioBuffering(false); setIsPlaying(true);
                       }}
                       onWaiting={() => setNativeAudioBuffering(true)}
@@ -2670,6 +2722,7 @@ export function ArchiveSetExplorer({
                       onCanPlay={() => setNativeAudioBuffering(false)}
                       onPause={() => {
                         void nativeControllerRef.current?.observePause(() => {
+                          audioFocus.setPaused();
                           setNativeAudioBuffering(false);
                           setIsPlaying(false);
                         });
@@ -3195,15 +3248,13 @@ export function ArchiveSetExplorer({
 
                           <div className="spotify-inline" hidden={!isSpotifyOpen}>
                             {isSpotifyOpen && track.spotifyTrackId ? (
-                              <iframe
-                                allow="autoplay; clipboard-write; encrypted-media"
-                                frameBorder="0"
-                                height="80"
-                                loading="lazy"
-                                src={`https://open.spotify.com/embed/track/${track.spotifyTrackId}?utm_source=generator&theme=0`}
-                                style={{ borderRadius: 0 }}
+                              <SpotifyTrackPreview
+                                key={`${detail.id}:${activeSource.sourceUrl}:${track.idx}`}
+                                trackId={track.spotifyTrackId}
                                 title={`${track.artist} ${track.title} Spotify embed`}
-                                width="100%"
+                                onRegister={(pause) => audioFocus.register(String(track.idx), pause)}
+                                onPlaying={() => audioFocus.playing(String(track.idx))}
+                                onStopped={() => audioFocus.stopped(String(track.idx))}
                               />
                             ) : null}
                           </div>

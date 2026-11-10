@@ -20,7 +20,7 @@ describe("original recording windows", () => {
   const make = () => ({ src: "/part-a", load: vi.fn(), paused: true, currentTime: 0, readyState: 1, play: vi.fn().mockResolvedValue(undefined), pause: vi.fn() });
   it("offsets playback into the original file without downloading or transcoding it", () => { const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn(), segments); c.seek(2, false); expect(audio.currentTime).toBe(52 * 60 + 2); expect(c.position()).toBe(2); });
   it("seeks across files and waits for the new metadata", () => { const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn(), segments); c.seek(12, true); expect(audio.src).toBe("/part-b"); expect(audio.load).toHaveBeenCalledOnce(); expect(audio.play).toHaveBeenCalledOnce(); expect(c.isPending()).toBe(true); c.ready(); expect(audio.currentTime).toBe(22); expect(c.position()).toBe(12); expect(audio.play).toHaveBeenCalledTimes(2); });
-  it("switches naturally at the set seam and stops at the reviewed end", () => { const audio = make(); audio.paused = false; const c = createNativeAudioController(audio, 20, vi.fn(), segments); audio.currentTime = 52 * 60 + 10; expect(c.tick()).toBe(10); expect(audio.src).toBe("/part-b"); c.ready(); audio.currentTime = 30; expect(c.tick()).toBe(20); expect(audio.currentTime).toBe(30); expect(audio.pause).toHaveBeenCalled(); });
+  it("switches naturally at the set seam and stops at the reviewed end", () => { const audio = make(); audio.paused = false; const c = createNativeAudioController(audio, 20, vi.fn(), segments); c.seek(0, true); audio.currentTime = 52 * 60 + 10; expect(c.tick()).toBe(10); expect(audio.src).toBe("/part-b"); c.ready(); audio.currentTime = 30; expect(c.tick()).toBe(20); expect(audio.currentTime).toBe(30); expect(audio.pause).toHaveBeenCalled(); });
   it("replaces a pending cross-file seek with the latest target", () => { const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn(), segments); c.seek(12, true); c.seek(3, false); expect(audio.src).toBe("/part-a"); c.ready(); expect(audio.currentTime).toBe(52 * 60 + 3); expect(audio.play).toHaveBeenCalledOnce(); expect(c.isPlayRequested()).toBe(false); });
   it("clamps native scrubbing outside the approved source window", () => { const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn(), segments); audio.currentTime = 0; expect(c.tick()).toBe(0); expect(audio.currentTime).toBe(52 * 60); });
 });
@@ -265,5 +265,46 @@ describe("asynchronous native pause/play event ordering", () => {
     await Promise.resolve(); await Promise.resolve();
     expect(controller.isPlayRequested()).toBe(false);
     expect(paused).not.toHaveBeenCalled(); expect(error).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Spotify interruption at a recording seam", () => {
+  it("preserves a natural pause-before-ended transition between original files", async () => {
+    const audio = { src: "/part-a", load: vi.fn(), paused: false, ended: false, currentTime: 0, readyState: 1,
+      play: vi.fn().mockResolvedValue(undefined), pause: vi.fn() };
+    const controller = createNativeAudioController(audio, 20, vi.fn(), [
+      { src: "/part-a", startSeconds: 0, durationSeconds: 10 },
+      { src: "/part-b", startSeconds: 0, durationSeconds: 10 },
+    ]);
+    controller.seek(9, true); audio.currentTime = 10; audio.paused = true; audio.ended = true;
+    const paused = vi.fn(); await controller.observePause(paused);
+    expect(paused).not.toHaveBeenCalled();
+    expect(controller.isPlayRequested()).toBe(true);
+    expect(controller.ended()).toBe(10);
+    expect(audio.src).toBe("/part-b");
+    controller.ready(); expect(controller.isPlayRequested()).toBe(true);
+    // An explicit comparison pause still wins even if the element is ended.
+    controller.pause(); await controller.observePause(paused);
+    expect(controller.isPlayRequested()).toBe(false);
+    expect(paused).toHaveBeenCalledOnce();
+  });
+  it("does not let a queued ended event restart a paused recording", () => {
+    const audio = { src: "/part-a", load: vi.fn(), paused: false, currentTime: 0, readyState: 1,
+      play: vi.fn().mockResolvedValue(undefined), pause: vi.fn() };
+    const controller = createNativeAudioController(audio, 20, vi.fn(), [
+      { src: "/part-a", startSeconds: 0, durationSeconds: 10 },
+      { src: "/part-b", startSeconds: 0, durationSeconds: 10 },
+    ]);
+    controller.seek(9, true); audio.currentTime = 10;
+    controller.pause(); audio.paused = true;
+    expect(controller.ended()).toBe(10);
+    expect(controller.isPlayRequested()).toBe(false);
+    expect(audio.src).toBe("/part-a");
+    expect(audio.play).toHaveBeenCalledOnce();
+    // Resuming after the comparison crosses the seam normally.
+    controller.seek(controller.position(), true); controller.ready();
+    expect(audio.src).toBe("/part-b");
+    expect(controller.isPlayRequested()).toBe(true);
   });
 });
