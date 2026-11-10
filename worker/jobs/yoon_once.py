@@ -159,8 +159,8 @@ def prepare(store, root):
         if shutil.disk_usage(root).free < 8_000_000_000:
             raise RuntimeError('disk_budget')
         fetch(source, master, source_spec)
-        subprocess.run(['ffmpeg', '-nostdin', '-y', '-v', 'error', '-ss', str(source_spec.start),
-            '-i', str(master), '-t', str(source_spec.duration), '-vn', '-acodec', 'libmp3lame',
+        subprocess.run(['ffmpeg', '-nostdin', '-y', '-v', 'error', '-ss', str(source_spec.seek_seconds),
+            '-i', str(master), *source_spec.crop_filter_args(), '-t', str(source_spec.duration), '-vn', '-acodec', 'libmp3lame',
             '-ab', '128k', '-ar', '44100', str(audio)], check=True, timeout=600,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         from audio_segmenter import AudioSegmenter

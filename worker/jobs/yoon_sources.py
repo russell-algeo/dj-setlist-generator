@@ -7,12 +7,20 @@ class Source:
     id: str
     sha256: str
     bytes: int
-    start: int
-    end: int
+    start: int | float
+    end: int | float
     bounds: str
+    start_frame: int | None = None
+    end_frame: int | None = None
+    sample_rate: int | None = None
 
     @property
     def duration(self):
+        if self.sample_rate is not None:
+            frames = self.end_frame - self.start_frame
+            if frames % self.sample_rate:
+                raise RuntimeError('reviewed_duration_must_be_whole_seconds')
+            return frames // self.sample_rate
         return self.end - self.start
 
     @property
@@ -20,8 +28,24 @@ class Source:
         return (self.duration - 30) // 15 + 1
 
     def pins(self):
-        return dict(source_sha256=self.sha256, source_bytes=self.bytes,
+        pins = dict(source_sha256=self.sha256, source_bytes=self.bytes,
                     source_start_seconds=self.start, source_end_seconds=self.end)
+        if self.sample_rate is not None:
+            pins.update(source_start_frame=self.start_frame, source_end_frame=self.end_frame,
+                        source_sample_rate=self.sample_rate)
+        return pins
+
+    @property
+    def seek_seconds(self):
+        return self.start if self.sample_rate is None else self.start_frame // self.sample_rate
+
+    def crop_filter_args(self):
+        if self.sample_rate is None:
+            return []
+        # Integer-second input seek followed by a sample-exact residual trim.
+        residual = self.start_frame % self.sample_rate
+        end = residual + self.end_frame - self.start_frame
+        return ['-af', f'atrim=start_sample={residual}:end_sample={end},asetpts=PTS-STARTPTS']
 
 
 JACKSON = Source('jackson-sunday',
@@ -35,7 +59,14 @@ DONALD = Source('donald-two-hour',
 HALO = Source('halo-varga-sunday',
     'aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae',
     4290463660, 10320, 15720, 'provisional schedule-derived start and end')
-CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO)}
+# Sunday slot yoon-36, inferred from the approximate Jackson anchor.
+# Frame pins are authoritative; binary float subtraction is not exact here.
+GRISHA = Source('grisha-sunday',
+    'a67425f4a8f30a20912ff337b4bf7706cff6e25acfa88a48e4647592f4d31da6',
+    4290463660, 4934.883265306123, 12134.883265306122,
+    'provisional schedule-derived boundaries from approximate Jackson anchor',
+    start_frame=217628352, end_frame=535148352, sample_rate=44100)
+CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA)}
 
 
 def reviewed_source(value):

@@ -240,4 +240,45 @@ query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_
 check(d2.finalize_ready())
 check(query("SELECT (source_metadata->'yoon_resume'->>'valid_responses')::int AS n FROM ops.set_runs WHERE id=%s",(HALO_RUN,))[0]['n']==359)
 check(query('SELECT status FROM ops.set_runs WHERE id=%s',(HALO_RUN,))[0]['status']=='private_resume_complete')
+# New catalog source: empty fresh run, one-time derivative pin, normal queue.
+from worker.jobs.yoon_sources import GRISHA
+from worker.jobs.yoon_resume_policy import initial_state
+GRISHA_RUN='a0000000-0000-4000-8000-000000000040'
+fresh_state=initial_state(float(query("SELECT extract(epoch from clock_timestamp()) AS n")[0]['n']))
+fresh_state.update(source_id=GRISHA.id,source_pins=GRISHA.pins(),initialization_mode='fresh',
+    members=[{'user_id':'synthetic-owner','role':'manager'},{'user_id':'synthetic-viewer','role':'viewer'}])
+descriptor=dict(GRISHA.pins(),source_id=GRISHA.id,recognition_mode='resumable',
+    source_url='https://dropbox.com/SYNTHETIC_GRISHA')
+query("""INSERT INTO ops.set_runs(id,submission_id,requested_by,status,source_url,
+ publication_visibility,target_set_id,collection_id,source_metadata)
+ SELECT %s,submission_id,requested_by,'private_resume_pending','local:synthetic',
+ publication_visibility,target_set_id,collection_id,%s::jsonb FROM ops.set_runs WHERE id=%s""",
+ (GRISHA_RUN,json.dumps({'yoon_fixed_input':descriptor,'yoon_resume':fresh_state}),RUN))
+d=ResumeStore(GRISHA_RUN,'9300','1',connect=connect)
+# The catalog's four exact pins are enforced before any lease is created.
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_fixed_input,source_end_seconds}','12135') WHERE id=%s",(GRISHA_RUN,))
+denies(d.claim)
+check(query('SELECT count(*)::int AS n FROM ops.set_run_leases WHERE set_run_id=%s',(GRISHA_RUN,))[0]['n']==0)
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_fixed_input,source_end_seconds}','12134.883265306122') WHERE id=%s",(GRISHA_RUN,))
+check(d.claim()=='https://dropbox.com/SYNTHETIC_GRISHA')
+state=d.require_owner()
+check(state['fresh_source_initialized'] and not state.get('provenance_seeded') and not state.get('origin'))
+check(state['expected_windows']==479 and 'provisional' in state['bounds'])
+check(query('SELECT count(*)::int AS n FROM ops.set_run_leases WHERE set_run_id=%s',(GRISHA_RUN,))[0]['n']==479)
+check(query('SELECT count(*)::int AS n FROM ops.segment_hits WHERE set_run_id=%s',(GRISHA_RUN,))[0]['n']==0)
+d.write({'status':'prepared','audio_sha256':'c'*64,'recognition_mode':'resumable'})
+check(d.require_owner()['expected_audio_sha256']=='c'*64)
+d.prepare_scheduler()
+ticket=d.reserve(0)
+d.finish(Recognition(0,None,None,None,{'matches':[]},False,0,http_status=200),ticket,0)
+check(d.summary()[0]['valid']==1)
+d.release('bounded_pause')
+d2=ResumeStore(GRISHA_RUN,'9301','1',connect=connect)
+d2.claim();d2.write({'status':'prepared','audio_sha256':'c'*64,'recognition_mode':'resumable'})
+check(d2.require_owner()['continuations']==2)
+check(d2.summary()[0]['valid']==1)
+denies(lambda:d2.reserve(0))
+denies(lambda:d2.write({'status':'prepared','audio_sha256':'d'*64,'recognition_mode':'resumable'}))
+check(query("SELECT source_metadata->'yoon_resume'->>'reason' AS reason FROM ops.set_runs WHERE id=%s",(GRISHA_RUN,))[0]['reason']=='prepared_audio_changed')
+check(query("SELECT source_metadata->'yoon_resume'->>'expected_audio_sha256' AS digest FROM ops.set_runs WHERE id=%s",(GRISHA_RUN,))[0]['digest']=='c'*64)
 print(json.dumps({'done':True,'checks':checks}),file=sys.__stdout__,flush=True)
