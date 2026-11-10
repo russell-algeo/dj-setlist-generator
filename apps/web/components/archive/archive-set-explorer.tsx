@@ -7,6 +7,9 @@ import { ArchiveDeleteControl, SubmittedByYouBadge } from "@/components/archive/
 import { buildArtistHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { SpotifyTrackPreview } from "@/components/archive/spotify-track-preview";
+import { traceAudioTiming } from "@/lib/archive/audio-timing";
+import { createSetAudioFocus } from "@/lib/archive/audio-focus";
 import { SpotifyExportButton } from "@/components/archive/spotify-export-button";
 import {
   mergeListenIntervals,
@@ -960,6 +963,8 @@ export function ArchiveSetExplorer({
   const playbackStartedRef = useRef(false);
   const playerReadyRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
+  const seekOnPlayRef = useRef<number | null>(null);
+  const awaitingPlaybackProgressRef = useRef(false);
   const pendingAutoplayRef = useRef(false);
   const restoredPlaybackTimeRef = useRef<number | null>(null);
   const seekLockUntilRef = useRef(0);
@@ -974,6 +979,24 @@ export function ArchiveSetExplorer({
   const prevTrackPressTsRef = useRef(0);
   const ytPlayerRef = useRef<YouTubePlayer | null>(null);
   const scWidgetRef = useRef<SoundCloudWidget | null>(null);
+  const audioFocusPort = useRef({
+    isSetPlaying: (): boolean => false,
+    pauseSet: () => {},
+    resumeSet: () => {},
+  });
+  const [audioFocus] = useState(() => createSetAudioFocus({
+    isSetPlaying: () => audioFocusPort.current.isSetPlaying(),
+    pauseSet: () => audioFocusPort.current.pauseSet(),
+    resumeSet: () => audioFocusPort.current.resumeSet(),
+  }));
+
+  // Reset ownership before passive child cleanup: closing a preview during
+  // navigation/source replacement must never start an old/new set.
+  useLayoutEffect(() => {
+    audioFocus.reset();
+    setOpenSpotifyIdxs([]);
+    return () => audioFocus.reset();
+  }, [audioFocus, detail.id, activeSource.kind, activeSource.sourceUrl]);
 
   useEffect(() => {
     setQuery(initialQuery);
@@ -1346,6 +1369,8 @@ export function ArchiveSetExplorer({
   };
 
   const selectTrackAtTime = (track: UiTrack, scroll: boolean) => {
+    audioFocus.setIntent();
+    seekOnPlayRef.current = track.start;
     currentTimeRef.current = track.start;
     activeIdxRef.current = track.idx;
     setCurrentTime(track.start);
@@ -1447,6 +1472,7 @@ export function ArchiveSetExplorer({
     soundCloudWarmupFinishingRef.current = false;
     pendingSeekRef.current = null;
     pendingAutoplayRef.current = false;
+    seekOnPlayRef.current = null;
     setPlayerReadyState(false, updateReactState);
 
     if (ytPlayerRef.current?.destroy) {
@@ -1697,7 +1723,11 @@ export function ArchiveSetExplorer({
   };
 
   const seekPlayer = (seconds: number, scroll: boolean, autoplay: boolean) => {
+    traceAudioTiming("seek-command", activeSource.kind);
     const safeSeconds = clamp(seconds, 0, Math.max(0, detail.duration));
+    seekOnPlayRef.current = null;
+    pendingSeekRef.current = null;
+    pendingAutoplayRef.current = false;
     playbackStartedRef.current = true;
     lastListenSampleRef.current = null;
     updateFromTime(safeSeconds, scroll);
@@ -1775,10 +1805,16 @@ export function ArchiveSetExplorer({
   };
 
   const jumpTo = (seconds: number, scroll: boolean, autoplay: boolean) => {
-    seekPlayer(seconds, scroll, autoplay);
+    if (autoplay) audioFocus.requestSetPlayback(() => seekPlayer(seconds, scroll, true));
+    else { audioFocus.setIntent(); seekPlayer(seconds, scroll, false); }
   };
 
-  const pausePlayer = () => {
+  const pausePlayer = (reason: "user" | "preview" = "user") => {
+    traceAudioTiming("pause-command", activeSource.kind);
+    awaitingPlaybackProgressRef.current = false;
+    if (reason === "user") audioFocus.setIntent();
+    pendingAutoplayRef.current = false;
+    isPlayingRef.current = false;
     if (activeSource.kind === "youtube" && ytPlayerRef.current?.pauseVideo && playerReadyRef.current) {
       setIsPlaying(false);
       stopFallbackTick();
@@ -1802,11 +1838,18 @@ export function ArchiveSetExplorer({
     persistPlaybackPositionForTime(currentTimeRef.current, true);
   };
 
-  const playPlayer = () => {
+  const playPlayer = (reason: "user" | "preview" = "user") => {
+    if (reason === "user") {
+      traceAudioTiming("user-play-request", activeSource.kind);
+      audioFocus.requestSetPlayback(() => playPlayer("preview"));
+      return;
+    }
+    traceAudioTiming("play-command", activeSource.kind);
+    awaitingPlaybackProgressRef.current = true;
     playbackStartedRef.current = true;
-    updateFromTime(currentTimeRef.current, false);
+    const startAtSeconds = clamp(pendingSeekRef.current ?? seekOnPlayRef.current ?? currentTimeRef.current, 0, Math.max(0, detail.duration));
+    updateFromTime(startAtSeconds, false);
     publishNowPlayingMetadata();
-    const startAtSeconds = clamp(currentTimeRef.current, 0, Math.max(0, detail.duration));
 
     if (activeSource.kind === "youtube") {
       if (ytEmbedBlocked) {
@@ -1815,10 +1858,10 @@ export function ArchiveSetExplorer({
       }
 
       if (ytPlayerRef.current?.playVideo && playerReadyRef.current) {
-        if (startAtSeconds > 0 && ytPlayerRef.current.seekTo) {
-          ytPlayerRef.current.seekTo(startAtSeconds, true);
-        }
-        ytPlayerRef.current.playVideo();
+        if (seekOnPlayRef.current !== null || pendingSeekRef.current !== null) {
+          pendingSeekRef.current = null;
+          seekPlayer(startAtSeconds, false, true);
+        } else ytPlayerRef.current.playVideo();
       } else {
         pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
@@ -1833,12 +1876,14 @@ export function ArchiveSetExplorer({
       }
 
       if (scWidgetRef.current?.play && playerReadyRef.current) {
-        if (startAtSeconds > 0 && scWidgetRef.current.seekTo) {
-          scWidgetRef.current.seekTo(startAtSeconds * 1000);
+        if (seekOnPlayRef.current !== null || pendingSeekRef.current !== null) {
+          pendingSeekRef.current = null;
+          seekPlayer(startAtSeconds, false, true);
+        } else {
+          setIsPlaying(true);
+          startPlayerPoll();
+          scWidgetRef.current.play();
         }
-        setIsPlaying(true);
-        startPlayerPoll();
-        scWidgetRef.current.play();
       } else {
         pendingSeekRef.current = startAtSeconds;
         pendingAutoplayRef.current = true;
@@ -1848,6 +1893,23 @@ export function ArchiveSetExplorer({
 
     setIsPlaying(true);
     startFallbackProgress();
+  };
+
+  audioFocusPort.current = {
+    isSetPlaying: () => {
+      if (activeSource.kind === "youtube" && playerReadyRef.current && ytPlayerRef.current?.getPlayerState) {
+        return ytPlayerRef.current.getPlayerState() === (window as PlayerWindow).YT?.PlayerState?.PLAYING || pendingAutoplayRef.current;
+      }
+      return isPlayingRef.current || pendingAutoplayRef.current;
+    },
+    pauseSet: () => {
+      pausePlayer("preview");
+    },
+    resumeSet: () => {
+      const position = currentTimeRef.current;
+      if (detail.duration > 0 && position >= detail.duration) return;
+      playPlayer("preview");
+    },
   };
 
   const togglePlay = () => {
@@ -1864,7 +1926,7 @@ export function ArchiveSetExplorer({
       }
 
       if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
-        seekPlayer(0, false, true);
+        jumpTo(0, false, true);
         return;
       }
 
@@ -1879,7 +1941,7 @@ export function ArchiveSetExplorer({
       }
 
       if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
-        seekPlayer(0, false, true);
+        jumpTo(0, false, true);
         return;
       }
 
@@ -1893,7 +1955,7 @@ export function ArchiveSetExplorer({
     }
 
     if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
-      seekPlayer(0, false, true);
+      jumpTo(0, false, true);
       return;
     }
 
@@ -2125,6 +2187,8 @@ export function ArchiveSetExplorer({
                   const YT = playerWindow.YT;
                   const playing = event?.data === YT?.PlayerState?.PLAYING;
                   if (playing) {
+                    traceAudioTiming("playing-event", "youtube");
+                    if (audioFocus.guardSetPlayback()) return;
                     playbackStartedRef.current = true;
                     publishNowPlayingMetadata();
                     setIsPlaying(true);
@@ -2138,6 +2202,7 @@ export function ArchiveSetExplorer({
                     event?.data === YT?.PlayerState?.ENDED ||
                     event?.data === YT?.PlayerState?.CUED;
                   if (paused) {
+                    audioFocus.setPaused();
                     setIsPlaying(false);
                     pollPlayerTime();
                     persistLatestPlayerPosition(true);
@@ -2225,6 +2290,8 @@ export function ArchiveSetExplorer({
             if (soundCloudWarmupActiveRef.current) {
               return;
             }
+            traceAudioTiming("playing-event", "soundcloud");
+            if (audioFocus.guardSetPlayback()) return;
             playbackStartedRef.current = true;
             publishNowPlayingMetadata();
             setIsPlaying(true);
@@ -2236,6 +2303,7 @@ export function ArchiveSetExplorer({
               restoreSoundCloudAfterWarmup(widget, enableSoundCloudControls);
               return;
             }
+            audioFocus.setPaused();
             setIsPlaying(false);
             pollPlayerTime();
             persistLatestPlayerPosition(true);
@@ -2259,6 +2327,10 @@ export function ArchiveSetExplorer({
               if (soundCloudWarmupActiveRef.current) {
                 finishSoundCloudWarmup(widget);
                 return;
+              }
+              if (awaitingPlaybackProgressRef.current) {
+                traceAudioTiming("first-progress-event", "soundcloud");
+                awaitingPlaybackProgressRef.current = false;
               }
               if (!playbackStartedRef.current) {
                 playbackStartedRef.current = true;
@@ -3055,15 +3127,13 @@ export function ArchiveSetExplorer({
 
                           <div className="spotify-inline" hidden={!isSpotifyOpen}>
                             {isSpotifyOpen && track.spotifyTrackId ? (
-                              <iframe
-                                allow="autoplay; clipboard-write; encrypted-media"
-                                frameBorder="0"
-                                height="80"
-                                loading="lazy"
-                                src={`https://open.spotify.com/embed/track/${track.spotifyTrackId}?utm_source=generator&theme=0`}
-                                style={{ borderRadius: 0 }}
+                              <SpotifyTrackPreview
+                                key={`${detail.id}:${activeSource.sourceUrl}:${track.idx}`}
+                                trackId={track.spotifyTrackId}
                                 title={`${track.artist} ${track.title} Spotify embed`}
-                                width="100%"
+                                onRegister={(pause) => audioFocus.register(String(track.idx), pause)}
+                                onPlaying={() => audioFocus.playing(String(track.idx))}
+                                onStopped={() => audioFocus.stopped(String(track.idx))}
                               />
                             ) : null}
                           </div>
