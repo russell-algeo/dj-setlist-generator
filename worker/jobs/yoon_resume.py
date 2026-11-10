@@ -11,6 +11,32 @@ from worker.jobs.yoon_resume_store import QueuePause
 from worker.jobs.yoon_sources import CATALOG, JACKSON
 
 
+async def _recognize_batch_preserving_stops(recognizer, segments, total_segments):
+    """Permit cooldown reselection only after every gathered task settled safely."""
+    original = recognizer.recognize_segment_with_backoff
+    stops = []
+
+    async def observed(segment):
+        try:
+            return await original(segment)
+        except (Exception, asyncio.CancelledError) as exc:
+            if not (isinstance(exc, QueuePause) and str(exc) == 'cooldown'):
+                stops.append(exc)
+            raise
+
+    recognizer.recognize_segment_with_backoff = observed
+    try:
+        return await recognizer.recognize_batch(segments,total_segments=total_segments)
+    except QueuePause as exc:
+        if str(exc) == 'cooldown' and stops:
+            # The common batch raises in segment order. An earlier cooldown must
+            # not hide a later cancellation, owner failure or uncertain error.
+            raise next((stop for stop in stops if isinstance(stop, asyncio.CancelledError)), stops[0])
+        raise
+    finally:
+        recognizer.recognize_segment_with_backoff = original
+
+
 async def recognize_resumable(store, audio: Path, *, slot_index=0):
     with phase('imports'):
         from audio_segmenter import AudioSegmenter
@@ -91,7 +117,7 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
                     for first,end in ranges:
                         with phase('extract'):
                             extracted.extend(await segmenter.create_segments_batch(audio,first,end,executor))
-                    task = asyncio.create_task(recognizer.recognize_batch(extracted,total_segments=source.windows))
+                    task = asyncio.create_task(_recognize_batch_preserving_stops(recognizer,extracted,source.windows))
                     try:
                         while True:
                             done,_ = await asyncio.wait({task},timeout=2)
@@ -109,6 +135,13 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
                         _, after_state = store.clock_state()
                     if after_state['requests'] == requests_before:
                         return 'paused'
+                except QueuePause as exc:
+                    if str(exc) != 'cooldown':
+                        raise
+                    # A peer can extend the durable cooldown after selection.
+                    # The gathered batch has settled; reselect only missing
+                    # windows and honor the existing wait/deadline/owner checks.
+                    continue
                 finally:
                     with phase('cleanup'):
                         for segment in extracted:

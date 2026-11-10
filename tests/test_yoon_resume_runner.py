@@ -30,6 +30,8 @@ class Session:
     instances=[]
     def __init__(self,**kwargs):self.options=kwargs;self.closed=False;self.batches=[];self.instances.append(self)
     async def close(self):self.closed=True
+    async def recognize_segment_with_backoff(self,segment):
+        raise AssertionError("Batch-model fixture must use recognize_batch")
     async def recognize_batch(self,segments,**kwargs):
         self.batches.append([s['index'] for s in segments])
         # Reserve concurrent attempts before finishing any, like the shared engine.
