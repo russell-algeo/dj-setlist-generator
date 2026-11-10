@@ -123,7 +123,7 @@ class HighkinTests(unittest.TestCase):
                 descriptor.update(source_urls=urls) if source==HIGHKIN else descriptor.update(source_url=urls[0])
                 state=initial_state(0)|dict(initialization_mode='fresh',provenance_seeded=source==JACKSON)
                 row=dict(target_set_id='synthetic',status='private_resume_pending',db_now=0,source_metadata={'yoon_fixed_input':descriptor})
-                cur=Mock();cur.fetchone.side_effect=[{'marker':'private-recognition-retention-v1'},{'n':0},{'n':0},{'n':0}]
+                cur=Mock();cur.fetchall.return_value=[];cur.fetchone.side_effect=[{'marker':'private-recognition-retention-v1'},{'n':0},{'n':0},{'n':0}]
                 @contextmanager
                 def locked(**kwargs):yield cur,row,state
                 store=ResumeStore('12345678-1234-1234-1234-123456789012','1','1',connect=Mock())

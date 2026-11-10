@@ -68,7 +68,7 @@ ticket=s.reserve(4);denies(lambda:s.reserve(4))
 check(s.require_owner()['requests']==1)
 r=Recognition(60,None,None,None,None,False,4,was_rate_limited=True,error_type='RateLimited')
 r.http_status=429
-check(s.finish(r,ticket,60) is None)
+check(s.finish(r,ticket,60).delay_seconds == 60)
 candidate,wait=s.next_window();check(candidate['segment_index']==4 and wait>55)
 denies(lambda:s.reserve(4))
 s.release('cooldown_pending');denies(s.claim);check(query('SELECT status FROM ops.set_runs WHERE id=%s',(RUN,))[0]['status']=='private_resume_paused')
@@ -77,15 +77,50 @@ query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_
 query("UPDATE ops.segment_hits SET raw_data=jsonb_set(raw_data,'{private_jackson_v2,next_allowed_at}','0') WHERE set_run_id=%s",(RUN,))
 wrong.claim();check(wrong.require_owner()['continuations']==2)
 denies(s.require_owner)
+for i in range(12):
+    query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_resume,next_allowed_at}','0') WHERE id=%s",(RUN,))
+    query("UPDATE ops.segment_hits SET raw_data=jsonb_set(raw_data,'{private_jackson_v2,next_allowed_at}','0') WHERE set_run_id=%s AND segment_index=4",(RUN,))
+    t=wrong.reserve(4)
+    directive=wrong.finish(r,t,0)
+    check(directive.delay_seconds==min(3600,60*2**(i+1)))
+    check(wrong.require_owner()['throttle_requests']==i+2)
+    check(wrong.require_owner()['requests']-wrong.require_owner()['throttle_requests']==0)
+    denies(lambda:wrong.reserve(4))
+# Model a pre-upgrade exhausted window and old lifetime/continuation counters.
+wrong.release('cooldown_pending')
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_resume}',(source_metadata->'yoon_resume')-'throttle_policy_version'-'throttle_requests') WHERE id=%s",(RUN,))
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(jsonb_set(source_metadata,'{yoon_resume,created_at}','1'),'{yoon_resume,continuations}','300') WHERE id=%s",(RUN,))
+query("UPDATE ops.set_run_leases SET status='exhausted' WHERE set_run_id=%s AND segment_start_index=4",(RUN,))
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_resume,next_allowed_at}','0') WHERE id=%s",(RUN,))
+query("UPDATE ops.segment_hits SET raw_data=jsonb_set(raw_data,'{private_jackson_v2,next_allowed_at}','0') WHERE set_run_id=%s AND segment_index=4",(RUN,))
+wrong=ResumeStore(RUN,'9011','1',connect=connect);wrong.claim()
+check(wrong.require_owner()['throttle_requests']==13)
+check(wrong.require_owner()['continuations']==301)
+check(wrong.next_window()[0]['segment_index']==4)
 ticket=wrong.reserve(4)
 r=Recognition(60,None,None,None,{'matches':[]},False,4)
 r.http_status=200
 wrong.finish(r,ticket,0)
+# A completed effective non429 cap is an intentional pause, never an
+# unexpected authorization failure, and must not append/reopen anything.
+for _ in range(8):
+    cap_ticket=wrong.reserve(9)
+    cap_response=Recognition(135,None,None,None,None,False,9,
+        error_type='ProviderServerError',http_status=503,retry_after_format='absent')
+    wrong.finish(cap_response,cap_ticket,0)
+cap_before=query('SELECT row_to_json(h)::text AS row FROM ops.segment_hits h WHERE set_run_id=%s AND segment_index=9',(RUN,))[0]['row']
+try:
+    wrong.reserve(9)
+except QueuePause as exc:
+    check(str(exc)=='window_attempt_budget')
+else:raise AssertionError('expected intentional exhausted-window pause')
+check(cap_before==query('SELECT row_to_json(h)::text AS row FROM ops.segment_hits h WHERE set_run_id=%s AND segment_index=9',(RUN,))[0]['row'])
+check(query("SELECT status FROM ops.set_run_leases WHERE set_run_id=%s AND segment_start_index=9",(RUN,))[0]['status']=='exhausted')
 check(wrong.summary()[0]['valid']==5)
 check(wrong.next_window()[0]['segment_index']==5)
 hit=query('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=4',(RUN,))[0]['raw_data']['private_jackson_v2']
-check(hit['valid'] and len(hit['attempts'])==2)
-check([a['diagnostic']['http_status'] for a in hit['attempts']]==[429,200])
+check(hit['valid'] and len(hit['attempts'])==14)
+check([a['diagnostic']['http_status'] for a in hit['attempts']]==[429]*13+[200])
 # Distinct pending windows may be in flight together; completed rows cannot be replayed.
 denies(lambda:wrong.reserve(4))
 ticket5=wrong.reserve(5);ticket6=wrong.reserve(6)
@@ -101,6 +136,8 @@ wrong.finish(limited,ticket7,9000)
 denies(lambda:wrong.reserve(7))
 # A slot can only admit its assigned partition, even though workflow owner is shared.
 denies(lambda:wrong.reserve(plan.lease_size,0))
+denies(lambda:wrong.reserve(plan.lease_size,1))
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_resume,next_allowed_at}','0'::jsonb) WHERE id=%s",(RUN,))
 slot_ticket=wrong.reserve(plan.lease_size,1)
 slot_result=Recognition(plan.lease_size*15,None,None,None,{'matches':[]},False,plan.lease_size,http_status=200)
 wrong.finish(slot_result,slot_ticket,0)
@@ -123,7 +160,7 @@ denies(wrong.complete)
 # Existing public retention still applies, while old private attempts survive.
 query("UPDATE ops.segment_hits SET created_at=now()-interval '8 days'")
 query('SELECT ops.cleanup_expired_ops_data()')
-check(query('SELECT count(*)::int AS n FROM ops.segment_hits WHERE set_run_id=%s',(RUN,))[0]['n']==10)
+check(query('SELECT count(*)::int AS n FROM ops.segment_hits WHERE set_run_id=%s',(RUN,))[0]['n']==11)
 check(query("SELECT count(*)::int AS n FROM ops.segment_hits WHERE set_run_id='40000000-0000-4000-8000-000000000099'")[0]['n']==0)
 # Complete durable coverage remains finalizable after all provider budgets expire.
 query("DELETE FROM ops.segment_hits WHERE set_run_id=%s",(RUN,))

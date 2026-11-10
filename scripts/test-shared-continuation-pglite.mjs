@@ -46,6 +46,11 @@ for(const [requests,expected] of [[0,true],[1,false]]) {
   assert.equal((await db.query('SELECT ops.shared_recognition_dispatchable($1,$2::jsonb) AS ok',[id,{shared_recognition:{...state,requests,geometry:undefined,request_limit:8192}}])).rows[0].ok,expected);checks++;
 }
 for(const patch of [{next_allowed_at:now+1000},{review_required:true},{in_flight:true},{continuations:256},{requests:16},{deadline:now-1},{deadline:now+604801},{requests:'1'},{version:2},{policy_version:3},{continuations:-1},{reason:'window_attempt_budget'}]){assert.equal(await eligible({...state,...patch}),false,JSON.stringify(patch));checks++;}
+const throttleState={...state,policy_version:3,requests:1000005,throttle_requests:1000000,continuations:10000,created_at:now-800000,deadline:now-100000};
+assert.equal(await eligible(throttleState),true);checks++;
+for(const patch of [{throttle_requests:999989},{throttle_requests:-1},{throttle_requests:1000006},{throttle_requests:1.5},{throttle_requests:'1'},{throttle_requests:undefined},{next_allowed_at:-1},{next_allowed_at:now+1000},{in_flight:true},{review_required:true},{continuations:-1},{requests:9007199254740992},{geometry:{segment_count:3}},{reason:'window_attempt_budget'}]) {
+  assert.equal(await eligible({...throttleState,...patch}),false,JSON.stringify(patch));checks++;
+}
 await db.query("UPDATE ops.set_runs SET source_metadata=$2 WHERE id=$1",[id,metadata({...state,next_allowed_at:now+1000})]);
 assert.equal((await db.query('SELECT * FROM ops.claim_next_dispatchable_set_run(10)')).rows.length,0);checks++;
 await db.query("UPDATE ops.set_runs SET source_metadata=$2 WHERE id=$1",[id,metadata(state)]);
@@ -83,6 +88,10 @@ const requeued=await db.query(queries.requeue.sql,queries.requeue.params);assert
 assert.equal((await db.query('SELECT count(*)::integer AS n FROM ops.segment_hits')).rows[0].n,2);checks++;
 assert.equal((await db.query('SELECT status FROM ops.set_run_leases')).rows[0].status,'completed');checks++;
 assert.equal((await db.query('SELECT source_metadata FROM ops.set_runs WHERE id=$1',[id])).rows[0].source_metadata.active_workflow_run_id,'awaiting_dispatch');checks++;
+await db.exec('SELECT ops.cleanup_expired_ops_data()');assert.equal((await db.query('SELECT count(*)::integer AS n FROM ops.segment_hits')).rows[0].n,2);checks++;
+await db.query("UPDATE ops.set_runs SET source_metadata=$2 WHERE id=$1",[id,metadata(throttleState)]);
+await db.query(queries.staleRuns.sql,queries.staleRuns.params);
+assert.notEqual((await db.query('SELECT status FROM ops.set_runs WHERE id=$1',[id])).rows[0].status,'failed');checks++;
 await db.exec('SELECT ops.cleanup_expired_ops_data()');assert.equal((await db.query('SELECT count(*)::integer AS n FROM ops.segment_hits')).rows[0].n,2);checks++;
 await db.query("UPDATE ops.set_runs SET source_metadata=$2 WHERE id=$1",[id,metadata({...state,created_at:now-700000,deadline:now-1})]);
 await db.query(queries.staleRuns.sql,queries.staleRuns.params);

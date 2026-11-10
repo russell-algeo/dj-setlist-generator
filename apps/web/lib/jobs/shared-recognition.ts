@@ -7,9 +7,27 @@ export const sharedRecognition = (metadata: Record<string, unknown>) => {
     ? value as Record<string, unknown> : null;
 };
 
+const validThrottleCounters = (state: Record<string, unknown>) => {
+  const integer = (key: string) => typeof state[key] === "number" && Number.isSafeInteger(state[key]) && (state[key] as number) >= 0;
+  const positive = (key: string) => typeof state[key] === "number" && Number.isFinite(state[key]) && (state[key] as number) > 0;
+  return integer("requests") && integer("throttle_requests") && integer("continuations") &&
+    (state.throttle_requests as number) <= (state.requests as number) &&
+    positive("created_at") && positive("deadline") && integer("request_limit") &&
+    (state.request_limit as number) > 0 && (state.request_limit as number) <= 8192 &&
+    typeof state.next_allowed_at === "number" && Number.isFinite(state.next_allowed_at) && state.next_allowed_at >= 0;
+};
+
+// Only clean bounded recognition progress is exempt from ordinary recovery
+// attempts. Preparation/storage failures can occur before any provider request.
+export const sharedRecognitionConsumesRecoveryAttempt = (state: Record<string, unknown> | null) =>
+  !state || !["workflow_time_budget", "recognition_retry_pending", "cooldown_pending",
+    "recognition_requests_in_flight"].includes(String(state.reason));
+
 // Do not infer validity from row presence, recognized=false, or a legacy response.
 export const sharedRecognitionNeedsReview = (state: Record<string, unknown>, inFlight = 0) =>
-  state.review_required !== false || state.in_flight !== false || inFlight > 0;
+  state.review_required !== false || state.in_flight !== false || inFlight > 0 ||
+  (state.policy_version !== undefined && ![1, 2, 3].includes(state.policy_version as number)) ||
+  (state.policy_version === 3 && !validThrottleCounters(state));
 
 export const sharedRecognitionExhausted = (state: Record<string, unknown>, segments: number, now = Date.now() / 1000) => {
   const number = (key: string) => typeof state[key] === "number" && Number.isFinite(state[key]) ? state[key] as number : NaN;
@@ -19,6 +37,17 @@ export const sharedRecognitionExhausted = (state: Record<string, unknown>, segme
   const prepared = Number.isInteger(segments) && segments > 0;
   const limit = prepared ? Math.min(8192, segments * 8, requestLimit) : requestLimit;
   const validGeometry = requests === 0 || (prepared && geometry?.segment_count === segments);
+  if (state.policy_version === 3) {
+    const throttleRequests = number("throttle_requests"), nextAllowed = number("next_allowed_at");
+    // Deadline is retained as audit data. Only non-429 requests exhaust policy 3.
+    return ["window_attempt_budget", "lifetime_request_budget"].includes(String(state.reason)) ||
+      !(created > 0 && deadline > 0 && Number.isFinite(nextAllowed) && nextAllowed >= 0 &&
+        Number.isSafeInteger(continuations) && continuations >= 0 &&
+        Number.isSafeInteger(requestLimit) && requestLimit > 0 && requestLimit <= 8192 && validGeometry &&
+        Number.isSafeInteger(requests) && requests >= 0 &&
+        Number.isSafeInteger(throttleRequests) && throttleRequests >= 0 && throttleRequests <= requests &&
+        requests - throttleRequests < limit);
+  }
   const terminal = ["window_attempt_budget", "lifetime_request_budget", "lifetime_time_budget", "continuation_budget"];
   return terminal.includes(String(state.reason)) || !(created > 0 && deadline > now && deadline <= created + 7 * 86400 &&
     Number.isInteger(continuations) && continuations >= 0 && continuations < 256 &&

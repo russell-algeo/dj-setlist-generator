@@ -18,7 +18,7 @@ import { hasUncommittedPublication, matchesWorkflowOwner, prepareDispatchMetadat
 import { recoveryEligibility } from "./recovery-eligibility";
 import { buildRequeueWithCleanupQuery } from "@/lib/jobs/requeue";
 
-import { sharedRecognition, sharedRecognitionExhausted, sharedRecognitionNeedsReview, validRecognitionHit } from "./shared-recognition";
+import { sharedRecognition, sharedRecognitionConsumesRecoveryAttempt, sharedRecognitionExhausted, sharedRecognitionNeedsReview, validRecognitionHit } from "./shared-recognition";
 
 const db = getDb();
 
@@ -100,7 +100,7 @@ const requeueSetRunForFullRecovery = async (
   const requeued = await db.execute(buildRequeueWithCleanupQuery({
     predicate: recoveryEligibility(run),
     stage: "queued",
-    incrementAttempt: !sharedRecognition((run.sourceMetadata ?? {}) as Record<string, unknown>),
+    incrementAttempt: sharedRecognitionConsumesRecoveryAttempt(sharedRecognition((run.sourceMetadata ?? {}) as Record<string, unknown>)),
   }));
   if (requeued.rows.length === 0) return false;
 
@@ -560,8 +560,13 @@ export const finalizeSetRunWorkflow = async (values: {
     }
     // Only a clean, explicit pause is an automatic continuation. Crashed or
     // malformed state remains available for reconciliation without data loss.
-    if (shared.paused !== true || typeof shared.next_allowed_at !== "number") {
+    if (shared.paused !== true || typeof shared.next_allowed_at !== "number" || !Number.isFinite(shared.next_allowed_at)) {
       return { action: "recognition_requires_reconciliation" as const };
+    }
+    if (sharedRecognitionConsumesRecoveryAttempt(shared) && run.attemptCount >= automaticRecoveryAttemptLimit) {
+      const failed = await markSetRunFailed(run, "Non-throttle workflow recovery exhausted", details);
+      if (failed) await syncSubmissionStatusFromRuns(run.submissionId);
+      return { action: failed ? "failed_after_recovery_limit" as const : "recovery_skipped" as const };
     }
     const requeued = await requeueSetRunForFullRecovery(run, "Durable recognition paused; preserving completed windows for continuation", details);
     if (!requeued) return { action: "recovery_skipped" as const };

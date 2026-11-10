@@ -17,9 +17,10 @@ import uuid
 
 from config import Config
 from recognition_transport import RequestDeferred
+from recognition_retry_policy import (POLICY_VERSION, RetryDirective, actual_throttle,
+    non_throttle_attempts, throttle_streak, throttle_delay, effective_requests)
 
 VERSION = 1
-POLICY_VERSION = 2
 WORKFLOW_SECONDS = 3600
 CONTINUATIONS = 256
 WINDOW_ATTEMPTS = 8
@@ -76,12 +77,13 @@ def audio_fingerprint(path):
 
 
 def budget_reason(state, now, *, request=True):
-    if now + REQUEST_SECONDS >= state['created_at'] + MAX_AGE:
+    durable = state.get('policy_version') == POLICY_VERSION
+    if not durable and now + REQUEST_SECONDS >= state['created_at'] + MAX_AGE:
         return 'lifetime_time_budget'
-    if state['continuations'] > CONTINUATIONS:
+    if not durable and state['continuations'] > CONTINUATIONS:
         return 'continuation_budget'
-    if request and state['requests'] >= state['request_limit']:
-        return 'lifetime_request_budget'
+    if request and (effective_requests(state) if durable else state['requests']) >= state['request_limit']:
+        return 'recognition_requests_in_flight' if durable and state.get('in_flight') else 'lifetime_request_budget'
     if now + 65 >= state['session_started'] + WORKFLOW_SECONDS:
         return 'workflow_time_budget'
     return None
@@ -140,7 +142,7 @@ class RecognitionStore:
         reason = None
         with self.locked() as (cur, row, state):
             cur.execute("SELECT obj_description('ops.claim_next_dispatchable_set_run(integer)'::regprocedure,'pg_proc') AS marker")
-            if cur.fetchone()['marker'] != 'shared-recognition-parallel-v2':
+            if cur.fetchone()['marker'] != 'shared-recognition-throttle-v3':
                 raise RecognitionFence('shared_recognition_migration_required')
             if not state:
                 cur.execute('''SELECT (SELECT count(*) FROM ops.segment_hits WHERE set_run_id=%s)
@@ -149,7 +151,7 @@ class RecognitionStore:
                 if cur.fetchone()['n']:
                     return None
                 state = dict(version=VERSION, policy_version=POLICY_VERSION, created_at=row['db_now'], continuations=0,
-                    requests=0, session_requests=0, deadline=row['db_now']+MAX_AGE, next_allowed_at=0,
+                    requests=0, throttle_requests=0, session_requests=0, deadline=row['db_now']+MAX_AGE, next_allowed_at=0,
                     provider_next_allowed_at=0, consecutive_limits=0, in_flight=False, in_flight_until=0,
                     paused=False, review_required=False, used_owners=[], request_limit=MAX_REQUESTS)
             if state.get('version') != VERSION:
@@ -159,10 +161,16 @@ class RecognitionStore:
             cur.execute("SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s AND raw_data->'shared_recognition'->>'in_flight'='true'", (self.run_id,))
             if state.get('in_flight') or state.get('review_required') or cur.fetchone()['n']:
                 raise RecognitionPause('recognition_requires_reconciliation')
-            if state.get('policy_version', 1) not in (1, POLICY_VERSION):
+            if state.get('policy_version', 1) not in (1, 2, POLICY_VERSION):
                 raise RecognitionFence('shared_policy_version_unknown')
             # Clean legacy evidence remains immutable. Only the scheduling policy
             # upgrades, never an unknown request or a completed response.
+            if state.get('policy_version') != POLICY_VERSION:
+                cur.execute('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s', (self.run_id,))
+                attempts = [a for h in cur.fetchall()
+                            for a in (h['raw_data'].get('shared_recognition') or {}).get('attempts', [])]
+                state['throttle_requests'] = sum(actual_throttle(a) for a in attempts)
+                effective_requests(state)  # Refuse inconsistent accounting.
             state['policy_version'] = POLICY_VERSION
             state.pop('spacing_seconds', None)
             state.pop('active_index', None)
@@ -172,11 +180,7 @@ class RecognitionStore:
                 state.update(owner=self.identity, paused=False, reason=None)
                 self.save(cur,state)
                 return state
-            if state['continuations'] >= CONTINUATIONS:
-                reason = 'continuation_budget'
-            elif now >= state['created_at'] + MAX_AGE:
-                reason = 'lifetime_time_budget'
-            elif state['requests'] >= state['request_limit']:
+            if effective_requests(state) >= state['request_limit']:
                 reason = 'lifetime_request_budget'
             elif now < state['next_allowed_at']:
                 reason = 'cooldown_pending'
@@ -299,9 +303,9 @@ class RecognitionStore:
             attempts=list(data.get('attempts') or [])
             if data.get('valid') or data.get('in_flight'):
                 raise RequestAuthorizationError('shared_window_not_admissible')
-            if len(attempts)>=WINDOW_ATTEMPTS:
+            if non_throttle_attempts(attempts)>=WINDOW_ATTEMPTS:
                 raise RecognitionPause('window_attempt_budget')
-            if row['db_now'] < data.get('next_allowed_at',0):
+            if row['db_now'] < max(data.get('next_allowed_at',0), state.get('provider_next_allowed_at',0)):
                 raise RecognitionPause('cooldown_pending')
             token=str(uuid.uuid4())
             attempts.append(dict(token=token,owner=self.identity,number=state['requests']+1,
@@ -314,6 +318,9 @@ class RecognitionStore:
               VALUES(%s,%s,%s,%s,false,%s::jsonb) ON CONFLICT(set_run_id,segment_index)
               DO UPDATE SET lease_id=excluded.lease_id,raw_data=excluded.raw_data""",
               (self.run_id,lease_id,index,index*step,json.dumps({'shared_recognition':data})))
+            # An idle peer may have paused before this slot's first request.
+            # Actual progress invalidates that provisional no-progress label.
+            if state.get('reason') == 'recognition_no_progress': state['reason'] = None
             state.update(requests=state['requests']+1,session_requests=state['session_requests']+1,
                          in_flight=True,in_flight_until=max(state.get('in_flight_until',0),row['db_now']+REQUEST_SECONDS))
             self.save(cur,state)
@@ -339,6 +346,10 @@ class RecognitionStore:
                 was_rate_limited=result.was_rate_limited,retry_after_seconds=result.retry_after_seconds,
                 retry_after_format=result.retry_after_format)
             attempts[-1].update(finished_at=row['db_now'],outcome='valid' if valid else 'failed',diagnostic=diagnostic)
+            if result.http_status == 429:
+                state['throttle_requests'] = state.get('throttle_requests', 0) + 1
+                delay_seconds = max(delay_seconds, throttle_delay(throttle_streak(attempts), result.retry_after_seconds))
+                state['provider_next_allowed_at'] = max(state.get('provider_next_allowed_at', 0), row['db_now']+delay_seconds)
             delay=max(0,delay_seconds,result.retry_after_seconds or 0) if not valid else 0
             data.update(valid=valid,in_flight=False,attempts=attempts,next_allowed_at=row['db_now']+delay)
             if valid: data['response']=asdict(result)
@@ -355,10 +366,10 @@ class RecognitionStore:
             reason=None
             if result.retry_after_format=='invalid':
                 reason='retry_after_needs_review';state['review_required']=True
-            if len(attempts)>=WINDOW_ATTEMPTS and not valid: reason='window_attempt_budget'
+            if non_throttle_attempts(attempts)>=WINDOW_ATTEMPTS and not valid: reason='window_attempt_budget'
             if reason: state.update(paused=True,reason=reason)
             self.save(cur,state)
-            return reason
+            return RetryDirective(delay)
 
     def settle_lease(self, lease, worker_name):
         with self.locked() as (cur,_,state):
@@ -383,6 +394,16 @@ class RecognitionStore:
                 # Other slots may still be making legitimate concurrent requests.
                 # Their in-flight evidence is not an error; finalization waits for
                 # the workflow and separately fences any genuinely unknown result.
+                if (reason in ('workflow_time_budget','recognition_retry_pending','cooldown_pending')
+                        and state.get('session_requests',0) == 0
+                        and state.get('next_allowed_at',0) <= row['db_now']):
+                    # SDK/extraction failures before HTTP reserve cannot earn
+                    # unlimited continuation just by returning an invalid result.
+                    reason = 'recognition_no_progress'
+                    state['reason'] = None
+                if effective_requests(state) < state['request_limit']:
+                    if reason == 'lifetime_request_budget': reason = 'recognition_retry_pending'
+                    if state.get('reason') == 'lifetime_request_budget': state['reason'] = None
                 state.update(paused=True,reason=state.get('reason') or reason,
                              next_allowed_at=max(state['next_allowed_at'],row['db_now']+wait))
                 if reason in ('prepared_audio_changed','retry_after_needs_review'):

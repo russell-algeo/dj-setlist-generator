@@ -48,7 +48,7 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
 
     def on_attempt(result,ticket,delay_seconds):
         with phase('finish'):
-            store.finish(result,ticket,delay_seconds)
+            return store.finish(result,ticket,delay_seconds)
 
     # Same provider, classification, retry pacing, backoff and concurrency as an
     # ordinary DJ worker. Only private source and durable storage are different.

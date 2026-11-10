@@ -76,8 +76,13 @@ def classify_error(error):
         stack.extend((current.__context__, current.__cause__))
     # Rate limiting has priority even when buried under a wrapper/status error.
     for current in errors:
-        if isinstance(current, RateLimited) or getattr(current, 'status', None) == 429:
+        if getattr(current, 'status', None) == 429:
             return _failure('RateLimited', current, True, 429)
+    for current in errors:
+        if isinstance(current, RateLimited):
+            # An SDK label is not proof of an HTTP response. Do not mint
+            # durable unlimited-throttle credit without an actual status.
+            return _failure('RateLimited', current, True)
     for current in errors:
         status = getattr(current, 'status', None)
         if isinstance(status, int) and 100 <= status <= 599:

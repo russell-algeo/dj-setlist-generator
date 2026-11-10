@@ -222,7 +222,13 @@ describe("set workflow finalization during rollout", () => {
   const payload = { setRunId: "run-1", workflowRunId: "new-workflow", bootstrapResult: "success", recognizeResult: "cancelled", publishResult: "skipped" };
   const sharedMetadata = (patch: Record<string, unknown> = {}) => ({ active_workflow_run_id: "new-workflow", segment_count: 2,
     shared_recognition: { version: 1, created_at: Date.now()/1000, deadline: Date.now()/1000 + 86400,
-      continuations: 12, requests: 5, request_limit: 16, geometry: { segment_count: 2 }, paused: true, review_required: false, in_flight: false, next_allowed_at: Date.now()/1000 + 3600, ...patch } });
+      continuations: 12, requests: 5, request_limit: 16, reason: "cooldown_pending", geometry: { segment_count: 2 }, paused: true, review_required: false, in_flight: false, next_allowed_at: Date.now()/1000 + 3600, ...patch } });
+  it.each(["preparation_failed", "worker_or_storage_error", "recognition_no_progress"])("bounds non-throttle %s recovery", async (reason) => {
+    prepare({ attemptCount: 9, sourceMetadata: sharedMetadata({ policy_version: 3, throttle_requests: 0, reason }) });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("failed_after_recovery_limit");
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+  });
   it("queues a clean durable pause without deleting evidence or consuming legacy retry limits", async () => {
     prepare({ attemptCount: 9, sourceMetadata: sharedMetadata() });
     mockedDb.execute.mockResolvedValueOnce({ rows: [{ id: "run-1" }] });
@@ -252,6 +258,21 @@ describe("set workflow finalization during rollout", () => {
     expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_requires_reconciliation");
     expect(mockedDb.execute).not.toHaveBeenCalled();
     expect(mockedDb.update).not.toHaveBeenCalled();
+  });
+  it("keeps old policy-3 throttle pauses pending beyond legacy lifetime limits", async () => {
+    prepare({ attemptCount: 10000, sourceMetadata: sharedMetadata({ policy_version: 3, requests: 100005,
+      throttle_requests: 100000, continuations: 10000, created_at: Date.now()/1000 - 800000, deadline: Date.now()/1000 - 100000 }) });
+    mockedDb.execute.mockResolvedValueOnce({ rows: [{ id: "run-1" }] });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_continuation_queued");
+    expect(mockedDb.delete).not.toHaveBeenCalled();
+    expect(updateSet).not.toHaveBeenCalledWith(expect.objectContaining({ status: "completed" }));
+  });
+  it("stops policy-3 only when its non-throttle request budget is exhausted", async () => {
+    prepare({ sourceMetadata: sharedMetadata({ policy_version: 3, requests: 100016, throttle_requests: 100000 }) });
+    const { finalizeSetRunWorkflow } = await import("./dispatch");
+    expect((await finalizeSetRunWorkflow(payload)).action).toBe("recognition_budget_exhausted");
+    expect(mockedDb.delete).not.toHaveBeenCalled();
   });
   it("stops bounded durable recognition at total request cap", async () => {
     prepare({ sourceMetadata: sharedMetadata({ requests: 16 }) });

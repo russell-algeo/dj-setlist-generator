@@ -63,11 +63,11 @@ class AdmissionTests(unittest.TestCase):
         cur=Cursor([]);a.lock(cur);self.assertEqual(cur.sql[-1],a.LOCK_SQL)
         cur.fetchone=lambda:{'transaction_isolation':'repeatable read'}
         with self.assertRaises(RuntimeError):a.lock(cur)
-    def test_shared_pipeline_byte_identical(self):
+    def test_shared_pipeline_reviewed_throttle_policy_pins(self):
         here=Path(__file__).resolve().parents[1]
-        # Shared engine bytes stay pinned. Only the private adapter pin changes
-        # for allowlisted diagnostic scopes; provider/budget bytes stay fixed.
-        pins={'worker/jobs/shared_recognition.py': '5b5944064c2402208cfbe83ecad8a4b467e0923dc755212eec0239c07cda672c', 'worker/jobs/yoon_resume.py': 'a7518ca758c52837a31c0d6cbd5c323d4a19ce538c2a59c746cd041915851612', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': '5deb90a7f063df2910c910e5c434d0cb6bdf0f404d1a7eb60a4d2b82b90045f2', 'recognition_transport.py': 'efd802d7fc498eee4b6a4dd4b74e0fa00ef99b3a010ed85ea0a31040d971c63d', 'worker/jobs/yoon_resume_policy.py': 'b0bf11d70ba4d7dc6929a39ec10e69233694a7d4bf8270cd9b0aa1dbbec6fde9', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
+        # Reviewed policy3 changes the common retry engine, not private-only pacing.
+        # Transport, aggregation and source recognizer remain pinned unchanged.
+        pins={'worker/jobs/shared_recognition.py': '062494b4e7009be13327b80e7a7ffc36753f2fb5868f0cc421e15f65ab916c0e', 'worker/jobs/yoon_resume.py': '72cb7eafb8510124547858568cd082544f90506a8abdaeb37d6b49044fe340aa', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': 'd7d93f4ea8ac591baf868533876d5ec90462edf0355700752a6dc9cbd1a075c5', 'recognition_transport.py': '3eb691ef807eb82fe2e69dcdd1f8c398d28e7cc6f6c5d8acf038989693796a4b', 'worker/jobs/yoon_resume_policy.py': '50fca4b2c3413b255b37555783ecf0c2db1ae916df604d8b4813ca4eec0a80f8', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
         for name,expected in pins.items():
             self.assertEqual(hashlib.sha256((here/name).read_bytes()).hexdigest(),expected,name)
     def test_per_run_workflow_group(self):

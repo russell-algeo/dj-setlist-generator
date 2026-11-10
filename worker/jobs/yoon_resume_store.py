@@ -8,11 +8,13 @@ reservation is explicitly uncertain, not silently a valid no-match.
 from contextlib import contextmanager
 from dataclasses import asdict
 import json
+import math
 import re
 import uuid
 from recognition_transport import RequestDeferred
+from recognition_retry_policy import (POLICY_VERSION, RetryDirective, actual_throttle,
+    non_throttle_attempts, throttle_streak, throttle_delay, effective_requests)
 from worker.jobs.yoon_sources import JACKSON, reviewed_source
-from worker.jobs.yoon_window_allowances import window_attempt_limit
 
 from worker.jobs.yoon_resume_policy import (
     CONTINUATION_LIMIT, may_reserve,
@@ -21,6 +23,55 @@ from worker.jobs.yoon_resume_policy import (
 
 class QueuePause(RequestDeferred):
     pass
+
+
+def verified_window_exhaustion(data, index):
+    """Classify only a settled, well-formed refusal; never authorize a retry."""
+    if data.get('valid') is not False or data.get('in_flight') is not False:
+        return False
+    attempts = data.get('attempts')
+    if not isinstance(attempts, list) or not attempts:
+        return False
+    seen_tickets, previous_number = set(), 0
+    for attempt in attempts:
+        if not isinstance(attempt, dict) or attempt.get('state') != 'finished':
+            return False
+        diagnostic = attempt.get('diagnostic')
+        if not isinstance(diagnostic, dict):
+            return False
+        status = diagnostic.get('http_status')
+        if status is not None and (type(status) is not int or not 100 <= status <= 599):
+            return False
+        if (not isinstance(diagnostic.get('outcome'), str) or not diagnostic['outcome']
+                or diagnostic.get('retry_after_format') == 'invalid'):
+            return False
+        for field in ('started_at', 'finished_at'):
+            value = attempt.get(field)
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                return False
+        if attempt['finished_at'] < attempt['started_at']:
+            return False
+        if type(attempt.get('number')) is not int or attempt['number'] <= previous_number:
+            return False
+        previous_number = attempt['number']
+        if not all(isinstance(attempt.get(k), str) and attempt[k].isdecimal()
+                   for k in ('workflow_run_id', 'run_attempt')):
+            return False
+        try:
+            uuid.UUID(attempt['ticket'])
+            if attempt['ticket'] in seen_tickets: return False
+            seen_tickets.add(attempt['ticket'])
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return False
+    response = data.get('response')
+    if (not isinstance(response, dict) or response.get('segment_index') != index
+            or response.get('timestamp') != index * 15
+            or not isinstance(response.get('error_type'), str) or not response['error_type']):
+        return False
+    if (response.get('http_status') != attempts[-1]['diagnostic'].get('http_status')
+            or response['error_type'] != attempts[-1]['diagnostic'].get('outcome')):
+        return False
+    return non_throttle_attempts(attempts) >= 8
 
 
 class ResumeStore:
@@ -90,14 +141,31 @@ class ResumeStore:
                 raise RuntimeError('private_retention_migration_required')
             if row['status'] not in ('private_resume_pending','private_resume_paused'):
                 raise RuntimeError('private_resume_not_released')
-            if state['continuations'] >= CONTINUATION_LIMIT:
-                raise QueuePause('continuation_budget')
             identity = f"{self.owner['workflow_run_id']}:{self.owner['run_attempt']}"
             used = list(state.get('used_owners') or [])
             if identity in used:
                 raise RuntimeError('private_continuation_identity_replayed')
             if state.get('review_required'):
                 raise QueuePause('private_resume_review_required')
+            # Upgrade only a released, certain owner. Completed responses and
+            # one-off allowance receipts are immutable historical evidence.
+            cur.execute("SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s", (self.run_id,))
+            evidence = [(h['raw_data'].get('private_jackson_v2') or {}) for h in cur.fetchall()]
+            if any(d.get('in_flight') for d in evidence):
+                raise RuntimeError('uncertain_request_requires_reconciliation')
+            if state.get('throttle_policy_version') not in (None, POLICY_VERSION):
+                raise RuntimeError('private_throttle_policy_unknown')
+            if state.get('throttle_policy_version') != POLICY_VERSION:
+                state['throttle_requests'] = sum(actual_throttle(a) for d in evidence for a in d.get('attempts', []))
+                effective_requests(state)
+                state['throttle_policy_version'] = POLICY_VERSION
+                # A known 429 exhaustion becomes retryable, never a no-match.
+                cur.execute("""UPDATE ops.set_run_leases l SET status='pending',updated_at=now()
+                    FROM ops.segment_hits h WHERE h.lease_id=l.id AND l.set_run_id=%s
+                    AND l.status='exhausted' AND h.raw_data->'private_jackson_v2'->>'valid'='false'
+                    AND h.raw_data->'private_jackson_v2'->>'in_flight'='false'
+                    AND (SELECT count(*) FROM jsonb_array_elements(h.raw_data->'private_jackson_v2'->'attempts') a
+                      WHERE (a->>'state'='finished' AND a->'diagnostic'->'http_status'='429'::jsonb) IS NOT TRUE) < 8""", (self.run_id,))
             reason = may_reserve(state,now=row['db_now'],session_started=row['db_now'],
                                  session_requests=0,window_attempts=0, windows=self.source.windows)
             if reason:
@@ -287,13 +355,17 @@ class ResumeStore:
             lease = cur.fetchone()
             data = dict((lease.get('raw_data') or {}).get('private_jackson_v2') or {}) if lease else {}
             attempts = list(data.get('attempts') or [])
+            if lease and lease['status'] == 'exhausted' and verified_window_exhaustion(data, index):
+                # finish() already closed this window at its effective cap.
+                # Propagate intentional deferral through the common transport;
+                # do not reopen the lease, append evidence or grant a request.
+                raise QueuePause('window_attempt_budget')
             if not lease or lease['status'] != 'pending' or data.get('valid') or data.get('in_flight'):
                 raise RuntimeError('private_window_not_available')
             reason = may_reserve(state,now=row['db_now'],session_started=state['session_started'],
-                                 session_requests=state['session_requests'],window_attempts=len(attempts),
+                                 session_requests=state['session_requests'],window_attempts=non_throttle_attempts(attempts),
                                  next_allowed_at=data.get('next_allowed_at',0),windows=self.source.windows,
-                                 window_attempt_limit=window_attempt_limit(state, run_id=self.run_id,
-                                     index=index, attempts=attempts))
+                                 window_attempt_limit=8)
             if reason:
                 raise QueuePause(reason)
             state['requests'] += 1
@@ -331,15 +403,18 @@ class ResumeStore:
                 outcome=('recognized' if result.recognized else 'no_match') if valid else result.error_type,
                 delay_seconds=delay_seconds)
             attempts[-1].update(state='finished',finished_at=row['db_now'],diagnostic=diagnostic)
+            if result.http_status == 429:
+                state['throttle_requests'] = state.get('throttle_requests', 0) + 1
+                delay_seconds = max(delay_seconds, throttle_delay(throttle_streak(attempts), result.retry_after_seconds))
+                state['next_allowed_at'] = max(state.get('next_allowed_at', 0), row['db_now']+delay_seconds)
+            delay_seconds = max(0, delay_seconds, result.retry_after_seconds or 0)
             data.update(valid=valid,in_flight=False,attempts=attempts,
-                        next_allowed_at=row['db_now']+max(0,delay_seconds))
+                        next_allowed_at=row['db_now']+delay_seconds)
             response = asdict(result)
             response['error_details'] = None
             data['response'] = response
             reason = 'retry_after_needs_review' if result.retry_after_format == 'invalid' else None
-            limit = window_attempt_limit(state, run_id=self.run_id,
-                                         index=result.segment_index, attempts=attempts)
-            exhausted = not valid and len(attempts)>=limit
+            exhausted = not valid and non_throttle_attempts(attempts)>=8
             cur.execute('''UPDATE ops.segment_hits SET recognized=%s,track_title=%s,artist=%s,
                 shazam_track_id=%s,raw_data=%s::jsonb WHERE id=%s''',
                 (bool(valid and result.recognized),result.track_title if valid else None,
@@ -352,7 +427,7 @@ class ResumeStore:
             if reason:
                 state['review_required'] = True
             self.save_state(cur,state)
-            return reason
+            return RetryDirective(delay_seconds)
 
     def release(self, reason):
         with self.locked() as (cur,row,state):

@@ -15,6 +15,7 @@ from shazamio import Shazam
 from recognition_transport import (SingleAttemptHTTP, RequestAuthorizationError, classify_error,
                                    validate_response)
 
+from recognition_retry_policy import RetryDirective, throttle_delay
 from config import Config
 from worker.pipeline.models import Recognition
 
@@ -173,19 +174,19 @@ class TrackRecognizer:
                 self.transport.end(token)
 
     async def recognize_segment_with_backoff(self, segment: dict) -> Recognition:
-        """Production JitterRetry pacing, with observable attempts and finite time.
+        """Shared retry engine with durable exponential HTTP-429 backoff.
 
-        The original worker's retry group used JitterRetry with MAX_RETRIES,
-        followed by the process-local quota cooldown only after a 429 exhausted
-        that group. Keep that curve, initial jitter and concurrency. The approved
-        additions are valid-only completion, durable attempt callbacks, honoring
-        Retry-After and a continuation deadline instead of an endless quota loop.
+        Preserve JitterRetry for non-throttle failures, initial jitter and
+        concurrency. Actual HTTP429 uses exponential backoff; adapter callbacks
+        persist and return its cross-workflow delay. A bounded continuation
+        returns incomplete evidence, never a manufactured successful no-match.
         """
         deadline = time.monotonic() + self.max_retry_seconds
         if self.continuation_deadline is not None:
             deadline = min(deadline, self.continuation_deadline)
         result = None
         attempt = 0
+        consecutive_throttles = 0
         initial_jitter = True
         while True:
             if not self.single_attempt:
@@ -220,24 +221,28 @@ class TrackRecognizer:
                          and result.retry_after_format != 'invalid')
             delay = 0
             quota_exhausted = False
+            if result.http_status == 429:
+                consecutive_throttles += 1
+            else:
+                consecutive_throttles = 0
             if can_retry:
-                if attempt < self.max_attempts:
-                    delay = self.retry_options.get_timeout(attempt)
-                elif result.was_rate_limited:
-                    # The production outer retry loop starts another retry group
-                    # after quota cooldown. The continuation deadline now bounds it.
+                if result.http_status == 429:
+                    # Actual throttles have no lifetime attempt cap. Durable
+                    # adapters return the persisted streak's delay below.
                     quota_exhausted = True
-                    delay = Config.QUOTA_COOLDOWN_DURATION
+                    delay = throttle_delay(consecutive_throttles, result.retry_after_seconds)
                     attempt = 0
-                    initial_jitter = True
+                elif attempt < self.max_attempts:
+                    delay = self.retry_options.get_timeout(attempt)
                 else:
                     can_retry = False
                 delay = max(delay, result.retry_after_seconds or 0)
             elif result.retry_after_seconds is not None:
-                # Persist even a wait longer than this continuation can service.
                 delay = result.retry_after_seconds
             if self.on_attempt is not None and current['attempted']:
-                self.on_attempt(result, current['ticket'], delay)
+                directive = self.on_attempt(result, current['ticket'], delay)
+                if isinstance(directive, RetryDirective):
+                    delay = max(delay, directive.delay_seconds)
             if result.is_valid or not can_retry:
                 return result
             if quota_exhausted:

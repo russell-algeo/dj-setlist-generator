@@ -71,20 +71,20 @@ class Tests(IsolatedAsyncioTestCase):
         self.assertTrue(result.is_valid)
         self.assertEqual([r[0] for r in recorded],[429,503,200])
         self.assertEqual([r[1] for r in recorded],tickets)
-        self.assertEqual([r[2] for r in recorded],[Config.BASE_DELAY*2,Config.BASE_DELAY*4,0])
+        self.assertEqual([r[2] for r in recorded],[60,Config.BASE_DELAY*2,0])
         self.assertEqual(http.calls,3)
         self.assertNotIn(30,self.waits)
 
-    async def test_quota_cooldown_after_same_retry_group_as_production(self):
+    async def test_throttle_backoff_grows_across_former_retry_group(self):
         recorded=[]
-        rec,http=self.recognizer([Reply(429)]*Config.MAX_RETRIES+[Reply()],
+        rec,http=self.recognizer([Reply(429)]*Config.MAX_RETRIES+[Reply()],max_retry_seconds=86400,
             before_attempt=lambda seg:seg['index'],
             on_attempt=lambda r,t,d:recorded.append(d))
         with patch('track_recognizer.asyncio.sleep',self.sleep):
             result=await rec.recognize_segment_with_backoff(segment(0))
         self.assertTrue(result.is_valid)
         self.assertEqual(http.calls,Config.MAX_RETRIES+1)
-        self.assertEqual(recorded[Config.MAX_RETRIES-1],Config.QUOTA_COOLDOWN_DURATION)
+        self.assertEqual(recorded[:3],[60,120,240])
         self.assertEqual(rec.retry_options.attempts,Config.MAX_RETRIES)
         self.assertEqual(rec.retry_options._random_interval_size,Config.JITTER_INTERVAL_SIZE)
         self.assertEqual(rec.retry_options._max_timeout,Config.MAX_BACKOFF_DELAY)

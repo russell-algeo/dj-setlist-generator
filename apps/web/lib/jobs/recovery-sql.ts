@@ -55,6 +55,7 @@ export const recoverStaleRunsQuery = sql`
       and run.cancel_requested_at is null and run.published_set_id is null
       and run.stage is distinct from 'publishing_committed'
       and run.source_metadata->'shared_recognition'->>'version' = '1'
+      and run.source_metadata->'shared_recognition'->'policy_version' is distinct from '3'::jsonb
       and run.source_metadata->'shared_recognition'->>'review_required' = 'false'
       and run.source_metadata->'shared_recognition'->>'in_flight' = 'false'
       and case when jsonb_typeof(run.source_metadata->'shared_recognition'->'deadline') = 'number'

@@ -5,6 +5,7 @@ runs. This module does not implement a private provider retry strategy.
 """
 from __future__ import annotations
 from worker.jobs.yoon_sources import CATALOG
+from recognition_retry_policy import POLICY_VERSION, effective_requests
 
 WORKFLOW_SECONDS = 60 * 60
 CONTINUATION_LIMIT = 32
@@ -24,11 +25,12 @@ def may_reserve(state, *, now, session_started, session_requests, window_attempt
         raise RuntimeError('private_window_budget_invalid')
     if type(window_attempt_limit) is not int or window_attempt_limit not in (8, 12):
         raise RuntimeError('private_window_attempt_limit_invalid')
-    if now + 65 >= state['created_at'] + MAX_AGE_SECONDS:
+    durable = state.get('throttle_policy_version') == POLICY_VERSION
+    if not durable and now + 65 >= state['created_at'] + MAX_AGE_SECONDS:
         return 'lifetime_time_budget'
-    if state['requests'] >= windows * WINDOW_ATTEMPT_LIMIT:
+    if (effective_requests(state) if durable else state['requests']) >= windows * WINDOW_ATTEMPT_LIMIT:
         return 'lifetime_request_budget'
-    if state['continuations'] > CONTINUATION_LIMIT:
+    if not durable and state['continuations'] > CONTINUATION_LIMIT:
         return 'continuation_budget'
     if now + 65 >= session_started + WORKFLOW_SECONDS:
         return 'workflow_time_budget'
