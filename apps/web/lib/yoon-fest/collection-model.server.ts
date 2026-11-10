@@ -18,6 +18,11 @@ const set = z.object({
   id: z.string().uuid(), slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   title: z.string().min(1), performer: z.string().min(1),
   boundaryStatus: z.enum(["provisional", "reviewed"]), boundaryNote: z.string().min(1),
+  recognitionCoverage: z.object({
+    expectedWindows: z.number().int().positive(), validResponses: z.number().int().nonnegative(),
+    matchedWindows: z.number().int().nonnegative(),
+  }).strict().refine((value) => value.matchedWindows <= value.validResponses &&
+    value.validResponses <= value.expectedWindows, "Invalid recognition coverage").optional(),
   spans: z.array(recordingSpan).min(1),
   audio: z.object({ assetId: z.string().uuid(), revision: z.string().min(1), durationSeconds: z.number().finite().positive(),
     contentType: z.enum(["audio/flac", "audio/mp4", "audio/wav", "audio/mpeg"]),

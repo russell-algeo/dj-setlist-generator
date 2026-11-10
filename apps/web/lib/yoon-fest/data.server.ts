@@ -34,10 +34,12 @@ export async function loadYoonCollection(actor: SessionActor): Promise<YoonColle
     .orderBy(asc(setEntries.position)) : [];
   return yoonCollectionSchema.parse({ collection: "yoon-fest", revision: "neon", sets: rows.map((row) => {
     const metadata = record(row.metadata); const mixInfo = record(metadata.mixInfo);
+    const coverage = record(metadata.summary).recognitionCoverage;
     return { id: row.id, slug: row.slug, title: row.title,
       performer: typeof mixInfo.artist_name === "string" ? mixInfo.artist_name : "Unknown",
       boundaryStatus: metadata.boundaryStatus ?? "provisional",
       boundaryNote: metadata.boundaryNote ?? "Recording boundaries have not been reviewed.",
+      ...(coverage ? { recognitionCoverage: coverage } : {}),
       spans: row.sourceSpans,
       audio: { assetId: row.audioId, revision: row.revision, durationSeconds: Number(row.duration), contentType: row.contentType, sources: row.sources },
       tracks: entries.filter((entry) => entry.setId === row.id).map((entry) => ({ position: entry.position,
@@ -67,7 +69,10 @@ export function toYoonSetDetail(set: YoonSet): ArchiveSetDetail {
     heroImageUrl: null, thumbnailUrl: null, sourcePlatform: null, sourceUrl: null,
     sourceLinks: [], embedUrl: null, duration: set.audio.durationSeconds,
     durationFmt: formatDuration(set.audio.durationSeconds),
-    recognitionRate: tracks.length ? identified.length / tracks.length * 100 : null,
+    // The private importer intentionally inserts identified clusters only. Their
+    // proportion of displayed cards is not the proportion of recognized audio.
+    recognitionRate: set.recognitionCoverage
+      ? 100 * set.recognitionCoverage.matchedWindows / set.recognitionCoverage.expectedWindows : null,
     generatedAt: null, stats: { totalTracks: tracks.length, identifiedTracks: identified.length,
       highOrMediumTracks: tracks.filter((track) => ["HIGH", "MEDIUM"].includes(track.conf)).length,
       distinctArtists: new Set(identified.map((track) => track.artist)).size },

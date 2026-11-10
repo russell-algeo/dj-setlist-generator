@@ -5,7 +5,7 @@ const { select, authorize, joins, predicates, queue } = vi.hoisted(() => ({ sele
 vi.mock("@/lib/db/client", () => ({ getDb: () => ({ select }) }));
 vi.mock("./access.server", () => ({ assertYoonAccess: authorize }));
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }));
-import { loadYoonCollection } from "./data.server";
+import { loadYoonCollection, toYoonSetDetail } from "./data.server";
 const example = fixture.sets[0]!;
 describe("private collection reader", () => {
   beforeEach(() => {
@@ -17,6 +17,12 @@ describe("private collection reader", () => {
     authorize.mockRejectedValue(new Error("Not found")); await expect(loadYoonCollection(actor("outsider"))).rejects.toThrow("Not found"); expect(select).not.toHaveBeenCalled();
   });
   it("ships no recordings when the protected collection contains no rows", async () => expect((await loadYoonCollection(actor())).sets).toEqual([]));
+  it("does not equate identified-only cards with full recognition coverage", () => {
+    expect(toYoonSetDetail(example).recognitionRate).toBeNull();
+    expect(toYoonSetDetail({ ...example, recognitionCoverage: {
+      expectedWindows: 479, validResponses: 479, matchedWindows: 376,
+    } }).recognitionRate).toBeCloseTo(78.496868, 5);
+  });
   it("loads the existing set/entry/media tables with membership on both queries", async () => {
     queue.push([{ id: example.id, slug: example.slug, title: example.title,
       metadata: { mixInfo: { artist_name: example.performer }, boundaryStatus: example.boundaryStatus, boundaryNote: example.boundaryNote },

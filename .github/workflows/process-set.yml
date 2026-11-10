@@ -12,6 +12,15 @@ on:
         required: false
         default: false
         type: boolean
+      private_enrichment_only:
+        description: Spotify metadata only for completed fixed private development run
+        required: false
+        default: false
+        type: boolean
+      private_enrichment_expected:
+        description: Reviewed identity and source/cluster SHA256 pins JSON; no source links
+        required: false
+        type: string
       dispatch_generation:
         description: Non-secret attempt fence assigned by the application dispatcher
         required: false
@@ -57,7 +66,7 @@ permissions:
 
 jobs:
   bootstrap:
-    if: ${{ github.event.inputs.private_analysis != 'true' && github.event.inputs.resume_mode != 'publish_only' }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (github.event.inputs.private_analysis != 'true' && github.event.inputs.resume_mode != 'publish_only' ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -178,7 +187,7 @@ jobs:
   recognize:
     needs:
       - bootstrap
-    if: ${{ github.event.inputs.private_analysis != 'true' && github.event.inputs.resume_mode != 'publish_only' }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (github.event.inputs.private_analysis != 'true' && github.event.inputs.resume_mode != 'publish_only' ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -230,7 +239,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: ${{ always() && github.event.inputs.private_analysis != 'true' && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (always() && github.event.inputs.private_analysis != 'true' && (github.event.inputs.resume_mode == 'publish_only' || needs.bootstrap.result == 'success') ) }}
     needs:
       - bootstrap
       - recognize
@@ -275,7 +284,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: ${{ always() && github.event.inputs.private_analysis != 'true' }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (always() && github.event.inputs.private_analysis != 'true' ) }}
     needs:
       - bootstrap
       - recognize
@@ -305,7 +314,7 @@ jobs:
 
   private-offline-tests:
     # No environment, DB/provider secrets, source input, or artifacts in this job.
-    if: ${{ github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -339,7 +348,7 @@ jobs:
       effective_slot_count: ${{ steps.private_prepare.outputs.effective_slot_count }}
     needs: private-offline-tests
     # Publish on a reviewed, protected ref before dispatch; never execute PR code.
-    if: ${{ github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -387,7 +396,7 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/fixed-analysis"
   private-recognize:
     needs: private-prepare
-    if: ${{ needs.private-prepare.outputs.complete != 'true' }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (needs.private-prepare.outputs.complete != 'true' ) }}
     strategy:
       fail-fast: false
       matrix:
@@ -438,7 +447,7 @@ jobs:
   private-release:
     # Private-only owner cleanup. Never invokes the normal finalizer or dispatcher.
     needs: [private-offline-tests, private-prepare, private-recognize]
-    if: ${{ always() && needs.private-offline-tests.result == 'success' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    if: ${{ github.event.inputs.private_enrichment_only != 'true' && (always() && needs.private-offline-tests.result == 'success' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -458,3 +467,29 @@ jobs:
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
         run: python -m worker.jobs.yoon_once release >/dev/null 2>&1
+
+  private-enrichment:
+    if: ${{ github.event.inputs.private_enrichment_only == 'true' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-publish.txt
+      - name: Enrich completed private run with Spotify only
+        env:
+          WORKER_DEPLOYMENT_TARGET: development
+          PRIVATE_RUN_ID: ${{ github.event.inputs.set_run_id }}
+          PRIVATE_ENRICHMENT_EXPECTED: ${{ github.event.inputs.private_enrichment_expected }}
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m worker.jobs.yoon_spotify_enrich >/dev/null 2>&1

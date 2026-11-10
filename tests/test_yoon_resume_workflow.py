@@ -15,12 +15,12 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn(token,job)
         self.assertIn('python -m worker.jobs.yoon_once release >/dev/null 2>&1',job)
         expr=re.search(r'if: \$\{\{ (.*?) \}\}',job).group(1)
-        for private,target,ref,tests in itertools.product(['true','false',''],['development','production'],['refs/heads/preview','refs/heads/remote-deployment'],['success','failure','cancelled','skipped']):
+        for enrichment,private,target,ref,tests in itertools.product(['true','false',''],['true','false',''],['development','production'],['refs/heads/preview','refs/heads/remote-deployment'],['success','failure','cancelled','skipped']):
             value=expr
-            for key,replacement in {'github.event.inputs.private_analysis':private,'github.event.inputs.deployment_target':target,'github.ref':ref,'github.repository':'russell-algeo/dj-setlist-generator','needs.private-offline-tests.result':tests}.items():
+            for key,replacement in {'github.event.inputs.private_enrichment_only':enrichment,'github.event.inputs.private_analysis':private,'github.event.inputs.deployment_target':target,'github.ref':ref,'github.repository':'russell-algeo/dj-setlist-generator','needs.private-offline-tests.result':tests}.items():
                 value=value.replace(key,repr(replacement))
             actual=eval(value.replace('always()','True').replace('&&',' and '),{'__builtins__':{}},{})
-            self.assertEqual(actual,private=='true' and target=='development' and ref=='refs/heads/preview' and tests=='success')
+            self.assertEqual(actual,enrichment!='true' and private=='true' and target=='development' and ref=='refs/heads/preview' and tests=='success')
     def test_audio_is_attempt_scoped_and_completion_skips_media(self):
         for name in ['private-prepare','private-recognize']:
             self.assertIn('analysis-audio-${{ github.run_id }}-${{ github.run_attempt }}',self.jobs[name])
@@ -42,6 +42,7 @@ class WorkflowTests(unittest.TestCase):
     def test_normal_paths_and_permissions_remain_separate(self):
         for name in ['bootstrap','recognize','publish','finalize']:
             self.assertIn("github.event.inputs.private_analysis != 'true'",self.jobs[name].split('runs-on:',1)[0])
+            self.assertIn("github.event.inputs.private_enrichment_only != 'true'",self.jobs[name].split('runs-on:',1)[0])
         self.assertIn('permissions:\n  contents: read\n',self.text)
         self.assertNotIn('actions: write',self.text)
         self.assertNotIn('actions: read',self.text)

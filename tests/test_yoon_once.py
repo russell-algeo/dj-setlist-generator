@@ -159,16 +159,22 @@ raise SystemExit(j.main())
 
     def test_workflow_audio_only_existing_auth(self):
         t=(Path(__file__).resolve().parents[1]/'.github/workflows/process-set.yml').read_text()
-        private=t.split('  private-prepare:',1)[1]
+        private=t.split('  private-prepare:',1)[1].split('  private-enrichment:',1)[0]
         self.assertEqual(private.count('actions/upload-artifact'),1)
         self.assertIn('/fixed-analysis/audio/input.mp3',t); self.assertIn('retention-days: 1',t)
         self.assertIn('secrets.DEVELOPMENT_DATABASE_URL_DIRECT',t)
         for forbidden in ['GH_PAT','YOON_SOURCE_URL','INTERNAL_WORKER_SHARED_SECRET','worker.callbacks']:
             self.assertNotIn(forbidden,private)
         self.assertEqual(private.count('>/dev/null 2>&1'),3)
-        ordinary=t.split('  private-prepare:',1)[0]
-        self.assertEqual(ordinary.count("if: ${{ github.event.inputs.private_analysis != 'true'"),2)
-        self.assertEqual(ordinary.count("if: ${{ always() && github.event.inputs.private_analysis != 'true'"),2)
+        import re
+        pieces=re.split(r'^  ([a-z][a-z-]+):\n',t.split('\njobs:\n',1)[1],flags=re.M)
+        jobs=dict(zip(pieces[1::2],pieces[2::2]))
+        for name in ['bootstrap','recognize','publish','finalize']:
+            header=jobs[name].split('runs-on:',1)[0]
+            self.assertIn("github.event.inputs.private_analysis != 'true'",header)
+            self.assertIn("github.event.inputs.private_enrichment_only != 'true'",header)
+        for name in ['private-prepare','private-recognize','private-release']:
+            self.assertIn("github.event.inputs.private_enrichment_only != 'true'",jobs[name].split('runs-on:',1)[0])
         self.assertIn("github.ref == 'refs/heads/preview'",private)
         self.assertIn("github.event.inputs.deployment_target == 'development'",private)
 
