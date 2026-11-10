@@ -17,7 +17,7 @@ const closed=new Promise(r=>child.on('close',r));
 for await(const line of createInterface({input:child.stdout})){
  const req=JSON.parse(line);if(req.done){done=true;checks=req.checks;continue;}
  let index=0;const sql=req.sql.replace(/%s/g,()=>`$${++index}`);
- try{const r=await db.query(sql,req.params);for(const row of r.rows)for(const f of r.fields??[])if(f.dataTypeID===20&&row[f.name]!==null)row[f.name]=Number(row[f.name]);child.stdin.write(JSON.stringify({rows:r.rows,fields:r.fields})+'\n');}
+ try{const r=await db.query(sql,req.params,{parsers:{114:v=>v,3802:v=>v}});for(const row of r.rows)for(const f of r.fields??[])if(f.dataTypeID===20&&row[f.name]!==null)row[f.name]=Number(row[f.name]);child.stdin.write(JSON.stringify({rows:r.rows,fields:r.fields})+'\n');}
  catch(e){child.stdin.write(JSON.stringify({error:e.message})+'\n');}
 }
 assert.equal(await closed,0,stderr);assert(done,stderr);

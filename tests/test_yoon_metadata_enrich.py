@@ -136,13 +136,16 @@ class MetadataTests(unittest.TestCase):
         for guard in ("private_analysis == 'true'", "deployment_target == 'development'",
                       "github.ref == 'refs/heads/preview'", "private_enrichment_only == 'true'"):
             self.assertIn(guard,rich)
-        before,after=rich.split('      - name: Enrich and update the completed private set')
+        before,after=rich.split('      - name: Enrich and stage the completed private set')
         self.assertNotIn('secrets.',before)
         self.assertIn('secrets.DISCOGS_TOKEN',after)
         self.assertIn('secrets.DEVELOPMENT_DATABASE_URL_DIRECT',after)
         self.assertNotIn('upload-artifact',rich)
         self.assertNotIn('persist-credentials: true',rich)
-        self.assertIn('>/dev/null 2>&1',after)
+        self.assertIn('python -m worker.jobs.yoon_metadata_enrich',after)
+        from worker.jobs.yoon_metadata_enrich import diagnostic_code
+        self.assertEqual(diagnostic_code(RuntimeError('private source secret')),'private_metadata_failed')
+        self.assertEqual(diagnostic_code(RuntimeError('private_audience_changed')),'private_audience_changed')
 
     def test_shared_modules_unchanged(self):
         root=Path(__file__).resolve().parents[1]

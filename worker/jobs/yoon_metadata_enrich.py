@@ -1,8 +1,9 @@
-"""Production metadata pipeline with an identity-preserving private publication.
+"""Production metadata collection with a separate guarded private publication.
 
 Recognition, credentials, source media and access are never changed here. A
 reservation is durable before provider calls; interrupted attempts need review.
-Provider conflicts are staged, never silently substituted for verified links.
+Provider results and conflicts are staged in ops. An existing owner connector
+applies reviewed metadata separately; the worker needs no archive write grant.
 """
 from copy import deepcopy
 import json
@@ -152,6 +153,7 @@ def build_apply_plan(row, tracks, snapshot, payload):
 
 class MetadataStore(Store):
     key = KEY
+    stage_only = True  # Worker role intentionally cannot write the private archive.
 
     def __init__(self, expected, workflow, attempt, run_id):
         pins = dict(expected)
@@ -161,17 +163,18 @@ class MetadataStore(Store):
         super().__init__(pins, workflow, attempt, run_id)
 
     def snapshot(self, cur, row):
-        # Parent already holds the common admission lock and run/submission locks.
-        # Parent-row locks also block new FK-linked entries/membership/source rows.
-        cur.execute('SELECT id FROM app.archive_collections WHERE id=%s FOR UPDATE', (row['collection_id'],))
-        cur.execute('SELECT id FROM app.sets WHERE id=%s FOR UPDATE', (row['target_set_id'],))
-        cur.execute('SELECT user_id,role FROM app.archive_collection_members WHERE collection_id=%s ORDER BY user_id FOR SHARE', (row['collection_id'],))
+        # Worker-role metadata collection is ops-only. The separately reviewed
+        # owner publication takes these app locks immediately before applying.
+        if not self.stage_only:
+            cur.execute('SELECT id FROM app.archive_collections WHERE id=%s FOR UPDATE', (row['collection_id'],))
+            cur.execute('SELECT id FROM app.sets WHERE id=%s FOR UPDATE', (row['target_set_id'],))
+            cur.execute('SELECT id FROM app.set_entries WHERE set_id=%s ORDER BY position,id FOR UPDATE', (row['target_set_id'],))
+            cur.execute('SELECT id FROM app.set_media WHERE set_id=%s FOR SHARE', (row['target_set_id'],))
+            cur.execute('SELECT id FROM app.set_source_links WHERE set_id=%s FOR SHARE', (row['target_set_id'],))
+        cur.execute('SELECT user_id,role FROM app.archive_collection_members WHERE collection_id=%s ORDER BY user_id' + ('' if self.stage_only else ' FOR SHARE'), (row['collection_id'],))
         members = [dict(user_id=str(m['user_id']), role=m['role']) for m in cur.fetchall()]
         if members != row['source_metadata']['yoon_resume']['members']:
             raise RuntimeError('private_audience_changed')
-        cur.execute('SELECT id FROM app.set_entries WHERE set_id=%s ORDER BY position,id FOR UPDATE', (row['target_set_id'],))
-        cur.execute('SELECT id FROM app.set_media WHERE set_id=%s FOR SHARE', (row['target_set_id'],))
-        cur.execute('SELECT id FROM app.set_source_links WHERE set_id=%s FOR SHARE', (row['target_set_id'],))
         cur.execute("""SELECT jsonb_build_object(
             'set',(SELECT to_jsonb(s)-'updated_at' FROM app.sets s WHERE id=%s),
             'entries',(SELECT coalesce(jsonb_agg(to_jsonb(e) ORDER BY position,id),'[]'::jsonb)
@@ -227,8 +230,8 @@ class MetadataStore(Store):
                 raise RuntimeError('reviewed_publication_changed')
             plan = build_apply_plan(row, tracks, snapshot, payload)
             prior.update(status='complete', results=payload, results_digest=digest(payload),
-                         conflicts=plan['conflicts'], applied=False)
-            if not plan['conflicts']:
+                         conflicts=plan['conflicts'], applied=False, publication_mode='reviewed-owner-apply')
+            if not plan['conflicts'] and not self.stage_only:
                 self.apply(cur, row, plan)
                 prior.update(applied=True, post_digest=digest(self.snapshot(cur, row)))
             self.write(cur, prior)
@@ -256,7 +259,35 @@ class MetadataStore(Store):
             (json.dumps(plan['set_metadata']),plan['recognition_rate'],row['target_set_id'],row['collection_id']))
 
 
+DIAGNOSTIC_PHASE = 'preflight'
+
+
+def diagnostic_code(error):
+    if getattr(error, 'sqlstate', None) == '42501':
+        return 'database_permission_denied'
+    if getattr(error, 'sqlstate', None) in ('55P03', '40P01', '57014'):
+        return 'database_lock_or_timeout'
+    allowed = {
+        'private_preview_only', 'explicit_rich_metadata_required', 'expected_identity_required',
+        'discogs_credentials_required', 'spotify_credentials_required', 'publication_digest_required',
+        'private_scope_required', 'private_audience_changed', 'published_private_set_required',
+        'private_mix_info_required', 'private_mix_source_url_forbidden', 'reviewed_publication_changed',
+        'private_admission_capacity', 'private_admission_duplicate_target', 'private_admission_uncertain_owner',
+        'private_admission_unknown_state', 'private_admission_uncertain_enrichment',
+        'source_changed', 'completed_cluster_changed', 'completed_private_run_required',
+        'reviewed_fresh_source_required', 'private_identity_changed', 'window_coverage_changed',
+        'window_evidence_changed', 'fresh_window_evidence_changed', 'attempt_evidence_changed',
+        'uncertain_or_changed_enrichment_requires_review', 'prior_spotify_evidence_changed',
+        'prior_spotify_evidence_invalid', 'production_track_count_changed', 'production_recognition_changed',
+        'published_recognition_changed', 'recognized_entry_missing', 'published_entries_not_in_cluster',
+        'enrichment_reservation_changed', 'published_spotify_receipt_conflict', 'published_link_evidence_missing',
+        'production_link_evidence_missing', 'private_entry_identity_ambiguous',
+    }
+    return str(error) if type(error) is RuntimeError and str(error) in allowed else 'private_metadata_failed'
+
+
 def main():
+    global DIAGNOSTIC_PHASE
     if (os.environ.get('WORKER_DEPLOYMENT_TARGET') != 'development'
             or os.environ.get('GITHUB_REF') != 'refs/heads/preview'
             or os.environ.get('GITHUB_REPOSITORY') != 'russell-algeo/dj-setlist-generator'
@@ -278,14 +309,26 @@ def main():
     os.environ.update(ENABLE_SPOTIFY='true',ENABLE_YOUTUBE='true',ENABLE_DISCOGS='true',
         ENABLE_SPOTIFY_PLAYLISTS='false',CREATE_SET_PLAYLISTS='false',ENABLE_CHECKPOINTS='false',NTFY_TOPIC='')
     store = MetadataStore(expected,os.environ['GITHUB_RUN_ID'],os.environ['GITHUB_RUN_ATTEMPT'],os.environ['PRIVATE_RUN_ID'])
+    DIAGNOSTIC_PHASE = 'reservation'
     ticket, tracks, mix = store.reserve()
     if ticket is not None:
-        store.finish(ticket, production_payload(tracks, mix))
+        DIAGNOSTIC_PHASE = 'providers'
+        payload = production_payload(tracks, mix)
+        DIAGNOSTIC_PHASE = 'stage_results'
+        store.finish(ticket, payload)
 
 
 if __name__ == '__main__':
-    with open(os.devnull,'w') as sink, tempfile.TemporaryDirectory(prefix='private-metadata-') as tmp:
-        os.dup2(sink.fileno(),1)
-        os.dup2(sink.fileno(),2)
-        os.chdir(tmp)
-        main()
+    diagnostic_fd = os.dup(2)
+    try:
+        with open(os.devnull,'w') as sink, tempfile.TemporaryDirectory(prefix='private-metadata-') as tmp:
+            os.dup2(sink.fileno(),1)
+            os.dup2(sink.fileno(),2)
+            os.chdir(tmp)
+            main()
+    except Exception as error:
+        os.write(diagnostic_fd, ('private_metadata phase=' + DIAGNOSTIC_PHASE +
+            ' code=' + diagnostic_code(error) + '\n').encode())
+        raise SystemExit(1)
+    finally:
+        os.close(diagnostic_fd)

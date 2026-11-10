@@ -24,6 +24,7 @@ class Cursor:
                 key=field['name'];value=row.get(key)
                 if value is not None and field['dataTypeID']==2950:row[key]=uuid.UUID(value)
                 if value is not None and field['dataTypeID']==1700:row[key]=Decimal(str(value))
+                if value is not None and field['dataTypeID'] in (114,3802):row[key]=json.loads(value)
     def fetchone(self): return self.rows[0] if self.rows else None
     def fetchall(self): return self.rows
 class Conn:
@@ -84,8 +85,22 @@ for position,index in enumerate((0,2),1):
         end_time_seconds,confidence,detection_count,cluster_density,cluster_span,metadata)
         VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)''',
         (entry_id,sid,position,track['artist'],track['title'],track['start_time'],track['end_time'],track['confidence'],track['detection_count'],track['cluster_density'],track['cluster_span'],json.dumps(meta)))
+# Include one legitimately seeded legacy window so origin locking/fingerprints
+# are exercised along with the fresh per-attempt evidence.
+origin_id='40000000-0000-4000-8000-000000000001'
+seed=query('SELECT raw_data FROM ops.segment_hits WHERE set_run_id=%s AND segment_index=0',(RUN,))[0]['raw_data']['private_jackson_v2']
+origin_metadata={'yoon_analysis':{'workflow_run_id':'2','status':'partial',
+    'raw_recognitions':[seed['response']],
+    'recognition_diagnostics':{'attempts':[{'segment_index':0,'http_status':200}]}}}
+query("INSERT INTO ops.set_runs(id,submission_id,requested_by,status,source_url,publication_visibility,target_set_id,collection_id,source_metadata) VALUES(%s,%s,'owner','private_analysis_partial','local:synthetic','private',%s,%s,%s::jsonb)",(origin_id,sub,sid,col,json.dumps(origin_metadata)))
+origin_hash=query("SELECT encode(digest(source_metadata::text,'sha256'),'hex') AS hash FROM ops.set_runs WHERE id=%s",(origin_id,))[0]['hash']
+pin=dict(run_id=origin_id,metadata_sha256=origin_hash,workflow_run_id='2',valid_windows=1)
+state['origin']=pin
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_resume}',%s::jsonb) WHERE id=%s",(json.dumps(state),RUN))
+seed.update(origin=dict(pin,segment_index=0),attempts=[])
+query('UPDATE ops.segment_hits SET raw_data=%s::jsonb WHERE set_run_id=%s AND segment_index=0',(json.dumps({'private_jackson_v2':seed}),RUN))
 expected=dict(target_set_id=sid,collection_id=col,submission_id=sub,requested_by='owner',source_digest=digest({}),cluster_digest=digest(tracks))
-s=object.__new__(MetadataStore);s.run_id=RUN;s.connect=connect;s.owner={'workflow_run_id':'1','run_attempt':'1'};s.expected=expected
+s=object.__new__(MetadataStore);s.stage_only=False;s.run_id=RUN;s.connect=connect;s.owner={'workflow_run_id':'1','run_attempt':'1'};s.expected=expected
 with s.locked() as (cur,row,got):
     before=s.snapshot(cur,row)
 s.publication_digest=digest(before)
@@ -108,7 +123,7 @@ payload=build_set_payload(enriched_tracks=[dict(track=Track(**track),metadata={
     'bpm':122 if track['artist']!='Unknown' else None,
     'discogs_url':'https://www.discogs.com/release/123' if track['artist']!='Unknown' else None,
     'platform_matches':{'spotify':{'status':'unverified'},'youtube':{'status':'unverified'}}}) for track in tracks],
-    mix_info=dict(mix,artist_profile_image='https://example.invalid/profile.jpg'))
+    mix_info=dict(mix,artist_profile_image='https://example.invalid/profile.jpg',artist_profile_name='Literal $private_metadata_apply$ marker'))
 denies(lambda:s.finish('wrong',payload))
 s.snapshot=changed_audience
 denies(lambda:s.finish(ticket,payload))
@@ -140,15 +155,58 @@ query('UPDATE app.set_entries SET metadata=%s::jsonb WHERE id=%s',(json.dumps(ol
 s.publication_digest=digest(before)
 query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,ARRAY[%s],%s::jsonb) WHERE id=%s",(KEY,json.dumps(dict(version=1,status='reserved',ticket=ticket,owner=s.owner,input=expected,publication_digest=s.publication_digest)),RUN))
 payload=saved_payload
+# Reproduce the deployment privilege boundary: app SELECT, ops writes only.
+query('CREATE ROLE synthetic_metadata_worker')
+query('GRANT USAGE ON SCHEMA app,ops TO synthetic_metadata_worker')
+query('GRANT SELECT ON ALL TABLES IN SCHEMA app,ops TO synthetic_metadata_worker')
+query('GRANT UPDATE ON ops.set_runs,ops.submissions,ops.segment_hits TO synthetic_metadata_worker')
+query('SET ROLE synthetic_metadata_worker')
+s.stage_only=False
+denies(lambda:s.finish(ticket,payload))  # original app FOR UPDATE was forbidden
+s.stage_only=True
 s.finish(ticket,payload)
 check(s.reserve()==(None,None,None))
+check(query('SELECT count(*) AS n FROM app.set_entries WHERE set_id=%s',(sid,))[0]['n']==2)
+query('RESET ROLE')
+from scripts.yoon_metadata_apply import snapshot_sql as apply_snapshot_sql, prepare_apply, PUBLICATION_KEY
+query("UPDATE ops.submissions SET requested_by='viewer' WHERE id=%s",(sub,))
+check(query(apply_snapshot_sql(RUN))==[])
+query("UPDATE ops.submissions SET requested_by='owner' WHERE id=%s",(sub,))
+query('UPDATE ops.set_runs SET published_set_id=NULL WHERE id=%s',(RUN,))
+check(query(apply_snapshot_sql(RUN))==[])
+query('UPDATE ops.set_runs SET published_set_id=%s WHERE id=%s',(sid,RUN))
+operator_snapshot=json.loads(query(apply_snapshot_sql(RUN))[0]['snapshot_json'])
+operator_plan=prepare_apply(RUN,operator_snapshot)
+def owner_apply():
+    with connect() as conn,conn.transaction(),conn.cursor() as cur:
+        for sql in operator_plan['sql_statements']:cur.execute(sql)
+query("UPDATE app.archive_collection_members SET role='manager' WHERE collection_id=%s AND user_id='viewer'",(col,))
+denies(owner_apply)
+query("UPDATE app.archive_collection_members SET role='viewer' WHERE collection_id=%s AND user_id='viewer'",(col,))
+query("UPDATE ops.submissions SET requested_by='viewer' WHERE id=%s",(sub,))
+denies(owner_apply)
+query("UPDATE ops.submissions SET requested_by='owner' WHERE id=%s",(sub,))
+query('UPDATE ops.set_runs SET published_set_id=NULL WHERE id=%s',(RUN,))
+denies(owner_apply)
+query('UPDATE ops.set_runs SET published_set_id=%s WHERE id=%s',(sid,RUN))
+def stale_isolation():
+    with connect() as conn,conn.transaction(),conn.cursor() as cur:
+        cur.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+        for sql in operator_plan['sql_statements']:cur.execute(sql)
+denies(stale_isolation)
+query("UPDATE ops.set_runs SET source_metadata=source_metadata||'{\"unexpected\":true}'::jsonb WHERE id=%s",(origin_id,))
+denies(owner_apply)
+query("UPDATE ops.set_runs SET source_metadata=source_metadata-'unexpected' WHERE id=%s",(origin_id,))
+owner_apply();owner_apply()  # original reviewed plan replay is a no-op
+check(query("SELECT source_metadata->%s->>'status' AS state FROM ops.set_runs WHERE id=%s",(PUBLICATION_KEY,RUN))[0]['state']=='complete')
 with s.locked() as (cur,row,got):after=s.snapshot(cur,row);receipt=row['source_metadata'][KEY]
-check(len(after['entries'])==28);check(receipt['applied'] is True)
+check(len(after['entries'])==28);check(receipt['applied'] is False)
 check(after['entries'][0]['id']==ids[0]);check(after['entries'][2]['id']==ids[1])
 check(after['entries'][0]['metadata']['privateRecognitionProvenance']==before['entries'][0]['metadata']['privateRecognitionProvenance'])
 for a,b in zip((after['entries'][0],after['entries'][2]),before['entries']):
     check({k:v for k,v in a.items() if k not in ('metadata','position','updated_at')}=={k:v for k,v in b.items() if k not in ('metadata','position','updated_at')})
 check(after['set']['metadata']['boundaryNote']=='preserve')
+check(after['set']['metadata']['mixInfo']['artist_profile_name']=='Literal $private_metadata_apply$ marker')
 check(after['set']['metadata']['summary']['total_tracks']==28)
 check(after['set']['metadata']['mixInfo']['artist_profile_image']=='https://example.invalid/profile.jpg')
 check(after['set']['visibility']=='private')
@@ -157,5 +215,5 @@ check(query('SELECT count(*) AS n FROM app.tracks')[0]['n']==0)
 check(query('SELECT count(*) AS n FROM app.artists')[0]['n']==0)
 # Replayed publication must also verify the post-apply entry state.
 query("UPDATE app.set_entries SET metadata=metadata||'{\"changed\":true}'::jsonb WHERE id=%s",(ids[0],))
-denies(s.reserve)
+denies(owner_apply)
 print(json.dumps({'done':True,'checks':checks}),file=sys.__stdout__,flush=True)

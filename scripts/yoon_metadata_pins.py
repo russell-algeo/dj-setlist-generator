@@ -36,6 +36,7 @@ def snapshot_sql(run_id):
       WHERE r.id='%s'::uuid AND r.publication_visibility='private'
         AND s.visibility='private' AND u.visibility='private'
         AND s.collection_id=r.collection_id AND u.collection_id=r.collection_id
+        AND r.requested_by=u.requested_by AND r.published_set_id=r.target_set_id
         AND r.cancel_requested_at IS NULL AND u.cancel_requested_at IS NULL
         AND r.create_playlist=false AND u.create_playlist=false""" % run_id
 
