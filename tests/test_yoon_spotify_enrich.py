@@ -104,7 +104,7 @@ class PrivateEnrichmentTests(unittest.TestCase):
         conditions=[line for line in old.splitlines() if line.startswith('    if:')]
         self.assertEqual(len(conditions),8)
         self.assertTrue(all("private_enrichment_only != 'true'" in line for line in conditions))
-        job=text.split('  private-enrichment:')[1]
+        job=text.split('  private-enrichment:')[1].split('  private-production-metadata:')[0]
         self.assertNotIn('upload-artifact',job)
         self.assertNotIn('DISCOGS',job)
         self.assertNotIn('YOUTUBE',job)

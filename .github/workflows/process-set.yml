@@ -13,12 +13,12 @@ on:
         default: false
         type: boolean
       private_enrichment_only:
-        description: Spotify metadata only for completed fixed private development run
+        description: Metadata only for completed fixed private development run
         required: false
         default: false
         type: boolean
       private_enrichment_expected:
-        description: Reviewed identity and source/cluster SHA256 pins JSON; no source links
+        description: Reviewed identity and source/cluster/publication pins JSON; no source links
         required: false
         type: string
       dispatch_generation:
@@ -469,7 +469,7 @@ jobs:
         run: python -m worker.jobs.yoon_once release >/dev/null 2>&1
 
   private-enrichment:
-    if: ${{ github.event.inputs.private_enrichment_only == 'true' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    if: ${{ github.event.inputs.private_enrichment_only == 'true' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' && fromJSON(github.event.inputs.private_enrichment_expected || '{}').rich_metadata != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -493,3 +493,34 @@ jobs:
           SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
           PYTHONDONTWRITEBYTECODE: '1'
         run: python -m worker.jobs.yoon_spotify_enrich >/dev/null 2>&1
+
+  private-production-metadata:
+    if: ${{ github.event.inputs.private_enrichment_only == 'true' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' && fromJSON(github.event.inputs.private_enrichment_expected || '{}').rich_metadata == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-publish.txt
+      - name: Test private metadata guards without credentials
+        run: python -m unittest discover -s tests -p test_yoon_metadata_enrich.py
+      - name: Enrich and update the completed private set
+        env:
+          WORKER_DEPLOYMENT_TARGET: development
+          PRIVATE_RUN_ID: ${{ github.event.inputs.set_run_id }}
+          PRIVATE_ENRICHMENT_EXPECTED: ${{ github.event.inputs.private_enrichment_expected }}
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
+          DISCOGS_CONSUMER_KEY: ${{ secrets.DISCOGS_CONSUMER_KEY }}
+          DISCOGS_CONSUMER_SECRET: ${{ secrets.DISCOGS_CONSUMER_SECRET }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m worker.jobs.yoon_metadata_enrich >/dev/null 2>&1

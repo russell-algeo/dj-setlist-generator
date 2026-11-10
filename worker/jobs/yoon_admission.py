@@ -13,7 +13,7 @@ ROWS_SQL = """SELECT r.id,r.target_set_id,r.status,r.source_metadata,
  EXISTS(SELECT 1 FROM ops.set_run_leases l WHERE l.set_run_id=r.id
    AND l.status='claimed') AS claimed_lease
  FROM ops.set_runs r WHERE r.source_metadata ?| ARRAY[
- 'yoon_fixed_input','yoon_resume','yoon_analysis','yoon_spotify_enrichment','yoon_spotify_recheck_v1']"""
+ 'yoon_fixed_input','yoon_resume','yoon_analysis','yoon_spotify_enrichment','yoon_spotify_recheck_v1','yoon_metadata_enrichment_v1']"""
 IDLE = frozenset(('private_analysis_pending','private_analysis_partial',
  'private_analysis_complete','private_analysis_failed','private_resume_pending',
  'private_resume_paused','private_resume_complete','cancelled'))
@@ -44,7 +44,7 @@ def occupied(row):
         raise RuntimeError('private_admission_unknown_state')
     elif row['uncertain_hit'] or row['claimed_lease']:
         raise RuntimeError('private_admission_uncertain_owner')
-    for key in ('yoon_spotify_enrichment','yoon_spotify_recheck_v1'):
+    for key in ('yoon_spotify_enrichment','yoon_spotify_recheck_v1','yoon_metadata_enrichment_v1'):
         receipt = metadata.get(key)
         if receipt is not None and receipt.get('status') != 'complete':
             if receipt.get('status') != 'reserved':
