@@ -64,6 +64,8 @@ candidate,wait=s.next_window();check(candidate['segment_index']==4 and wait==0)
 denies(s.claim)
 denies(lambda:s.reserve(0))
 wrong=ResumeStore(RUN,'9002','1',connect=connect);denies(wrong.require_owner)
+from recognition_lock_faults import run_checks
+checks += run_checks(s,query,index=4)
 ticket=s.reserve(4);denies(lambda:s.reserve(4))
 check(s.require_owner()['requests']==1)
 r=Recognition(60,None,None,None,None,False,4,was_rate_limited=True,error_type='RateLimited')

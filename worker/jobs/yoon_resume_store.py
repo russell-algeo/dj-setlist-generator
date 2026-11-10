@@ -6,6 +6,9 @@ used. A request reservation is committed before transmission; a hard-killed
 reservation is explicitly uncertain, not silently a valid no-match.
 """
 from contextlib import contextmanager
+from worker.recognition_transactions import (
+    recognition_transaction, retry_lock_timeouts,
+)
 from dataclasses import asdict
 import json
 import math
@@ -89,7 +92,7 @@ class ResumeStore:
     @contextmanager
     def locked(self, *, owner=True, admission=False):
         from worker.jobs.yoon_once import PRIVATE_GUARD, validate_descriptor
-        with self.connect() as conn, conn.transaction(), conn.cursor() as cur:
+        with recognition_transaction(self.connect) as conn, conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '5s'")
             cur.execute("SET LOCAL statement_timeout = '15s'")
             if admission:
@@ -132,6 +135,7 @@ class ResumeStore:
             '{yoon_resume}',%s::jsonb),status=%s,stage='private_resume',heartbeat_at=now(),
             updated_at=now() WHERE id=%s''', (json.dumps(state), status, self.run_id))
 
+    @retry_lock_timeouts
     def claim(self):
         from worker.jobs.yoon_once import validate_descriptor
         with self.locked(owner=False, admission=True) as (cur,row,state):
@@ -274,12 +278,14 @@ class ResumeStore:
             raise RuntimeError('private_origin_coverage_changed')
         state['provenance_seeded'] = True
 
+    @retry_lock_timeouts
     def require_owner(self):
         with self.locked() as (_,_,state):
             if state.get('review_required'):
                 raise QueuePause('private_resume_review_required')
             return state
 
+    @retry_lock_timeouts
     def write(self, payload):
         # Adapter for the unchanged fixed-source prepare/transcode implementation.
         mismatch = False
@@ -308,6 +314,7 @@ class ResumeStore:
         if mismatch:
             raise RuntimeError('prepared_audio_changed')
 
+    @retry_lock_timeouts
     def prepare_scheduler(self):
         """Persist the same scheduler geometry ordinary DJ runs use."""
         from worker.scheduler import build_scheduler_plan
@@ -324,6 +331,7 @@ class ResumeStore:
             raise RuntimeError('private_slot_invalid')
         return slots, size
 
+    @retry_lock_timeouts
     def next_windows(self, slot_index=0, limit=10):
         with self.locked() as (cur,row,state):
             slots, size = self._slot(state, slot_index)
@@ -345,6 +353,7 @@ class ResumeStore:
         rows,wait = self.next_windows(limit=1)
         return (rows[0] if rows else None),wait
 
+    @retry_lock_timeouts
     def reserve(self, index, slot_index=0):
         with self.locked() as (cur,row,state):
             slots, size = self._slot(state, slot_index)
@@ -388,6 +397,7 @@ class ResumeStore:
             self.save_state(cur,state)
             return ticket
 
+    @retry_lock_timeouts
     def finish(self, result, ticket, delay_seconds=0):
         """Persist the common engine's attempt and due time; never choose pacing."""
         with self.locked() as (cur,row,state):
@@ -433,6 +443,7 @@ class ResumeStore:
             self.save_state(cur,state)
             return RetryDirective(delay_seconds)
 
+    @retry_lock_timeouts
     def release(self, reason):
         with self.locked() as (cur,row,state):
             if self.coverage_ready(cur):
@@ -470,6 +481,7 @@ class ResumeStore:
             AND raw_data->'private_jackson_v2'->>'in_flight'='false' ''',(self.run_id,))
         return cur.fetchone()['n']==self.source.windows
 
+    @retry_lock_timeouts
     def finalize_ready(self):
         # A clean paused run with every durable response can finish even when all
         # provider budgets are exhausted. No ownership takeover or provider call.
@@ -504,6 +516,7 @@ class ResumeStore:
             self.complete_locked(cur,state)
             return True
 
+    @retry_lock_timeouts
     def summary(self):
         with self.locked() as (cur,_,state):
             cur.execute('''SELECT count(*) FILTER(WHERE status='completed') AS valid,
@@ -512,6 +525,7 @@ class ResumeStore:
                 count(*) AS total FROM ops.set_run_leases WHERE set_run_id=%s''', (self.run_id,))
             return dict(cur.fetchone()),state
 
+    @retry_lock_timeouts
     def complete(self):
         with self.locked() as (cur,_,state):
             self.complete_locked(cur,state)
@@ -533,6 +547,7 @@ class ResumeStore:
                      clustered_setlist=[asdict(t) for t in tracks])
         self.save_state(cur,state,'private_resume_complete')
 
+    @retry_lock_timeouts
     def clock_state(self):
         with self.locked() as (_,row,state):
             return row['db_now'],state
