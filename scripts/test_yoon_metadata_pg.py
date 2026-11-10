@@ -60,8 +60,9 @@ col='20000000-0000-4000-8000-000000000001';sid='10000000-0000-4000-8000-00000000
 query("INSERT INTO app.archive_collections(id,slug,title) VALUES(%s,'synthetic','Synthetic')",(col,))
 query("INSERT INTO app.archive_collection_members(collection_id,user_id,role) VALUES(%s,'owner','manager'),(%s,'viewer','viewer')",(col,col))
 mix=dict(title='Synthetic',artist_name='Synthetic DJ',duration=7200)
-query("INSERT INTO app.sets(id,slug,title,normalized_title,visibility,collection_id,metadata) VALUES(%s,'synthetic','Synthetic','synthetic','private',%s,%s::jsonb)",(sid,col,json.dumps(dict(mixInfo=mix,boundaryNote='preserve'))))
+query("INSERT INTO app.sets(id,slug,title,normalized_title,visibility,collection_id,metadata) VALUES(%s,'synthetic','Synthetic','synthetic','private',%s,%s::jsonb)",(sid,col,json.dumps(dict(mixInfo=mix,boundaryNote='preserve',summary={'recognitionCoverage':{'expectedWindows':479,'validResponses':479,'matchedWindows':330},'privateRecognitionProvenance':{'runId':RUN}}))))
 query("INSERT INTO ops.submissions(id,requested_by,mode,status,visibility,collection_id) VALUES(%s,'owner','set','completed','private',%s)",(sub,col))
+query('UPDATE app.sets SET recognition_rate=68.9 WHERE id=%s',(sid,))
 tracks=[]
 for i in range(28):
     known=i in (0,2)
@@ -213,6 +214,37 @@ check(after['set']['visibility']=='private')
 check(query("SELECT source_metadata->'yoon_resume' AS state FROM ops.set_runs WHERE id=%s",(RUN,))[0]['state']==state)
 check(query('SELECT count(*) AS n FROM app.tracks')[0]['n']==0)
 check(query('SELECT count(*) AS n FROM app.artists')[0]['n']==0)
+# Preserve coverage on the corrected path; then reproduce the exact historical
+# overwrite in this synthetic database to exercise the repair SQL end-to-end.
+check(after['set']['metadata']['summary']['recognitionCoverage']['matchedWindows']==330)
+check(float(after['set']['recognition_rate'])==68.9)
+from scripts.yoon_metadata_repair import prepare_repair, REPAIR_KEY
+query("UPDATE app.sets SET metadata=jsonb_set(metadata,'{summary}',%s::jsonb), recognition_rate=%s WHERE id=%s",
+    (json.dumps(payload['metadata']),round((28-26)/28*100,2),sid))
+buggy_snapshot=json.loads(query(apply_snapshot_sql(RUN))[0]['snapshot_json'])
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,%s,%s::jsonb) WHERE id=%s",
+    ('{'+PUBLICATION_KEY+',post_fingerprint}',json.dumps(buggy_snapshot['fingerprints']['publication']),RUN))
+repair_snapshot=json.loads(query(apply_snapshot_sql(RUN))[0]['snapshot_json'])
+repair_plan=prepare_repair(RUN,operator_snapshot,repair_snapshot)
+def owner_repair():
+    with connect() as conn,conn.transaction(),conn.cursor() as cur:
+        for sql in repair_plan['sql_statements']:cur.execute(sql)
+query("UPDATE app.archive_collection_members SET role='manager' WHERE collection_id=%s AND user_id='viewer'",(col,))
+denies(owner_repair)
+query("UPDATE app.archive_collection_members SET role='viewer' WHERE collection_id=%s AND user_id='viewer'",(col,))
+query("UPDATE ops.set_runs SET source_metadata=source_metadata||'{\"unexpected\":true}'::jsonb WHERE id=%s",(origin_id,))
+denies(owner_repair)
+query("UPDATE ops.set_runs SET source_metadata=source_metadata-'unexpected' WHERE id=%s",(origin_id,))
+owner_repair()
+fixed=json.loads(query(apply_snapshot_sql(RUN))[0]['snapshot_json'])
+check(fixed['publication']['set']['metadata']['summary']['recognitionCoverage']['matchedWindows']==330)
+check(fixed['publication']['set']['metadata']['summary']['privateRecognitionProvenance']=={'runId':RUN})
+check(fixed['publication']['set']['metadata']['summary']['total_tracks']==28)
+check(fixed['publication']['set']['recognition_rate']==68.9)
+check(fixed['publication']['set']['metadata'][REPAIR_KEY]['restored_recognition_rate']==68.9)
+for field in ('entries','media','source_links'):check(fixed['publication'][field]==repair_snapshot['publication'][field])
+for field in ('run','hits','members','origin'):check(fixed['fingerprints'][field]==repair_snapshot['fingerprints'][field])
+denies(owner_repair)  # A repeated plan is stale and must not rewrite anything.
 # Replayed publication must also verify the post-apply entry state.
 query("UPDATE app.set_entries SET metadata=metadata||'{\"changed\":true}'::jsonb WHERE id=%s",(ids[0],))
 denies(owner_apply)

@@ -8,15 +8,30 @@ const recordingSpan = z.object({
   recordingId: z.string().min(1), startSample: z.number().int().nonnegative(),
   endSample: z.number().int().positive(), sampleRate: z.number().int().positive(),
 }).strict();
+// Only normalized display fields cross this boundary, never raw provider or source metadata.
+const archiveTrack = z.object({
+  idx: z.number(), artist: z.string(), title: z.string(), start: z.number(), end: z.number().nullable(),
+  startFmt: z.string(), endFmt: z.string().nullable(), conf: z.enum(["HIGH", "MEDIUM", "LOW", "UNCERTAIN"]),
+  albumArt: z.string().nullable(), previewUrl: z.string().nullable(), bpm: z.number().nullable(),
+  energy: z.number().nullable(), dance: z.number().nullable(), key: z.string().nullable(),
+  genres: z.array(z.string()), detailGenres: z.array(z.string()), label: z.string().nullable(), labelUrl: z.string().nullable(),
+  spotifyUrl: z.string().nullable(), youtubeUrl: z.string().nullable(), discogsUrl: z.string().nullable(),
+  linkStatus: z.object({ spotify: z.enum(["confirmed", "legacy", "unverified"]), youtube: z.enum(["confirmed", "legacy", "unverified"]), discogs: z.enum(["confirmed", "legacy", "unverified"]) }),
+  detectionCount: z.number(), clusterDensity: z.number().nullable(), clusterSpan: z.number().nullable(),
+  sourceDeepLink: z.null(),
+}).strict();
 const track = z.object({
   position: z.number().int().positive(), artist: z.string().min(1), title: z.string().min(1),
   startSeconds: z.number().finite().nonnegative(), endSeconds: z.number().finite().positive(),
   confidence: z.enum(["HIGH", "MEDIUM", "LOW", "UNCERTAIN"]),
   spotifyUrl: spotifyTrackUrl.nullable(),
+  presentation: archiveTrack.optional(),
 }).strict();
 const set = z.object({
   id: z.string().uuid(), slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   title: z.string().min(1), performer: z.string().min(1),
+  generatedAt: z.string().nullable().optional(),
+  artistProfileImage: z.string().nullable().optional(),
   boundaryStatus: z.enum(["provisional", "reviewed"]), boundaryNote: z.string().min(1),
   recognitionCoverage: z.object({
     expectedWindows: z.number().int().positive(), validResponses: z.number().int().nonnegative(),

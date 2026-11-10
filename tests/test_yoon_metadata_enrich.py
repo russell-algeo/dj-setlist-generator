@@ -57,7 +57,11 @@ class MetadataTests(unittest.TestCase):
         return payload
 
     def test_full_production_path_and_preserving_apply_plan(self):
-        row,tracks,snapshot=fixture(); before=copy.deepcopy(snapshot)
+        row,tracks,snapshot=fixture()
+        snapshot['set']['recognition_rate']=68.9
+        snapshot['set']['metadata']['summary']={'recognitionCoverage':{'expectedWindows':479,'validResponses':479,'matchedWindows':330},
+            'privateRecognitionProvenance':{'runId':RUN}}
+        before=copy.deepcopy(snapshot)
         payload=self.payload(tracks,snapshot)
         self.assertEqual(len(payload['tracks']),3)
         self.assertEqual(payload['metadata']['total_tracks'],3)
@@ -75,6 +79,11 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(plan['entries'][0]['metadata']['privateRecognitionProvenance'],snapshot['entries'][0]['metadata']['privateRecognitionProvenance'])
         self.assertEqual(plan['set_metadata']['boundaryNote'],'preserve')
         self.assertEqual(plan['set_metadata']['mixInfo']['artist_profile_image'],'https://example.invalid/profile.jpg')
+        self.assertEqual(plan['recognition_rate'],68.9)
+        for key in ('recognitionCoverage','privateRecognitionProvenance'):
+            self.assertEqual(plan['set_metadata']['summary'][key],before['set']['metadata']['summary'][key])
+        self.assertEqual(plan['set_metadata']['summary']['total_tracks'],3)
+        self.assertTrue(plan['set_metadata']['summary']['generated_at'])
         self.assertEqual(snapshot,before)
 
     def test_missing_and_conflicting_verified_links(self):

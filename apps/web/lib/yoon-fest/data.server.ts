@@ -3,6 +3,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { unstable_noStore as noStore } from "next/cache";
 import type { SessionActor } from "@/lib/auth/session";
 import type { ArchiveSetDetail } from "@/lib/archive/types";
+import { mapSetTrack, buildTimeline, buildJourneyPoints } from "@/lib/archive/set-projection";
+import { getString } from "@/lib/archive/utils";
 import { formatDuration } from "@/lib/archive/utils";
 import { getDb } from "@/lib/db/client";
 import { archiveCollections, archiveCollectionMembers, sets, setMedia, setEntries } from "@/lib/db/schema";
@@ -19,7 +21,7 @@ export async function loadYoonCollection(actor: SessionActor): Promise<YoonColle
   const db = getDb();
   const membership = and(eq(archiveCollectionMembers.collectionId, sets.collectionId), eq(archiveCollectionMembers.userId, actor.userId));
   const privateCollection = and(eq(sets.visibility, "private"), eq(archiveCollections.slug, "yoon-fest"));
-  const rows = await db.select({ id: sets.id, slug: sets.slug, title: sets.title, metadata: sets.metadata,
+  const rows = await db.select({ id: sets.id, slug: sets.slug, title: sets.title, metadata: sets.metadata, updatedAt: sets.updatedAt,
     audioId: setMedia.id, revision: setMedia.revision, duration: setMedia.durationSeconds,
     contentType: setMedia.contentType, sourceSpans: setMedia.sourceSpans, sources: setMedia.recordingSources })
     .from(sets).innerJoin(archiveCollections, eq(archiveCollections.id, sets.collectionId))
@@ -27,7 +29,7 @@ export async function loadYoonCollection(actor: SessionActor): Promise<YoonColle
     .where(privateCollection).orderBy(asc(sets.createdAt), asc(sets.id));
   const entries = rows.length ? await db.select({ setId: setEntries.setId, position: setEntries.position,
     artist: setEntries.displayArtist, title: setEntries.displayTitle, start: setEntries.startTimeSeconds,
-    end: setEntries.endTimeSeconds, confidence: setEntries.confidence, metadata: setEntries.metadata })
+    end: setEntries.endTimeSeconds, detectionCount: setEntries.detectionCount, clusterDensity: setEntries.clusterDensity, clusterSpan: setEntries.clusterSpan, confidence: setEntries.confidence, metadata: setEntries.metadata })
     .from(setEntries).innerJoin(sets, eq(sets.id, setEntries.setId))
     .innerJoin(archiveCollections, eq(archiveCollections.id, sets.collectionId))
     .innerJoin(archiveCollectionMembers, membership).where(privateCollection)
@@ -37,14 +39,26 @@ export async function loadYoonCollection(actor: SessionActor): Promise<YoonColle
     const coverage = record(metadata.summary).recognitionCoverage;
     return { id: row.id, slug: row.slug, title: row.title,
       performer: typeof mixInfo.artist_name === "string" ? mixInfo.artist_name : "Unknown",
+      generatedAt: getString(record(metadata.summary).generated_at) ?? row.updatedAt?.toISOString() ?? null,
+      artistProfileImage: getString(mixInfo.artist_profile_image) ?? getString(mixInfo.artist_image),
       boundaryStatus: metadata.boundaryStatus ?? "provisional",
       boundaryNote: metadata.boundaryNote ?? "Recording boundaries have not been reviewed.",
       ...(coverage ? { recognitionCoverage: coverage } : {}),
       spans: row.sourceSpans,
       audio: { assetId: row.audioId, revision: row.revision, durationSeconds: Number(row.duration), contentType: row.contentType, sources: row.sources },
-      tracks: entries.filter((entry) => entry.setId === row.id).map((entry) => ({ position: entry.position,
-        artist: entry.artist, title: entry.title, startSeconds: entry.start, endSeconds: entry.end ?? Number(row.duration),
-        confidence: entry.confidence, spotifyUrl: record(entry.metadata).spotify_url ?? null })) };
+      tracks: entries.filter((entry) => entry.setId === row.id).map((entry) => {
+        const presentation = mapSetTrack({ position: entry.position, displayArtist: entry.artist,
+          displayTitle: entry.title, startTimeSeconds: entry.start, endTimeSeconds: entry.end ?? Number(row.duration),
+          confidence: entry.confidence, detectionCount: entry.detectionCount ?? 0,
+          clusterDensity: entry.clusterDensity ?? null, clusterSpan: entry.clusterSpan ?? null,
+          entryMetadata: entry.metadata, trackMetadata: {}, trackId: null,
+          trackSpotifyUrl: null, trackYoutubeUrl: null, trackDiscogsUrl: null, sourceDeepLink: null });
+        // Private recording deep links and recognition evidence must never enter page props.
+        presentation.sourceDeepLink = null;
+        return { position: entry.position, artist: entry.artist, title: entry.title,
+          startSeconds: entry.start, endSeconds: entry.end ?? Number(row.duration), confidence: entry.confidence,
+          spotifyUrl: presentation.spotifyUrl, presentation };
+      }) };
   }) });
 }
 
@@ -55,31 +69,29 @@ export async function getYoonSet(actor: SessionActor, slug: string) {
 
 // Explicit projection: never serialize the private source metadata into React props.
 export function toYoonSetDetail(set: YoonSet): ArchiveSetDetail {
-  const tracks = set.tracks.map((track) => ({
-    idx: track.position, artist: track.artist, title: track.title, start: track.startSeconds,
-    end: track.endSeconds, startFmt: formatDuration(track.startSeconds), endFmt: formatDuration(track.endSeconds),
-    conf: track.confidence, albumArt: null, previewUrl: null, bpm: null, energy: null,
-    dance: null, key: null, genres: [], detailGenres: [], label: null, labelUrl: null,
-    spotifyUrl: track.spotifyUrl, youtubeUrl: null, discogsUrl: null, detectionCount: 0,
+  const tracks = set.tracks.map((track) => track.presentation ?? mapSetTrack({
+    position: track.position, displayArtist: track.artist, displayTitle: track.title,
+    startTimeSeconds: track.startSeconds, endTimeSeconds: track.endSeconds, confidence: track.confidence,
+    entryMetadata: { spotify_url: track.spotifyUrl }, trackMetadata: {}, trackId: null,
+    trackSpotifyUrl: null, trackYoutubeUrl: null, trackDiscogsUrl: null, detectionCount: 0,
     clusterDensity: null, clusterSpan: null, sourceDeepLink: null,
   }));
   const identified = tracks.filter((track) => track.title !== "Unknown Track");
   return {
     id: set.id, slug: set.slug, title: set.title, artistName: set.performer, artists: [],
-    heroImageUrl: null, thumbnailUrl: null, sourcePlatform: null, sourceUrl: null,
+    heroImageUrl: set.artistProfileImage ?? null, thumbnailUrl: null, sourcePlatform: null, sourceUrl: null,
     sourceLinks: [], embedUrl: null, duration: set.audio.durationSeconds,
     durationFmt: formatDuration(set.audio.durationSeconds),
     // The private importer intentionally inserts identified clusters only. Their
     // proportion of displayed cards is not the proportion of recognized audio.
     recognitionRate: set.recognitionCoverage
       ? 100 * set.recognitionCoverage.matchedWindows / set.recognitionCoverage.expectedWindows : null,
-    generatedAt: null, stats: { totalTracks: tracks.length, identifiedTracks: identified.length,
+    generatedAt: set.generatedAt ?? null, stats: { totalTracks: tracks.length, identifiedTracks: identified.length,
       highOrMediumTracks: tracks.filter((track) => ["HIGH", "MEDIUM"].includes(track.conf)).length,
       distinctArtists: new Set(identified.map((track) => track.artist)).size },
-    highlightedTracks: [], timeline: tracks.map((track) => ({ idx: track.idx,
-      leftPct: 100 * track.start / set.audio.durationSeconds,
-      widthPct: 100 * (track.end - track.start) / set.audio.durationSeconds,
-      conf: track.conf, label: `${track.artist} - ${track.title}`, timeRange: `${track.startFmt} - ${track.endFmt}` })),
-    tracks, journeyPoints: [],
+    highlightedTracks: buildJourneyPoints(tracks).slice(0, 8)
+      .flatMap((point) => tracks.filter((track) => track.idx === point.idx)),
+    timeline: buildTimeline(tracks, set.audio.durationSeconds),
+    tracks, journeyPoints: buildJourneyPoints(tracks),
   };
 }

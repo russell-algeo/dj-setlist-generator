@@ -143,11 +143,11 @@ def build_apply_plan(row, tracks, snapshot, payload):
             mix[key] = deepcopy(value)
         else:
             mix.setdefault(key, deepcopy(value))
-    metadata.update(mixInfo=mix, summary=deepcopy(payload['metadata']))
-    total = payload['metadata']['total_tracks']
-    uncertain = payload['metadata'].get('uncertain_tracks', 0)
+    summary = deepcopy(metadata.get('summary') or {})
+    summary.update(deepcopy(payload['metadata']))
+    metadata.update(mixInfo=mix, summary=summary)
     return dict(entries=changes, set_metadata=metadata,
-        recognition_rate=round((total - uncertain) / total * 100, 2) if total else None,
+        recognition_rate=snapshot['set'].get('recognition_rate'),
         conflicts=conflicts)
 
 
