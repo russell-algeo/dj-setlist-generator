@@ -31,7 +31,11 @@ JACKSON = Source('jackson-sunday',
 DONALD = Source('donald-two-hour',
     'f8dd7ca1282c64ae4889fdb06fdb3a5e1a373849fe3062f7f47f8c86cdb95d1c',
     4290463660, 3371, 10571, 'owner start anchor; two-hour end provisional')
-CATALOG = {source.id: source for source in (JACKSON, DONALD)}
+# Schedule-derived continuation after Jackson; neither boundary acoustically verified.
+HALO = Source('halo-varga-sunday',
+    'aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae',
+    4290463660, 10320, 15720, 'provisional schedule-derived start and end')
+CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO)}
 
 
 def reviewed_source(value):
