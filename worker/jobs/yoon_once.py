@@ -413,7 +413,9 @@ def main():
                 output.write('effective_slot_count=1\n')
             return 0
         return 0 if asyncio.run(recognize(store, root / 'audio' / 'input.mp3')) == 'complete' else 1
-    except Exception:
+    except Exception as error:
+        from worker.jobs.yoon_recognition_diagnostics import report
+        report('entry', error)
         return 1
 
 

@@ -167,7 +167,8 @@ raise SystemExit(j.main())
         self.assertIn('secrets.DEVELOPMENT_DATABASE_URL_DIRECT',t)
         for forbidden in ['GH_PAT','YOON_SOURCE_URL','INTERNAL_WORKER_SHARED_SECRET','worker.callbacks']:
             self.assertNotIn(forbidden,private)
-        self.assertEqual(private.count('>/dev/null 2>&1'),3)
+        self.assertEqual(private.count('>/dev/null 2>&1'),2)
+        self.assertEqual(private.count('python -m worker.jobs.yoon_recognition_diagnostics recognize'),1)
         import re
         pieces=re.split(r'^  ([a-z][a-z-]+):\n',t.split('\njobs:\n',1)[1],flags=re.M)
         jobs=dict(zip(pieces[1::2],pieces[2::2]))

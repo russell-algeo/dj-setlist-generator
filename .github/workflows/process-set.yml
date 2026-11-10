@@ -439,7 +439,7 @@ jobs:
       - name: Recognize fixed input privately
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-        run: python -m worker.jobs.yoon_once recognize >/dev/null 2>&1
+        run: python -m worker.jobs.yoon_recognition_diagnostics recognize
       # No result/log/checkpoint artifact, cache, summary or publish/finalize callback.
       - if: ${{ always() }}
         run: rm -rf -- "$RUNNER_TEMP/fixed-analysis"
