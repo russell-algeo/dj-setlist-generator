@@ -41,6 +41,10 @@ class RecheckTests(unittest.TestCase):
         def locked(): yield None,row,tracks
         store.locked=locked
         store.write=lambda cur,value:row['source_metadata'].update({store.key:value})
+        store.run_id='synthetic-run'
+        row['target_set_id']='synthetic-set'
+        admission=patch('worker.jobs.yoon_admission.check')
+        admission.start();self.addCleanup(admission.stop)
         ticket,_=store.reserve()
         with self.assertRaises(RuntimeError):store.reserve()
         with self.assertRaises(RuntimeError):store.finish(ticket,[])

@@ -75,6 +75,8 @@ class Tests(unittest.TestCase):
             def execute(self,q,p): calls.append((q,p))
             def fetchone(self): return {'id':RUN}
         class Conn:
+            @contextmanager
+            def transaction(self): yield
             def cursor(self): return Cursor()
         @contextmanager
         def connect(): yield Conn()

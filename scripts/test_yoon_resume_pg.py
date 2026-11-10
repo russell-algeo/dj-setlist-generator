@@ -145,6 +145,12 @@ query("UPDATE ops.set_runs SET status='private_resume_running' WHERE id=%s",(RUN
 denies(lambda:wrong.write({'status':'prepared','audio_sha256':'b'*64,'recognition_mode':'resumable'}))
 check(query("SELECT source_metadata->'yoon_resume'->>'reason' AS reason FROM ops.set_runs WHERE id=%s",(RUN,))[0]['reason']=='prepared_audio_changed')
 check(query("SELECT source_metadata->'yoon_resume'->>'review_required' AS review FROM ops.set_runs WHERE id=%s",(RUN,))[0]['review']=='true')
+# Synthetic reconciliation between deliberately corrupted fixtures. Production
+# admission must reject these states; never use this as a recovery procedure.
+def reconcile_fixture(run):
+    query("UPDATE ops.set_runs SET status='private_resume_paused',source_metadata=jsonb_set(source_metadata,'{yoon_resume,review_required}','false') WHERE id=%s",(run,))
+    query("UPDATE ops.set_run_leases SET status='pending' WHERE set_run_id=%s AND status='claimed'",(run,))
+reconcile_fixture(RUN)
 # New catalog source: empty fresh run, one-time derivative pin, normal queue.
 from worker.jobs.yoon_sources import DONALD
 from worker.jobs.yoon_resume_policy import initial_state
@@ -187,6 +193,7 @@ denies(lambda:d2.write({'status':'prepared','audio_sha256':'d'*64,'recognition_m
 check(query("SELECT source_metadata->'yoon_resume'->>'reason' AS reason FROM ops.set_runs WHERE id=%s",(DONALD_RUN,))[0]['reason']=='prepared_audio_changed')
 check(query("SELECT source_metadata->'yoon_resume'->>'expected_audio_sha256' AS digest FROM ops.set_runs WHERE id=%s",(DONALD_RUN,))[0]['digest']=='c'*64)
 # New catalog source: empty fresh run, one-time derivative pin, normal queue.
+reconcile_fixture(DONALD_RUN)
 from worker.jobs.yoon_sources import HALO
 from worker.jobs.yoon_resume_policy import initial_state
 HALO_RUN='a0000000-0000-4000-8000-000000000030'
@@ -241,6 +248,7 @@ check(d2.finalize_ready())
 check(query("SELECT (source_metadata->'yoon_resume'->>'valid_responses')::int AS n FROM ops.set_runs WHERE id=%s",(HALO_RUN,))[0]['n']==359)
 check(query('SELECT status FROM ops.set_runs WHERE id=%s',(HALO_RUN,))[0]['status']=='private_resume_complete')
 # New catalog source: empty fresh run, one-time derivative pin, normal queue.
+reconcile_fixture(HALO_RUN)
 from worker.jobs.yoon_sources import GRISHA
 from worker.jobs.yoon_resume_policy import initial_state
 GRISHA_RUN='a0000000-0000-4000-8000-000000000040'
@@ -281,4 +289,37 @@ denies(lambda:d2.reserve(0))
 denies(lambda:d2.write({'status':'prepared','audio_sha256':'d'*64,'recognition_mode':'resumable'}))
 check(query("SELECT source_metadata->'yoon_resume'->>'reason' AS reason FROM ops.set_runs WHERE id=%s",(GRISHA_RUN,))[0]['reason']=='prepared_audio_changed')
 check(query("SELECT source_metadata->'yoon_resume'->>'expected_audio_sha256' AS digest FROM ops.set_runs WHERE id=%s",(GRISHA_RUN,))[0]['digest']=='c'*64)
+# Actual admission SQL over the migrated database. PGlite has one backend;
+# contention/interleavings are separately modeled in test_yoon_admission.
+from worker.jobs import yoon_admission as admission
+reconcile_fixture(GRISHA_RUN)
+def admitted(run,target):
+    with connect() as conn, conn.transaction(), conn.cursor() as cur:
+        admission.lock(cur)
+        admission.check(cur,run,target)
+        return True
+for i,r in enumerate((DONALD_RUN,HALO_RUN,GRISHA_RUN),2):
+    target=f'10000000-0000-4000-8000-{i:012d}'
+    query("INSERT INTO app.sets(id,slug,title,normalized_title,visibility,collection_id) SELECT %s,%s,'Synthetic','synthetic','private',collection_id FROM app.sets LIMIT 1",(target,'capacity-'+str(i)))
+    new_run=f'b0000000-0000-4000-8000-{i:012d}'
+    query("""INSERT INTO ops.set_runs(id,submission_id,requested_by,status,source_url,
+      publication_visibility,target_set_id,collection_id,source_metadata)
+      SELECT %s,submission_id,requested_by,'private_resume_paused','local:synthetic-capacity',
+      publication_visibility,%s,collection_id,source_metadata FROM ops.set_runs WHERE id=%s""",(new_run,target,r))
+DONALD_RUN='b0000000-0000-4000-8000-000000000002'
+HALO_RUN='b0000000-0000-4000-8000-000000000003'
+GRISHA_RUN='b0000000-0000-4000-8000-000000000004'
+check(admitted(DONALD_RUN,'10000000-0000-4000-8000-000000000002'))
+query("UPDATE ops.set_runs SET status='private_resume_running' WHERE id=%s",(DONALD_RUN,))
+check(admitted(HALO_RUN,'10000000-0000-4000-8000-000000000003'))
+query("UPDATE ops.set_runs SET status='private_resume_running' WHERE id=%s",(HALO_RUN,))
+denies(lambda:admitted(GRISHA_RUN,'10000000-0000-4000-8000-000000000004'))
+denies(lambda:admitted(DONALD_RUN,'different-target'))
+denies(lambda:admitted(GRISHA_RUN,'10000000-0000-4000-8000-000000000002'))
+query("UPDATE ops.set_runs SET status='private_resume_complete',source_metadata=jsonb_set(source_metadata,'{yoon_spotify_enrichment}',%s::jsonb) WHERE id=%s",(json.dumps({'status':'reserved','owner':{'workflow_run_id':'9900','run_attempt':'1'}}),DONALD_RUN))
+denies(lambda:admitted(GRISHA_RUN,'10000000-0000-4000-8000-000000000004'))
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_spotify_enrichment,status}','\"complete\"') WHERE id=%s",(DONALD_RUN,))
+check(admitted(GRISHA_RUN,'10000000-0000-4000-8000-000000000004'))
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_resume,review_required}','true') WHERE id=%s",(DONALD_RUN,))
+denies(lambda:admitted(GRISHA_RUN,'10000000-0000-4000-8000-000000000004'))
 print(json.dumps({'done':True,'checks':checks}),file=sys.__stdout__,flush=True)

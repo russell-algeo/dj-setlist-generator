@@ -53,7 +53,7 @@ on:
         type: string
 
 concurrency:
-  group: ${{ github.event.inputs.private_analysis == 'true' && 'process-set-private-analysis' || format('process-set-{0}-{1}-{2}', github.ref, github.event.inputs.deployment_target, github.event.inputs.set_run_id) }}
+  group: ${{ github.event.inputs.private_analysis == 'true' && format('process-set-private-analysis-{0}', github.event.inputs.set_run_id) || format('process-set-{0}-{1}-{2}', github.ref, github.event.inputs.deployment_target, github.event.inputs.set_run_id) }}
   cancel-in-progress: ${{ github.event.inputs.private_analysis != 'true' }}
 
 env:

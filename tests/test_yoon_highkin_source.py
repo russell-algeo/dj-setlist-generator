@@ -122,13 +122,14 @@ class HighkinTests(unittest.TestCase):
                 descriptor=dict(source.pins(),source_id=source.id,recognition_mode='resumable')
                 descriptor.update(source_urls=urls) if source==HIGHKIN else descriptor.update(source_url=urls[0])
                 state=initial_state(0)|dict(initialization_mode='fresh',provenance_seeded=source==JACKSON)
-                row=dict(status='private_resume_pending',db_now=0,source_metadata={'yoon_fixed_input':descriptor})
+                row=dict(target_set_id='synthetic',status='private_resume_pending',db_now=0,source_metadata={'yoon_fixed_input':descriptor})
                 cur=Mock();cur.fetchone.side_effect=[{'marker':'private-recognition-retention-v1'},{'n':0},{'n':0},{'n':0}]
                 @contextmanager
                 def locked(**kwargs):yield cur,row,state
                 store=ResumeStore('12345678-1234-1234-1234-123456789012','1','1',connect=Mock())
                 store.source=source;store.locked=locked;store.save_state=Mock()
-                self.assertEqual(store.claim(),urls if source==HIGHKIN else urls[0])
+                with patch('worker.jobs.yoon_admission.check'):
+                    self.assertEqual(store.claim(),urls if source==HIGHKIN else urls[0])
                 store.save_state.assert_called_once()
                 self.assertEqual(state['status'],'preparing')
 

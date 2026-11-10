@@ -67,7 +67,17 @@ GRISHA = Source('grisha-sunday',
     4290463660, 4934.883265306123, 12134.883265306122,
     'provisional schedule-derived boundaries from approximate Jackson anchor',
     start_frame=217628352, end_frame=535148352, sample_rate=44100)
-CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA, HIGHKIN)}
+# Schedule projection only; overlap with Donald is retained, not a verified handoff.
+DEEP_HOUSE = Source('deep-house-dad-capes-sunday',
+    DONALD.sha256, DONALD.bytes, 10364.649795918367, 15764.649795918367,
+    'Sunday 04:00–05:30 is a provisional schedule projection. It overlaps Donald’s provisional two-hour span by 206.350204082 seconds; Donald’s supplied start remains unchanged. Neither handoff has been acoustically verified.', start_frame=457081056, end_frame=695221056, sample_rate=44100)
+# Sunday slot yoon-41, inferred from the approximate Jackson anchor.
+BRETT = Source('brett-johnson-sunday',
+    '8e8bc76d49a050424fe01bad5e368033eda4a41466bb20176397e78686d15fac',
+    4290463660, 4905.116734693877, 12105.116734693878,
+    'provisional schedule-derived boundaries from approximate Jackson anchor',
+    start_frame=216315648, end_frame=533835648, sample_rate=44100)
+CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA, HIGHKIN, DEEP_HOUSE, BRETT)}
 
 
 def reviewed_source(value):

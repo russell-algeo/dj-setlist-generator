@@ -97,11 +97,11 @@ class WorkerIsolationTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/process-set.yml").read_text()
         template = re.search(r"^  group: (.+)$", text, re.MULTILINE).group(1)
 
-        expected = "${{ github.event.inputs.private_analysis == 'true' && 'process-set-private-analysis' || format('process-set-{0}-{1}-{2}', github.ref, github.event.inputs.deployment_target, github.event.inputs.set_run_id) }}"
+        expected = "${{ github.event.inputs.private_analysis == 'true' && format('process-set-private-analysis-{0}', github.event.inputs.set_run_id) || format('process-set-{0}-{1}-{2}', github.ref, github.event.inputs.deployment_target, github.event.inputs.set_run_id) }}"
         self.assertEqual(template, expected)
         def group(branch, target, private=False):
-            return "process-set-private-analysis" if private else f"process-set-{branch}-{target}-same-set-id"
-        self.assertEqual(group("refs/heads/preview", "development", True), "process-set-private-analysis")
+            return "process-set-private-analysis-same-set-id" if private else f"process-set-{branch}-{target}-same-set-id"
+        self.assertEqual(group("refs/heads/preview", "development", True), "process-set-private-analysis-same-set-id")
         self.assertNotEqual(group("refs/heads/preview", "development", True), group("refs/heads/preview", "development"))
         self.assertIn("cancel-in-progress: ${{ github.event.inputs.private_analysis != 'true' }}", text)
 

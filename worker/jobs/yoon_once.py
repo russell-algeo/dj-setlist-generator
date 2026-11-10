@@ -138,7 +138,13 @@ class Store:
             owner_params = (self.owner['workflow_run_id'], self.owner['run_attempt'])
         state = {'complete': 'private_analysis_complete', 'partial': 'private_analysis_partial',
                  'failed': 'private_analysis_failed'}.get(data['status'], 'private_analysis_running')
-        with self.connect() as conn, conn.cursor() as cur:
+        with self.connect() as conn, conn.transaction(), conn.cursor() as cur:
+            if claim:
+                from worker.jobs.yoon_admission import lock, check
+                cur.execute("SET LOCAL lock_timeout = '5s'")
+                cur.execute("SET LOCAL statement_timeout = '15s'")
+                lock(cur)
+                check(cur, self.run_id, self.target[0])
             cur.execute('''UPDATE ops.set_runs r SET
                 source_metadata = jsonb_set(r.source_metadata, '{yoon_analysis}', %s::jsonb),
                 status = %s, stage = 'private_analysis', heartbeat_at = now(), updated_at = now()

@@ -34,11 +34,14 @@ class ResumeStore:
         self.source = JACKSON
 
     @contextmanager
-    def locked(self, *, owner=True):
+    def locked(self, *, owner=True, admission=False):
         from worker.jobs.yoon_once import PRIVATE_GUARD, validate_descriptor
         with self.connect() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '5s'")
             cur.execute("SET LOCAL statement_timeout = '15s'")
+            if admission:
+                from worker.jobs.yoon_admission import lock
+                lock(cur)
             cur.execute('''SELECT r.*, extract(epoch from clock_timestamp())::float8 AS db_now
                 FROM ops.set_runs r, app.sets s, ops.submissions u, app.archive_collections c WHERE ''' + PRIVATE_GUARD + '''
                 AND u.cancel_requested_at IS NULL AND u.create_playlist=false
@@ -78,7 +81,9 @@ class ResumeStore:
 
     def claim(self):
         from worker.jobs.yoon_once import validate_descriptor
-        with self.locked(owner=False) as (cur,row,state):
+        with self.locked(owner=False, admission=True) as (cur,row,state):
+            from worker.jobs.yoon_admission import check
+            check(cur, self.run_id, row["target_set_id"])
             cur.execute("SELECT obj_description('ops.cleanup_expired_ops_data()'::regprocedure,'pg_proc') AS marker")
             if cur.fetchone()['marker']!='private-recognition-retention-v1':
                 raise RuntimeError('private_retention_migration_required')

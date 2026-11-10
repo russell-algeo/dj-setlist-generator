@@ -1,6 +1,6 @@
 import copy
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from worker.jobs.yoon_spotify_enrich import validate, digest, enrich, RUN
 
 class PrivateEnrichmentTests(unittest.TestCase):
@@ -54,6 +54,10 @@ class PrivateEnrichmentTests(unittest.TestCase):
         def locked():yield None,row,[]
         store.locked=locked
         store.write=lambda cur,value:row['source_metadata'].update({KEY:value})
+        store.run_id='synthetic-run'
+        row['target_set_id']='synthetic-set'
+        admission=patch('worker.jobs.yoon_admission.check')
+        admission.start();self.addCleanup(admission.stop)
         ticket,_=store.reserve()
         with self.assertRaises(RuntimeError):store.reserve()
         with self.assertRaises(RuntimeError):store.finish('wrong',[])
