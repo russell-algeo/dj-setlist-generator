@@ -15,13 +15,15 @@ RUN = '80d8f052-2222-45e5-a164-6cfb197ec5d7'
 DONALD_RUN = '63c98e06-08e8-4073-972d-4861a59f5f8d'
 HALO_RUN = 'd157e002-f047-4afe-a560-c7b837d4bdc9'
 GRISHA_RUN = 'f329482f-5c27-4d79-892e-504371e3ffb6'
-REVIEWED_RUNS = frozenset((RUN, DONALD_RUN, HALO_RUN, GRISHA_RUN))
+HIGHKIN_RUN = 'bbf3ec9d-4d8f-415c-a1ac-57c5657db77c'
+REVIEWED_RUNS = frozenset((RUN, DONALD_RUN, HALO_RUN, GRISHA_RUN, HIGHKIN_RUN))
 DONALD_SCOPE = dict(target_set_id='0ce1797e-e55e-41c7-b665-c593c217d218',
     collection_id='1d50c599-3150-43f9-a7e9-50d00fc996b7',
     submission_id='6b6671d9-dc59-48c7-84a4-6e19b0a54940',
     requested_by='65c06333-323d-48a8-9389-f03946d32264')
 HALO_SCOPE = dict(DONALD_SCOPE, target_set_id='b8dcffbe-a858-4306-aad4-9cb7cbf0e757', submission_id='db078f27-682b-49ad-ab21-6d9b8ed94332')
 GRISHA_SCOPE = dict(DONALD_SCOPE, target_set_id='fbd06998-4f88-4c8a-a2cd-1fc50a91280b', submission_id='f74d0374-6ff5-4991-9ebc-12d46c58a84d')
+HIGHKIN_SCOPE = dict(DONALD_SCOPE, target_set_id='8c63960c-e12a-4917-9d19-b45f574c0769', submission_id='a466b70e-0050-4639-84fc-5fe821b54055')
 DONALD_MEMBERS = [dict(user_id=DONALD_SCOPE['requested_by'],role='manager'),
     dict(user_id='d8e3668b-7bf1-4b7e-8530-109c38bb6d89',role='viewer')]
 KEY = 'yoon_spotify_enrichment' 
@@ -43,9 +45,9 @@ def validate(row, state, hits, expected, origin=None):
     fresh = str(row['id']) != RUN
     windows = 359 if str(row['id']) == HALO_RUN else 479
     if fresh:
-        from worker.jobs.yoon_sources import DONALD, HALO, GRISHA, reviewed_source
-        source = GRISHA if str(row['id']) == GRISHA_RUN else HALO if str(row['id']) == HALO_RUN else DONALD
-        scope = GRISHA_SCOPE if str(row['id']) == GRISHA_RUN else HALO_SCOPE if str(row['id']) == HALO_RUN else DONALD_SCOPE
+        from worker.jobs.yoon_sources import DONALD, HALO, GRISHA, HIGHKIN, reviewed_source
+        source = HIGHKIN if str(row['id']) == HIGHKIN_RUN else GRISHA if str(row['id']) == GRISHA_RUN else HALO if str(row['id']) == HALO_RUN else DONALD
+        scope = HIGHKIN_SCOPE if str(row['id']) == HIGHKIN_RUN else GRISHA_SCOPE if str(row['id']) == GRISHA_RUN else HALO_SCOPE if str(row['id']) == HALO_RUN else DONALD_SCOPE
         descriptor = row['source_metadata']['yoon_fixed_input']
         if (reviewed_source(descriptor) != source or origin is not None
                 or any(str(row[k]) != v for k,v in scope.items())

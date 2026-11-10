@@ -77,6 +77,7 @@ class ResumeStore:
             updated_at=now() WHERE id=%s''', (json.dumps(state), status, self.run_id))
 
     def claim(self):
+        from worker.jobs.yoon_once import validate_descriptor
         with self.locked(owner=False) as (cur,row,state):
             cur.execute("SELECT obj_description('ops.cleanup_expired_ops_data()'::regprocedure,'pg_proc') AS marker")
             if cur.fetchone()['marker']!='private-recognition-retention-v1':
@@ -122,7 +123,7 @@ class ResumeStore:
             elif self.source == JACKSON and not state.get('provenance_seeded'):
                 self.seed_valid_evidence(cur,row,state)
             self.save_state(cur,state)
-            return row['source_metadata']['yoon_fixed_input']['source_url']
+            return validate_descriptor(row['source_metadata']['yoon_fixed_input'])
 
     def require_empty_fresh_source(self, cur, state):
         # Only explicit new catalog runs may start without a legacy origin.

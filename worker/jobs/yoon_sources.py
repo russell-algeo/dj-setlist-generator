@@ -1,5 +1,6 @@
 """Finite reviewed private inputs. Capability URLs belong only in private DB rows."""
 from dataclasses import dataclass
+from worker.jobs.yoon_highkin_source import HIGHKIN, reviewed_highkin
 
 
 @dataclass(frozen=True)
@@ -66,12 +67,14 @@ GRISHA = Source('grisha-sunday',
     4290463660, 4934.883265306123, 12134.883265306122,
     'provisional schedule-derived boundaries from approximate Jackson anchor',
     start_frame=217628352, end_frame=535148352, sample_rate=44100)
-CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA)}
+CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA, HIGHKIN)}
 
 
 def reviewed_source(value):
     if not isinstance(value, dict):
         raise RuntimeError('fixed_input_mismatch')
+    if value.get('source_id') == HIGHKIN.id:
+        return reviewed_highkin(value)
     source = CATALOG.get(value.get('source_id', JACKSON.id))
     if (source is None or any(type(value.get(k)) is not type(v) or value.get(k) != v
                               for k, v in source.pins().items())
