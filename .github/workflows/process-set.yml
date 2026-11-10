@@ -318,6 +318,10 @@ jobs:
     if: ${{ github.event.inputs.private_enrichment_only != 'true' && (github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Exercise ambient fencing through the entire offline pipeline without
+      # inheriting the real dispatch identity. Runtime jobs keep the real value.
+      SET_LIST_DISPATCH_GENERATION: '00000000-0000-4000-8000-000000000001'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -330,7 +334,7 @@ jobs:
       - name: Run synthetic Python regression suite
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -m unittest discover -s tests -v
+        run: python scripts/test-recognition-offline.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
