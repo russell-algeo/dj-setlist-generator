@@ -2736,7 +2736,10 @@ export function ArchiveSetExplorer({
                         if (event.currentTarget !== nativeAudioRef.current) return;
                         setPlayerReadyState(true);
                         nativeControllerRef.current?.ready();
-                        if (!flushPendingSeek()) restoreReadyPlayerPosition();
+                        // Native metadata also fires at each original-file seam.
+                        // The controller owns that pending position and play intent;
+                        // generic restoration would replace it with a paused seek.
+                        flushPendingSeek();
                       }}
                       onPlay={(event) => {
                         if (event.currentTarget.paused || !nativeControllerRef.current?.isPlayRequested()) return;
