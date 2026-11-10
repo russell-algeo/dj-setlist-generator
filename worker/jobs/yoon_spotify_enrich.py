@@ -10,6 +10,7 @@ import re
 import tempfile
 import uuid
 from contextlib import contextmanager
+from worker.jobs.yoon_enrichment_registrations import ADDITIONAL_ENRICHMENT_RUNS
 
 RUN = '80d8f052-2222-45e5-a164-6cfb197ec5d7'
 DONALD_RUN = '63c98e06-08e8-4073-972d-4861a59f5f8d'
@@ -18,7 +19,7 @@ GRISHA_RUN = 'f329482f-5c27-4d79-892e-504371e3ffb6'
 HIGHKIN_RUN = 'bbf3ec9d-4d8f-415c-a1ac-57c5657db77c'
 DEEP_HOUSE_RUN = '207d90dd-006c-522d-9928-8727b2a8cefe'
 BRETT_RUN = 'f0a66788-adb4-4c3e-8545-882fcc67ed90'
-REVIEWED_RUNS = frozenset((RUN, DONALD_RUN, HALO_RUN, GRISHA_RUN, HIGHKIN_RUN, DEEP_HOUSE_RUN, BRETT_RUN))
+REVIEWED_RUNS = frozenset((RUN, DONALD_RUN, HALO_RUN, GRISHA_RUN, HIGHKIN_RUN, DEEP_HOUSE_RUN, BRETT_RUN)) | frozenset(ADDITIONAL_ENRICHMENT_RUNS)
 DONALD_SCOPE = dict(target_set_id='0ce1797e-e55e-41c7-b665-c593c217d218',
     collection_id='1d50c599-3150-43f9-a7e9-50d00fc996b7',
     submission_id='6b6671d9-dc59-48c7-84a4-6e19b0a54940',
@@ -41,6 +42,14 @@ def digest(value):
 def validate(row, state, hits, expected, origin=None):
     if str(row['id']) not in REVIEWED_RUNS or row['status'] != 'private_resume_complete':
         raise RuntimeError('completed_private_run_required')
+    additional = ADDITIONAL_ENRICHMENT_RUNS.get(str(row['id']))
+    if additional is not None:
+        required = {'target_set_id', 'collection_id', 'submission_id', 'requested_by',
+                    'source_digest', 'cluster_digest'}
+        if (not isinstance(expected, dict) or not required <= set(expected)
+                or set(expected) - required - {'rich_metadata'}
+                or ('rich_metadata' in expected and expected['rich_metadata'] is not True)):
+            raise RuntimeError('expected_identity_required')
     for key in ('target_set_id', 'collection_id', 'submission_id', 'requested_by'):
         if str(row[key]) != expected[key]:
             raise RuntimeError('private_identity_changed')
@@ -49,10 +58,24 @@ def validate(row, state, hits, expected, origin=None):
     fresh = str(row['id']) != RUN
     windows = 359 if str(row['id']) in (HALO_RUN, DEEP_HOUSE_RUN) else 479
     if fresh:
-        from worker.jobs.yoon_sources import DONALD, HALO, GRISHA, HIGHKIN, DEEP_HOUSE, BRETT, reviewed_source
+        from worker.jobs.yoon_sources import CATALOG, DONALD, HALO, GRISHA, HIGHKIN, DEEP_HOUSE, BRETT, reviewed_source
         source = BRETT if str(row['id']) == BRETT_RUN else DEEP_HOUSE if str(row['id']) == DEEP_HOUSE_RUN else HIGHKIN if str(row['id']) == HIGHKIN_RUN else GRISHA if str(row['id']) == GRISHA_RUN else HALO if str(row['id']) == HALO_RUN else DONALD
         scope = BRETT_SCOPE if str(row['id']) == BRETT_RUN else DEEP_HOUSE_SCOPE if str(row['id']) == DEEP_HOUSE_RUN else HIGHKIN_SCOPE if str(row['id']) == HIGHKIN_RUN else GRISHA_SCOPE if str(row['id']) == GRISHA_RUN else HALO_SCOPE if str(row['id']) == HALO_RUN else DONALD_SCOPE
+        additional = ADDITIONAL_ENRICHMENT_RUNS.get(str(row['id']))
+        if additional is not None:
+            source = CATALOG.get(additional['source_id'])
+            if source is None:
+                raise RuntimeError('reviewed_source_registration_missing')
+            scope = dict(DONALD_SCOPE, target_set_id=additional['target_set_id'],
+                         submission_id=additional['submission_id'])
+            windows = source.windows
         descriptor = row['source_metadata']['yoon_fixed_input']
+        if additional is not None:
+            from worker.jobs.yoon_remaining_sources import JOINED_CATALOG
+            url_key = 'source_urls' if source.id in JOINED_CATALOG else 'source_url'
+            if (not isinstance(descriptor, dict)
+                    or set(descriptor) - set(source.pins()) - {'source_id', 'recognition_mode', url_key}):
+                raise RuntimeError('fixed_input_mismatch')
         if (reviewed_source(descriptor) != source or origin is not None
                 or any(str(row[k]) != v for k,v in scope.items())
                 or state.get('initialization_mode') != 'fresh'

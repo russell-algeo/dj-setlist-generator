@@ -77,12 +77,23 @@ BRETT = Source('brett-johnson-sunday',
     4290463660, 4905.116734693877, 12105.116734693878,
     'provisional schedule-derived boundaries from approximate Jackson anchor',
     start_frame=216315648, end_frame=533835648, sample_rate=44100)
-CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA, HIGHKIN, DEEP_HOUSE, BRETT)}
+# Sunday slot yoon-34. Both handoffs remain schedule-provisional.
+SKY = Source('sky-rivers-adam-rose-sunday',
+    '2fc487280143ebc13dcac26280c0f74eb778a4b7ae6cbea8d9bd4b719636c3e5',
+    4290463660, 4949.766530612245, 13949.766530612245,
+    'provisional schedule-derived boundaries from approximate Jackson anchor; neither handoff acoustically verified',
+    start_frame=218284704, end_frame=615184704, sample_rate=44100)
+CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA, HIGHKIN, DEEP_HOUSE, BRETT, SKY)}
 
+
+from worker.jobs.yoon_remaining_sources import build_remaining_sources, JOINED_CATALOG, reviewed_remaining_joined
+CATALOG.update(build_remaining_sources(Source))
 
 def reviewed_source(value):
     if not isinstance(value, dict):
         raise RuntimeError('fixed_input_mismatch')
+    if value.get('source_id') in JOINED_CATALOG:
+        return reviewed_remaining_joined(value)
     if value.get('source_id') == HIGHKIN.id:
         return reviewed_highkin(value)
     source = CATALOG.get(value.get('source_id', JACKSON.id))

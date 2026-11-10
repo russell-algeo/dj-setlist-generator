@@ -1,0 +1,447 @@
+{
+  "source_plan_sha256": "88571c83552fd6031826c520639fe99e6fc64878d7af3ba1a9cae228ab6df326",
+  "timeline_sha256": "f1cdc6c51c777725f202605d65e53dceeb05860a1fd1699705e411fdccea4d51",
+  "rows": [
+    {
+      "source_id": "choice-friday",
+      "duration": 7200,
+      "windows": 479,
+      "parts": [
+        {
+          "filename": "260619_0119_3-4.wav",
+          "sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+          "bytes": 4290463660,
+          "start_frame": 237065976,
+          "end_frame": 554585976,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "hank-friday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260619_0119_3-4.wav",
+          "sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+          "bytes": 4290463660,
+          "start_frame": 554585976,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 77649624,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "sydka-live-friday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "bytes": 4290463660,
+          "start_frame": 77649624,
+          "end_frame": 315789624,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "jake-mora-friday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "bytes": 4290463660,
+          "start_frame": 315789624,
+          "end_frame": 553929624,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "honeydu-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "bytes": 4290463660,
+          "start_frame": 553929624,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 76993272,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "artur-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "bytes": 4290463660,
+          "start_frame": 76993272,
+          "end_frame": 315133272,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "airgordon-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "bytes": 4290463660,
+          "start_frame": 315133272,
+          "end_frame": 553273272,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "hunter-foshee-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "bytes": 4290463660,
+          "start_frame": 553273272,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260620_0122_3-4.wav",
+          "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 76336920,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "barbie-fish-santiago-gammelli-saturday",
+      "duration": 7200,
+      "windows": 479,
+      "parts": [
+        {
+          "filename": "260620_0122_3-4.wav",
+          "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+          "bytes": 4290463660,
+          "start_frame": 76336920,
+          "end_frame": 393856920,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "pily-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0122_3-4.wav",
+          "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+          "bytes": 4290463660,
+          "start_frame": 393856920,
+          "end_frame": 631996920,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "jay-dee-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0125_3-4.wav",
+          "sha256": "343530f5fa70b004fa05395933f968851fa8b1fb6f646a5bb3b83f4bbd6a7bfd",
+          "bytes": 4290463660,
+          "start_frame": 220253760,
+          "end_frame": 458393760,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "doza-lawnchair-generals-saturday",
+      "duration": 7200,
+      "windows": 479,
+      "parts": [
+        {
+          "filename": "260620_0125_3-4.wav",
+          "sha256": "343530f5fa70b004fa05395933f968851fa8b1fb6f646a5bb3b83f4bbd6a7bfd",
+          "bytes": 4290463660,
+          "start_frame": 458393760,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260620_0126_3-4.wav",
+          "sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 60837408,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "adam-rose-miro-saturday",
+      "duration": 7200,
+      "windows": 479,
+      "parts": [
+        {
+          "filename": "260620_0126_3-4.wav",
+          "sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+          "bytes": 4290463660,
+          "start_frame": 60837408,
+          "end_frame": 378357408,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "sinead-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0126_3-4.wav",
+          "sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+          "bytes": 4290463660,
+          "start_frame": 378357408,
+          "end_frame": 616497408,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "krane-saturday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260620_0126_3-4.wav",
+          "sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+          "bytes": 4290463660,
+          "start_frame": 616497408,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260621_0127_3-4.wav",
+          "sha256": "f8dd7ca1282c64ae4889fdb06fdb3a5e1a373849fe3062f7f47f8c86cdb95d1c",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 139561056,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "max-coletto-hazy-sunday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260621_0127_3-4.wav",
+          "sha256": "f8dd7ca1282c64ae4889fdb06fdb3a5e1a373849fe3062f7f47f8c86cdb95d1c",
+          "bytes": 4290463660,
+          "start_frame": 695221056,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260621_0128_3-4.wav",
+          "sha256": "2fc487280143ebc13dcac26280c0f74eb778a4b7ae6cbea8d9bd4b719636c3e5",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 218284704,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "4yo4u-jahnsen-local-jerry-sunday",
+      "duration": 7200,
+      "windows": 479,
+      "parts": [
+        {
+          "filename": "260621_0128_3-4.wav",
+          "sha256": "2fc487280143ebc13dcac26280c0f74eb778a4b7ae6cbea8d9bd4b719636c3e5",
+          "bytes": 4290463660,
+          "start_frame": 615184704,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260621_0129_3-4.wav",
+          "sha256": "a67425f4a8f30a20912ff337b4bf7706cff6e25acfa88a48e4647592f4d31da6",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 217628352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "mungo-sound-machine-sunday",
+      "duration": 5400,
+      "windows": 359,
+      "parts": [
+        {
+          "filename": "260621_0130_3-4.wav",
+          "sha256": "aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae",
+          "bytes": 4290463660,
+          "start_frame": 693252000,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260621_0131_3-4.wav",
+          "sha256": "8e8bc76d49a050424fe01bad5e368033eda4a41466bb20176397e78686d15fac",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 216315648,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    },
+    {
+      "source_id": "danny-daze-sunday",
+      "duration": 7200,
+      "windows": 479,
+      "parts": [
+        {
+          "filename": "260621_0131_3-4.wav",
+          "sha256": "8e8bc76d49a050424fe01bad5e368033eda4a41466bb20176397e78686d15fac",
+          "bytes": 4290463660,
+          "start_frame": 533835648,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260621_0132_3-4.wav",
+          "sha256": "3f80aaabf7357e6848fccbfa75d9d43e0724388126ae88a8d3cc62b1b93c2cb7",
+          "bytes": 1856824492,
+          "start_frame": 0,
+          "end_frame": 136279296,
+          "total_frames": 309469824,
+          "sample_rate": 44100,
+          "channels": 2,
+          "bits": 24
+        }
+      ]
+    }
+  ]
+}

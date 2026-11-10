@@ -17,6 +17,7 @@ import uuid
 from worker.jobs.yoon_recognition import PrivateRecognitionSession, policy_for
 from worker.jobs.yoon_sources import JACKSON, reviewed_source
 from worker.jobs.yoon_highkin_source import HIGHKIN, assemble_highkin
+from worker.jobs.yoon_remaining_sources import JOINED_CATALOG, assemble_remaining
 
 SOURCE_SHA = 'aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae'
 SOURCE_BYTES = 4290463660
@@ -35,7 +36,7 @@ PRIVATE_GUARD = '''
 
 def validate_descriptor(value):
     source = reviewed_source(value)
-    if source == HIGHKIN:
+    if source == HIGHKIN or source.id in JOINED_CATALOG:
         urls = value.get('source_urls')
         if (not isinstance(urls, list) or len(urls) != 2 or
                 any(not isinstance(url, str) or not allowed_source(url) for url in urls)
@@ -169,6 +170,8 @@ def prepare(store, root):
     master = root / 'source.wav'
     audio = root / 'audio' / 'input.mp3'
     audio.parent.mkdir(parents=True, exist_ok=True)
+    if source_spec.id in JOINED_CATALOG:
+        return prepare_remaining_joined(store, root, source, mode, audio)
     if source_spec == HIGHKIN:
         return prepare_highkin(store, root, source, mode, audio)
     try:
@@ -217,6 +220,49 @@ def prepare_highkin(store, root, urls, mode, audio):
             check=True, timeout=600, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         from audio_segmenter import AudioSegmenter
         if abs(AudioSegmenter.get_audio_duration_ffprobe(audio) - HIGHKIN.duration) > .2:
+            raise RuntimeError('duration_mismatch')
+        with audio.open('rb') as f:
+            digest = hashlib.file_digest(f, 'sha256').hexdigest()
+        store.write({'status': 'prepared', 'audio_sha256': digest,
+                     'joined_pcm_sha256': assembled['audio_sha256'],
+                     'recognition_mode': mode})
+    except Exception:
+        audio.unlink(missing_ok=True)
+        store.write({'status': 'failed', 'reason': 'preparation_failed'})
+        raise
+    finally:
+        # Only local downloaded copies and derivative, never source-service bytes.
+        for path in [*originals, joined]:
+            path.unlink(missing_ok=True)
+
+
+def prepare_remaining_joined(store, root, urls, mode, audio):
+    source_spec = JOINED_CATALOG.get(store.source.id)
+    if source_spec is None or source_spec != store.source:
+        raise RuntimeError('fixed_input_mismatch')
+    # Additional fixed reviewed joins. Existing Highkin preparation remains unchanged.
+    originals = [root / piece.filename for piece in source_spec.pieces]
+    joined = root / f'{source_spec.id}-joined.wav'
+    # Avoid overwriting unrelated files, including pre-existing originals.
+    if any(p.exists() or p.is_symlink() for p in [*originals, joined, audio]):
+        raise RuntimeError('preparation_paths_not_fresh')
+    try:
+        if shutil.disk_usage(root).free < 12_000_000_000:
+            raise RuntimeError('disk_budget')
+        descriptor = dict(source_spec.pins(), source_id=source_spec.id,
+                          recognition_mode='resumable', source_urls=urls)
+        validate_descriptor(descriptor)
+        for url, path, piece in zip(urls, originals, source_spec.pieces):
+            store.require_owner()
+            fetch(url, path, piece)
+        store.require_owner()
+        assembled = assemble_remaining(descriptor, originals, joined)
+        store.require_owner()
+        subprocess.run(['ffmpeg', '-nostdin', '-y', '-v', 'error', '-i', str(joined),
+            '-vn', '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100', str(audio)],
+            check=True, timeout=600, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        from audio_segmenter import AudioSegmenter
+        if abs(AudioSegmenter.get_audio_duration_ffprobe(audio) - source_spec.duration) > .2:
             raise RuntimeError('duration_mismatch')
         with audio.open('rb') as f:
             digest = hashlib.file_digest(f, 'sha256').hexdigest()
