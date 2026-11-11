@@ -100,6 +100,40 @@ check(query("SELECT count(*) AS n FROM ops.segment_hits WHERE set_run_id=%s",(RU
 # pause cannot be picked up until both run and individual windows are due.
 plan=s.prepare_scheduler();ticket=s.reserve(4)
 check(RUN not in queue.blocked_ids())  # genuinely running owned work may hold requests
+# A real running receipt has many progress fields beyond its two-field owner.
+# It must occupy one slot, not block all future admissions as an uncertain owner.
+active_before=copy.deepcopy(saved())
+others_before={run:copy.deepcopy(saved(run)) for run in other}
+evidence_before=query('SELECT row_to_json(h)::text AS row FROM ops.segment_hits h WHERE set_run_id=%s ORDER BY segment_index',(RUN,))
+leases_before=query('SELECT row_to_json(l)::text AS row FROM ops.set_run_leases l WHERE set_run_id=%s ORDER BY segment_start_index',(RUN,))
+query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,'{yoon_queue_v1,status}','\"queued\"') WHERE id=%s",(other[0],))
+sent=[];report=queue.tick(lambda payload:sent.append(payload))
+check(report=={'pending':3,'reserved':1,'blocked':0} and len(sent)==1)
+check(saved()==active_before)
+check(query('SELECT row_to_json(h)::text AS row FROM ops.segment_hits h WHERE set_run_id=%s ORDER BY segment_index',(RUN,))==evidence_before)
+check(query('SELECT row_to_json(l)::text AS row FROM ops.set_run_leases l WHERE set_run_id=%s ORDER BY segment_start_index',(RUN,))==leases_before)
+check(queue.tick(lambda payload:sent.append(payload))=={'pending':3,'reserved':0,'blocked':0})
+check(len(sent)==1)  # one active worker + one reservation fills cap two
+remaining=next(run for run in other if saved(run)['source_metadata'][KEY]['status']=='queued')
+try:queue.refresh_and_reserve(remaining)
+except RuntimeError as exc:check(str(exc)=='private_admission_capacity')
+else:raise AssertionError('expected capacity, not uncertainty or another reservation')
+# Malformed or mismatched queue identities remain fail-closed even when the
+# worker's actual resume receipt and per-window evidence still look valid.
+for owner in (None,{},[],{'workflow_run_id':'9999','run_attempt':'1'},
+              {'workflow_run_id':'9001','run_attempt':'2'},
+              {'workflow_run_id':9001,'run_attempt':'1'}):
+    metadata=copy.deepcopy(active_before['source_metadata']);metadata[KEY]['owner']=owner
+    query('UPDATE ops.set_runs SET source_metadata=%s::jsonb WHERE id=%s',(json.dumps(metadata),RUN))
+    before_bad=saved();called=[]
+    check(queue.tick(lambda payload:called.append(payload))=={'pending':3,'reserved':0,'blocked':1})
+    check(called==[] and saved()==before_bad)
+    denies(lambda:queue.refresh_and_reserve(remaining))
+    check(saved()==before_bad)
+query('UPDATE ops.set_runs SET source_metadata=%s::jsonb WHERE id=%s',(json.dumps(active_before['source_metadata']),RUN))
+for run,before in others_before.items():
+    query('UPDATE ops.set_runs SET source_metadata=%s::jsonb WHERE id=%s',(json.dumps(before['source_metadata']),run))
+check(saved()==active_before)
 r=Recognition(60,None,None,None,None,False,4,was_rate_limited=True,error_type='RateLimited',http_status=429)
 s.finish(r,ticket,60);s.release('workflow_interrupted')
 check(queue.refresh_and_reserve(RUN) is None)

@@ -47,6 +47,46 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(a.occupied(r))
         r['source_metadata']['yoon_spotify_recheck_v1']={'status':'partial'}
         with self.assertRaises(RuntimeError):a.occupied(r)
+    def test_running_queue_compares_owner_pair_not_full_resume_receipt(self):
+        r=row(1,uncertain_hit=True,claimed_lease=True)
+        r['source_metadata']['yoon_resume'].update(status='recognizing',requests=17,continuations=1)
+        r['source_metadata']['yoon_queue_v1']={'version':1,'status':'running',
+            'owner':{'workflow_run_id':'1','run_attempt':'1'}}
+        self.assertTrue(a.occupied(r))
+        a.check(Cursor([r]),'2','set2')
+        with self.assertRaisesRegex(RuntimeError,'private_admission_capacity'):
+            a.check(Cursor([r,row(2)]),'3','set3')
+        for run,target in [('1','other'),('3','set1')]:
+            with self.assertRaisesRegex(RuntimeError,'private_admission_duplicate_target'):
+                a.check(Cursor([r]),run,target)
+
+    def test_running_queue_mismatched_or_malformed_owner_still_blocks(self):
+        r=row(1)
+        for owner in (None,[],{}, {'workflow_run_id':'2','run_attempt':'1'},
+                      {'workflow_run_id':'1','run_attempt':'2'},
+                      {'workflow_run_id':1,'run_attempt':'1'},
+                      {'workflow_run_id':'1','run_attempt':'invalid'}):
+            with self.subTest(owner=owner):
+                r['source_metadata']['yoon_queue_v1']={'version':1,'status':'running','owner':owner}
+                with self.assertRaisesRegex(RuntimeError,'private_admission_uncertain_queue'):
+                    a.check(Cursor([r]),'2','set2')
+
+    def test_clean_released_queue_owner_is_idle_but_uncertainty_is_not(self):
+        r=row(1,status='private_resume_paused')
+        r['source_metadata']['yoon_resume'].update(status='paused',reason='cooldown_pending')
+        r['source_metadata']['yoon_queue_v1']={'version':1,'status':'running',
+            'owner':{'workflow_run_id':'1','run_attempt':'1'}}
+        self.assertFalse(a.occupied(r))
+        for key in ('uncertain_hit','claimed_lease'):
+            r[key]=True
+            with self.assertRaisesRegex(RuntimeError,'private_admission_uncertain_owner'):a.occupied(r)
+            r[key]=False
+        for key in ('review_required','in_flight'):
+            r['source_metadata']['yoon_resume'][key]=True
+            with self.assertRaisesRegex(RuntimeError,'private_admission_uncertain_owner'):a.occupied(r)
+            r['source_metadata']['yoon_resume'].pop(key)
+        r['source_metadata']['yoon_queue_v1']['owner']=None
+        with self.assertRaisesRegex(RuntimeError,'private_admission_uncertain_queue'):a.occupied(r)
     def test_concurrent_admission_model(self):
         # Models the PostgreSQL transaction lock, NOT a multi-backend DB test.
         mutex=threading.Lock();barrier=threading.Barrier(12);rows=[]

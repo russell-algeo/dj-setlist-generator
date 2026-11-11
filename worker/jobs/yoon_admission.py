@@ -64,7 +64,11 @@ def occupied(row):
         if status == 'running':
             # A clean released owner may await queue reconciliation. Count the
             # actual work only, while preserving unknown/in-flight checks above.
-            if owners and queue.get('owner') not in owners:
+            # Resume receipts contain progress and source fields as well as the
+            # owner pair. Compare identity fields, not the entire receipt.
+            queue_owner = queue.get('owner')
+            if (not valid_owner(queue_owner) or (owners and any(
+                    queue_owner[k] != owners[0][k] for k in ('workflow_run_id','run_attempt')))):
                 raise RuntimeError('private_admission_uncertain_queue')
         elif status not in ('queued', 'complete', 'blocked'):
             raise RuntimeError('private_admission_uncertain_queue')
