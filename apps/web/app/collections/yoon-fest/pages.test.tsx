@@ -81,6 +81,15 @@ describe("private page and RSC entry gates", () => {
     expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
+  it.each(pages)("checks membership again on a new $name load after revocation", async ({ run }) => {
+    await run();
+    vi.clearAllMocks();
+    mocks.access.mockResolvedValue(false);
+    await expect(run()).rejects.toThrow("NOT_FOUND");
+    expect(mocks.access).toHaveBeenCalledExactlyOnceWith(actor());
+    expectNoProjection();
+  });
+
   it.each([
     "space and café", "//outside.example/path", "https://outside.example/?q=1#fragment",
     "../outside", "%2F%2Foutside.example", "name?callbackUrl=https://outside.example/", "line\nbreak",
