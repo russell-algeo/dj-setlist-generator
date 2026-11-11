@@ -15,6 +15,8 @@ await db.exec("INSERT INTO authn.users(id,email) VALUES('synthetic-owner','owner
 for(const id of ['a0000000-0000-4000-8000-000000000010','a0000000-0000-4000-8000-000000000011'])
  await db.query("INSERT INTO ops.set_runs(id,submission_id,requested_by,status,stage,source_url,publication_visibility,source_metadata) VALUES($1,'30000000-0000-4000-8000-000000000001','synthetic-owner','recognizing','recognizing','local:synthetic','public',$2)",[id,{active_workflow_run_id:'9001',dispatch_generation:'g',segment_count:3}]);
 await db.exec('CREATE ROLE synthetic_shared_worker; GRANT USAGE ON SCHEMA app,ops TO synthetic_shared_worker; GRANT SELECT ON ALL TABLES IN SCHEMA app TO synthetic_shared_worker; GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA ops TO synthetic_shared_worker; GRANT USAGE ON ALL SEQUENCES IN SCHEMA ops TO synthetic_shared_worker');
+// This role is created after the migration's finite ACL seal; grant only legacy guard helpers.
+await db.exec('GRANT EXECUTE ON FUNCTION ops.yoon_collection_scope(uuid),ops.yoon_is_v2(jsonb) TO synthetic_shared_worker');
 const child=spawn(process.env.PYTHON||'python3',[root+'scripts/test_shared_recognition_pg.py'],{cwd:root,env:{PATH:'/usr/bin:/bin',HOME:'/tmp',PYTHONDONTWRITEBYTECODE:'1',...(process.env.LD_LIBRARY_PATH?{LD_LIBRARY_PATH:process.env.LD_LIBRARY_PATH}:{})},stdio:['pipe','pipe','pipe']});
 let done=false,checks=0,stderr='';child.stderr.on('data',d=>stderr+=d);
 const closed=new Promise(r=>child.on('close',r));

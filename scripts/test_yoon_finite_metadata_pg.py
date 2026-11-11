@@ -62,6 +62,8 @@ from setlist_builder import Track
 from scripts.yoon_metadata_pins import snapshot_sql, prepare_pins
 from scripts.yoon_metadata_apply import snapshot_sql as apply_snapshot_sql, prepare_apply, PUBLICATION_KEY
 query('CREATE ROLE synthetic_metadata_worker')
+# Created after the finite ACL seal; legacy writes/admission need only these helpers.
+query('GRANT EXECUTE ON FUNCTION ops.yoon_collection_scope(uuid),ops.yoon_is_v2(jsonb),ops.assert_yoon_version_execution(uuid,text,text) TO synthetic_metadata_worker')
 query('GRANT USAGE ON SCHEMA app,ops TO synthetic_metadata_worker')
 query('GRANT SELECT ON ALL TABLES IN SCHEMA app,ops TO synthetic_metadata_worker')
 query('GRANT UPDATE ON ops.set_runs,ops.submissions,ops.segment_hits TO synthetic_metadata_worker')

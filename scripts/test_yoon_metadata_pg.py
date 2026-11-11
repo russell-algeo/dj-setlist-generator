@@ -158,6 +158,8 @@ query("UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,ARRAY[%
 payload=saved_payload
 # Reproduce the deployment privilege boundary: app SELECT, ops writes only.
 query('CREATE ROLE synthetic_metadata_worker')
+# Created after the finite ACL seal; legacy writes/admission need only these helpers.
+query('GRANT EXECUTE ON FUNCTION ops.yoon_collection_scope(uuid),ops.yoon_is_v2(jsonb),ops.assert_yoon_version_execution(uuid,text,text) TO synthetic_metadata_worker')
 query('GRANT USAGE ON SCHEMA app,ops TO synthetic_metadata_worker')
 query('GRANT SELECT ON ALL TABLES IN SCHEMA app,ops TO synthetic_metadata_worker')
 query('GRANT UPDATE ON ops.set_runs,ops.submissions,ops.segment_hits TO synthetic_metadata_worker')
