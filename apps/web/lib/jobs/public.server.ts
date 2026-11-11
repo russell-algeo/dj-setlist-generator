@@ -247,14 +247,16 @@ export const listPublicSubmissionsForActor = async (
       .where(inArray(setRuns.submissionId, submissionIds))
       .groupBy(setRuns.submissionId),
     db
-      .select({
+      // Only one event per visible submission crosses the database boundary.
+      // UUID order makes equal timestamps stable; it is not insertion order.
+      .selectDistinctOn([workerEvents.submissionId], {
         submissionId: workerEvents.submissionId,
         message: workerEvents.message,
         createdAt: workerEvents.createdAt,
       })
       .from(workerEvents)
       .where(inArray(workerEvents.submissionId, submissionIds))
-      .orderBy(desc(workerEvents.createdAt)),
+      .orderBy(workerEvents.submissionId, desc(workerEvents.createdAt), desc(workerEvents.id)),
   ]);
 
   const countsBySubmission = new Map(

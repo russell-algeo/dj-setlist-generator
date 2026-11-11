@@ -38,6 +38,7 @@ jobs:
           export PYTHON="$(command -v python)"
           node scripts/test-shared-recognition-store-pglite.mjs
           node scripts/test-shared-continuation-pglite.mjs
+          node scripts/test-jobs-list-pglite.mjs
           node scripts/test-yoon-resume-pglite.mjs
           node scripts/test-yoon-egress-projection-pglite.mjs
           node scripts/test-yoon-spotify-pglite.mjs
