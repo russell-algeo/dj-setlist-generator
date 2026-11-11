@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from worker.recognition_transactions import (
+    recognition_transaction, retry_lock_timeouts, RolledBackLockTimeout,
+)
 from dataclasses import asdict
 import hashlib
 import json
@@ -105,7 +108,7 @@ class RecognitionStore:
     def locked(self):
         from psycopg import Error
         try:
-            with self.connect() as conn, conn.transaction(), conn.cursor() as cur:
+            with recognition_transaction(self.connect) as conn, conn.cursor() as cur:
                 cur.execute("SET LOCAL lock_timeout='5s'")
                 cur.execute("SET LOCAL statement_timeout='15s'")
                 # Row locks serialize evidence changes for this run only; no
@@ -124,6 +127,8 @@ class RecognitionStore:
                     raise RecognitionFence('shared_owner_or_scope_changed')
                 state = dict(row['source_metadata'].get('shared_recognition') or {})
                 yield cur, row, state
+        except RolledBackLockTimeout:
+            raise RolledBackLockTimeout(RecognitionFence('shared_storage_error')) from None
         except Error:
             raise RecognitionFence('shared_storage_error') from None
 
@@ -137,6 +142,7 @@ class RecognitionStore:
                 or state.get('owner') != self.identity):
             raise RecognitionFence('shared_continuation_owner_changed')
 
+    @retry_lock_timeouts
     def begin(self):
         """Count continuation before download; return None for legacy evidence."""
         reason = None
@@ -196,6 +202,7 @@ class RecognitionStore:
             raise RecognitionPause(reason)
         return state
 
+    @retry_lock_timeouts
     def prepared(self, context, *, slot_count=1, lease_size=1):
         fingerprint = audio_fingerprint(context.audio_file)
         geometry = dict(segment_duration=Config.SEGMENT_DURATION,
@@ -230,6 +237,7 @@ class RecognitionStore:
             raise RecognitionPause(reason)
         return count
 
+    @retry_lock_timeouts
     def state(self):
         with self.locked() as (_, row, state):
             self.require_state(state)
@@ -257,6 +265,7 @@ class RecognitionStore:
         coverage=cur.fetchone()
         return total>0 and coverage['total']==total and coverage['valid']==total
 
+    @retry_lock_timeouts
     def claim_lease(self, worker_name):
         with self.locked() as (cur,row,state):
             self.require_state(state)
@@ -273,6 +282,7 @@ class RecognitionStore:
                   claimed_at=now(),updated_at=now() WHERE id=%s""",(worker_name,lease['id']))
             return lease
 
+    @retry_lock_timeouts
     def missing_indices(self, lease):
         with self.locked() as (cur,_,state):
             self.require_state(state)
@@ -283,6 +293,7 @@ class RecognitionStore:
             valid={r['segment_index'] for r in cur.fetchall()}
             return [i for i in range(lease['segment_start_index'],lease['segment_end_index']+1) if i not in valid]
 
+    @retry_lock_timeouts
     def reserve(self, index, lease_id, worker_name):
         """Reserve one actual HTTP attempt; other windows/leases remain concurrent."""
         from recognition_transport import RequestAuthorizationError
@@ -326,6 +337,7 @@ class RecognitionStore:
             self.save(cur,state)
             return dict(index=index,token=token,lease_id=str(lease_id),worker_name=worker_name)
 
+    @retry_lock_timeouts
     def finish(self, reservation, result, delay_seconds=0):
         with self.locked() as (cur,row,state):
             self.require_state(state)
@@ -371,6 +383,7 @@ class RecognitionStore:
             self.save(cur,state)
             return RetryDirective(delay)
 
+    @retry_lock_timeouts
     def settle_lease(self, lease, worker_name):
         with self.locked() as (cur,_,state):
             self.require_state(state)
@@ -385,6 +398,7 @@ class RecognitionStore:
               ('completed' if complete else 'failed',complete,lease['id'],self.run_id,worker_name))
             return complete
 
+    @retry_lock_timeouts
     def pause(self, reason, *, wait=0):
         with self.locked() as (cur,row,state):
             self.require_state(state)

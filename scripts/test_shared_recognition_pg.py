@@ -79,6 +79,8 @@ with patch('socket.socket.connect',side_effect=AssertionError('network forbidden
     lease=a.claim_lease('worker0');second=a.claim_lease('worker1')
     check(lease['segment_start_index']==0 and lease['segment_end_index']==1)
     check(second['segment_start_index']==2)
+    from recognition_lock_faults import run_checks
+    checks += run_checks(a,query,index=0,lease_id=lease['id'],worker_name='worker0')
     a.pause('recognition_retry_pending')
     check(a.state()[1]['reason']=='recognition_no_progress')
     first=a.reserve(0,lease['id'],'worker0')
