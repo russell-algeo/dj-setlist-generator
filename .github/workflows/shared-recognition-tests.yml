@@ -38,3 +38,4 @@ jobs:
           export PYTHON="$(command -v python)"
           node scripts/test-shared-recognition-store-pglite.mjs
           node scripts/test-shared-continuation-pglite.mjs
+          node scripts/test-jobs-list-pglite.mjs
