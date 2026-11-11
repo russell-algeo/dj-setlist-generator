@@ -2,6 +2,8 @@
 
 import re
 
+from discogs_matching import DISCOGS_MATCHING_VERSION
+
 from spotify_matching import (
     candidate_artist_names,
     candidate_title,
@@ -83,6 +85,8 @@ def usable_platform_url(metadata, platform):
     match = (metadata.get("platform_matches") or {}).get(platform)
     if match:
         return url if match.get("status") == "matched" and match.get("url") == url else None
+    if platform == "discogs" and (metadata.get("discogs_matching_version") or 0) >= DISCOGS_MATCHING_VERSION:
+        return None
     if metadata.get("link_matching_version") and platform != "discogs":
         return None
     return url

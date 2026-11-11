@@ -1599,7 +1599,7 @@ def render_set_explorer_html(
         if row.get("genres"):
             details_blocks.append(("Genres", ", ".join(str(g) for g in row.get("genres", []) if str(g).strip())))
         if row.get("label"):
-            details_blocks.append(("Label", str(row["label"])))
+            details_blocks.append(("Release label" if row.get("discogs_metadata_scope") == "release" else "Label", str(row["label"])))
         if row.get("key"):
             details_blocks.append(("Key", str(row["key"])))
         if energy is not None:

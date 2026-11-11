@@ -13,6 +13,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotify_matching import select_spotify_candidate
 from platform_matching import LINK_MATCHING_VERSION, match_evidence, select_youtube_candidate
+from discogs_matching import DISCOGS_MATCHING_VERSION, MAX_DISCOGS_CANDIDATES, validate_discogs_release
 
 
 def _make_discogs_session() -> requests.Session:
@@ -246,9 +247,11 @@ class MetadataEnricher:
         """
         enriched = {
             'link_matching_version': LINK_MATCHING_VERSION,
+            'discogs_matching_version': DISCOGS_MATCHING_VERSION,
             'platform_matches': {
                 'spotify': {'status': 'unverified' if self.spotify_enabled else 'disabled'},
                 'youtube': {'status': 'unverified' if self.youtube_enabled else 'disabled'},
+                'discogs': {'status': 'unverified' if self.discogs_enabled else 'disabled'},
             },
             'spotify_url': None,
             'spotify_album_art': None,
@@ -269,6 +272,7 @@ class MetadataEnricher:
             'discogs_styles': [],
             'discogs_label': None,
             'discogs_label_url': None,
+            'discogs_metadata_scope': None,
         }
 
         # Skip unknown tracks
@@ -281,12 +285,17 @@ class MetadataEnricher:
         # Spotify title-only fallback matches without hardcoded aliases.
         if self.discogs_enabled:
             discogs_data = self._search_discogs_rich(track.title, track.artist)
-            if discogs_data:
+            decision = (discogs_data or {}).get('match') or {'status': 'unverified', 'reason': 'missing_evidence'}
+            enriched['platform_matches']['discogs'] = decision
+            if decision.get('status') == 'matched' and decision.get('url') == discogs_data.get('url'):
+                enriched['discogs_metadata_scope'] = 'release'
                 enriched['discogs_url'] = discogs_data['url']
                 enriched['discogs_genres'] = discogs_data.get('genres', [])
                 enriched['discogs_styles'] = discogs_data.get('styles', [])
                 enriched['discogs_label'] = discogs_data.get('label')
                 enriched['discogs_label_url'] = discogs_data.get('label_url')
+            else:
+                discogs_data = None
 
         # Spotify
         if self.spotify_enabled:
@@ -891,65 +900,81 @@ class MetadataEnricher:
 
         return None
 
-    def _search_discogs_rich(self, title: str, artist: str) -> Optional[dict]:
-        """Search Discogs and return rich metadata dict with URL, genres, styles, and label.
+    def _search_discogs_rich(self, title: str, artist: str) -> dict:
+        """Validate at most five release tracklists; search hits alone are not evidence.
 
-        Returns:
-            Dict with 'url', 'genres', 'styles', 'label', or None on failure.
+        The existing retry-enabled session remains unchanged. No label search is
+        needed: label IDs and all metadata come from the validated release.
         """
+        def failure(status, reason, checked=0):
+            return {'match': {'status': status, 'reason': reason,
+                'matching_version': DISCOGS_MATCHING_VERSION, 'candidates_checked': checked}}
+
         auth_header = self._discogs_auth_header()
         if not auth_header:
-            return None
-
+            return failure('unavailable', 'credentials_unavailable')
+        headers = {'Authorization': auth_header}
+        checked, errors = 0, False
         try:
-            query = f"{artist} {title}"
-            url = "https://api.discogs.com/database/search"
-
-            headers = {
-                'Authorization': auth_header
-            }
-
-            params = {
-                'q': query,
-                'type': 'release',
-                'per_page': 1
-            }
-
-            response = _discogs_session.get(url, headers=headers, params=params, timeout=10)
+            response = _discogs_session.get('https://api.discogs.com/database/search',
+                headers=headers, params={'q': f'{artist} {title}', 'type': 'release',
+                    'per_page': MAX_DISCOGS_CANDIDATES}, timeout=10)
             response.raise_for_status()
-            data = response.json()
-
-            if not data.get('results'):
-                return None
-
-            result = data['results'][0]
-
-            # Build full Discogs URL from the URI path
-            uri = result.get('uri', '')
-            discogs_url = f"https://www.discogs.com{uri}" if uri and not uri.startswith('http') else uri
-
-            # Extract genres, styles, and label from search result
-            genres = result.get('genre', result.get('genres', []))
-            styles = result.get('style', result.get('styles', []))
-            labels = result.get('label', [])
-            label = labels[0] if labels else None
-
-            # Fetch label URL, using cache to avoid repeated lookups for the same label.
-            label_url = None
-            if label:
-                label_url = self._resolve_label_url(label, result, headers, url)
-
-            return {
-                'title': result.get('title'),
-                'url': discogs_url,
-                'genres': genres[:3],
-                'styles': styles[:5],
-                'label': label,
-                'label_url': label_url,
-            }
-        except Exception as e:
-            print(f"    [Discogs] Search error: {e}")
-            return None
+            results = response.json().get('results') or []
+            if not isinstance(results, list):
+                return failure('unavailable', 'invalid_provider_response')
+            seen = set()
+            for candidate in results[:MAX_DISCOGS_CANDIDATES]:
+                if not isinstance(candidate, dict):
+                    continue
+                release_id = candidate.get('id')
+                if (candidate.get('type') not in (None, 'release')
+                        or type(release_id) is not int or release_id <= 0 or release_id in seen):
+                    continue
+                seen.add(release_id)
+                checked += 1
+                try:
+                    # Construct the known API endpoint; do not follow arbitrary resource_url.
+                    response = _discogs_session.get(f'https://api.discogs.com/releases/{release_id}',
+                        headers=headers, timeout=10)
+                    response.raise_for_status()
+                    release = response.json()
+                    if not isinstance(release, dict) or release.get('id') != release_id:
+                        errors = True
+                        continue
+                    match = validate_discogs_release(artist, title, release)
+                    if not match:
+                        continue
+                    match['candidates_checked'] = checked
+                    labels = release.get('labels')
+                    label = labels[0] if isinstance(labels, list) and labels and isinstance(labels[0], dict) else {}
+                    def tags(key, limit):
+                        values = release.get(key)
+                        return [v for v in values if isinstance(v, str) and v.strip()][:limit] if isinstance(values, list) else []
+                    label_id = label.get('id')
+                    return {'url': match['url'], 'match': match,
+                        # Preserve the existing provider corroboration interface.
+                        'title': ' & '.join(match['artists']) + ' - ' + match['title'],
+                        'genres': tags('genres', 3),
+                        'styles': tags('styles', 5),
+                        'label': label.get('name') if isinstance(label.get('name'), str) else None,
+                        'label_url': f'https://www.discogs.com/label/{label_id}'
+                            if type(label_id) is int and label_id > 0 else None,
+                        'metadata_scope': 'release'}
+                except requests.HTTPError as error:
+                    status = getattr(error.response, 'status_code', None)
+                    if status in (401, 403, 429):
+                        return failure('unavailable', 'rate_limited' if status == 429 else 'provider_access_error', checked)
+                    errors = True
+                except (requests.RequestException, ValueError, TypeError, AttributeError):
+                    errors = True
+            return failure('unavailable' if errors else 'no_match',
+                'incomplete_provider_results' if errors else 'no_validated_tracklist_match', checked)
+        except requests.HTTPError as error:
+            status = getattr(error.response, 'status_code', None)
+            return failure('unavailable', 'rate_limited' if status == 429 else 'provider_http_error', checked)
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
+            return failure('unavailable', 'provider_response_error', checked)
 
     def _resolve_label_url(
         self, label: str, search_result: dict, headers: dict, search_url: str,

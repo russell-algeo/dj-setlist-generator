@@ -14,6 +14,8 @@ SPOTIFY_URL = "https://open.spotify.com/track/3cuhpRVEXe8tGKDGsYZrR0"
 YOUTUBE_URL = "https://www.youtube.com/watch?v=R2bda4X9v4E"
 DISCOGS = {"url": "https://www.discogs.com/release/437605-US-Collective-Midnight-Luv-So-Right",
            "title": "U.S. Collective - Midnight Luv / So Right", "styles": ["Deep House"]}
+# Unit-test provider stub already validated; the live matcher is covered separately.
+DISCOGS["match"] = {"status": "matched", "url": DISCOGS["url"], "matching_version": 1}
 
 
 def spotify_item(artist="Northern Collective", title="Right in Front of Me, Was You", isrc=None):

@@ -78,6 +78,9 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
     """
     track = item['track']
     meta = item['metadata']
+    discogs_url = usable_platform_url(meta, 'discogs')
+    discogs_rejected = not discogs_url and (meta.get('discogs_matching_version')
+        or (meta.get('platform_matches') or {}).get('discogs'))
     return {
         'position': position,
         'title': track.title,
@@ -111,11 +114,13 @@ def serialize_track(item: dict, position: int, source_url: str = '') -> dict:
         'energy': meta.get('energy'),
         'danceability': meta.get('danceability'),
         'youtube_url': usable_platform_url(meta, 'youtube'),
-        'discogs_url': meta.get('discogs_url'),
-        'discogs_genres': meta.get('discogs_genres', []),
-        'discogs_styles': meta.get('discogs_styles', []),
-        'discogs_label': meta.get('discogs_label'),
-        'discogs_label_url': meta.get('discogs_label_url'),
+        'discogs_matching_version': meta.get('discogs_matching_version'),
+        'discogs_metadata_scope': meta.get('discogs_metadata_scope'),
+        'discogs_url': discogs_url,
+        'discogs_genres': [] if discogs_rejected else meta.get('discogs_genres', []),
+        'discogs_styles': [] if discogs_rejected else meta.get('discogs_styles', []),
+        'discogs_label': None if discogs_rejected else meta.get('discogs_label'),
+        'discogs_label_url': None if discogs_rejected else meta.get('discogs_label_url'),
     }
 
 
@@ -237,8 +242,9 @@ class OutputFormatter:
                 links.append(f"[Spotify]({metadata['spotify_url']})")
             if metadata['youtube_url']:
                 links.append(f"[YouTube]({metadata['youtube_url']})")
-            if metadata['discogs_url']:
-                links.append(f"[Discogs]({metadata['discogs_url']})")
+            discogs_url = usable_platform_url(metadata, 'discogs')
+            if discogs_url:
+                links.append(f"[Discogs]({discogs_url})")
             
             if links:
                 lines.append(f"**Links:** {' • '.join(links)}")

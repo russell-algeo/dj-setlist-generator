@@ -26,6 +26,7 @@ export type ArchiveSetTrack = {
   detailGenres: string[];
   label: string | null;
   labelUrl: string | null;
+  labelScope?: "release" | null;
   spotifyUrl: string | null;
   youtubeUrl: string | null;
   discogsUrl: string | null;
