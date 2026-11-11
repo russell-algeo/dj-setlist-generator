@@ -107,7 +107,7 @@ class QueueTests(unittest.TestCase):
         for token in ('actions: write','GH_PAT','PRODUCTION_DATABASE','upload-artifact','SPOTIFY','DISCOGS'):
             self.assertNotIn(token,job)
         self.assertIn("'process-set-private-queue-preview'",workflow)
-        self.assertIn('time.sleep(60)',(root/'worker/jobs/yoon_queue.py').read_text())
+        self.assertIn('time.sleep(min(180, remaining))',(root/'worker/jobs/yoon_queue.py').read_text())
     def test_public_dispatch_and_cleanup_remain_isolated(self):
         root=Path(__file__).resolve().parents[1]
         text=(root/'apps/web/lib/jobs/dispatch.ts').read_text()

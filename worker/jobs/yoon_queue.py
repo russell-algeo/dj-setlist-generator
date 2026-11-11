@@ -286,7 +286,10 @@ class PrivateQueue:
                 AND r.source_metadata ? 'yoon_queue_v1'""")
             return {str(row['id']) for row in cur.fetchall() if requires_review(row)}
 
-    def tick(self, send):
+    def tick(self, send, *, max_reservations=None):
+        if max_reservations is not None and (type(max_reservations) is not int
+                or not 1 <= max_reservations <= admission.CAP):
+            raise ValueError('private_queue_dispatch_limit_invalid')
         counts = {'pending': 0, 'reserved': 0, 'blocked': 0}
         blocked_ids = self.blocked_ids()
         if blocked_ids:
@@ -317,6 +320,10 @@ class PrivateQueue:
             blocked_ids.update(self.blocked_ids())
             if blocked_ids:
                 break
+            # A bounded one-tick pilot cannot dispatch more children even if an
+            # earlier child finishes before later queue rows are examined.
+            if max_reservations is not None and counts['reserved'] >= max_reservations:
+                break
         blocked_ids.update(self.blocked_ids())
         counts['blocked'] = len(blocked_ids)
         return counts
@@ -324,6 +331,9 @@ class PrivateQueue:
 
 def main():
     # No source descriptors, callback errors, response bodies or exception text.
+    once = os.getenv('PRIVATE_QUEUE_ONCE', 'false')
+    if once not in ('true', 'false'):
+        return 2
     if (os.getenv('GITHUB_ACTIONS') != 'true' or os.getenv('RUNNER_OS') != 'Linux'
             or os.getenv('GITHUB_REPOSITORY') != 'russell-algeo/dj-setlist-generator'
             or os.getenv('GITHUB_REF') != 'refs/heads/preview'
@@ -342,8 +352,17 @@ def main():
             if response.status != 200:
                 raise RuntimeError('private_queue_dispatch_not_confirmed')
     queue = PrivateQueue()
-    started = time.monotonic()
-    while time.monotonic() - started < 4 * 60 * 60:
+    if once == 'true':
+        # A pilot is unconditional one-tick control flow, never a timed loop.
+        # Even process suspension cannot send it into controller rollover.
+        result = queue.tick(send, max_reservations=1)
+        print(json.dumps(result), flush=True)
+        if result['blocked']:
+            print('Private queue blocked; operator review required.', flush=True)
+            return 1
+        return 0
+    deadline = time.monotonic() + 4 * 60 * 60
+    while time.monotonic() < deadline:
         result = queue.tick(send)
         print(json.dumps(result), flush=True)
         if result['blocked']:
@@ -351,7 +370,11 @@ def main():
             return 1
         if result['pending'] == 0:
             return 0
-        time.sleep(60)
+        # Reservations never expire; slower polling only delays eligible work.
+        # Keep the first tick immediate and do not sleep past fenced rollover.
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(180, remaining))
     # One fenced rollover only. An uncertain rollover requires operator review.
     ids = queue.ids(rollover=True)
     if ids:

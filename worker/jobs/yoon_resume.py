@@ -120,7 +120,11 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
                     task = asyncio.create_task(_recognize_batch_preserving_stops(recognizer,extracted,source.windows))
                     try:
                         while True:
-                            done,_ = await asyncio.wait({task},timeout=2)
+                            # Passive guard only: request admission/receipts still
+                            # check immediately, and completion wakes this wait.
+                            # Ten seconds cuts timer reads by 80% versus two;
+                            # an in-flight stop can be noticed up to 8s later.
+                            done,_ = await asyncio.wait({task},timeout=10)
                             with phase('owner'):
                                 store.require_owner()
                             if done:

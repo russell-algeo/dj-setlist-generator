@@ -335,7 +335,20 @@ class ResumeStore:
     def next_windows(self, slot_index=0, limit=10):
         with self.locked() as (cur,row,state):
             slots, size = self._slot(state, slot_index)
-            cur.execute('''SELECT l.id,l.segment_start_index AS segment_index,h.raw_data
+            # Selection only needs the inherited due time, not provider history.
+            # Preserve nonobjects and absent keys so malformed/falsey values keep
+            # their existing Python behavior; JSON null is not a missing key.
+            cur.execute('''SELECT l.id,l.segment_start_index AS segment_index,
+                CASE WHEN jsonb_typeof(h.raw_data)='object' THEN
+                  CASE WHEN h.raw_data ? 'private_jackson_v2' THEN
+                    jsonb_build_object('private_jackson_v2',
+                      CASE WHEN jsonb_typeof(h.raw_data->'private_jackson_v2')='object' THEN
+                        CASE WHEN (h.raw_data->'private_jackson_v2') ? 'next_allowed_at' THEN
+                          jsonb_build_object('next_allowed_at',h.raw_data#>'{private_jackson_v2,next_allowed_at}')
+                        ELSE '{}'::jsonb END
+                      ELSE h.raw_data->'private_jackson_v2' END)
+                  ELSE '{}'::jsonb END
+                ELSE h.raw_data END AS raw_data
                 FROM ops.set_run_leases l LEFT JOIN ops.segment_hits h
                 ON h.set_run_id=l.set_run_id AND h.segment_index=l.segment_start_index
                 WHERE l.set_run_id=%s AND l.status='pending'
