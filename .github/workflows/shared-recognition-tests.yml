@@ -39,6 +39,7 @@ jobs:
           node scripts/test-shared-recognition-store-pglite.mjs
           node scripts/test-shared-continuation-pglite.mjs
           node scripts/test-yoon-resume-pglite.mjs
+          node scripts/test-yoon-egress-projection-pglite.mjs
           node scripts/test-yoon-spotify-pglite.mjs
           node scripts/test-private-migration-stages.mjs
           node scripts/test-yoon-registry-migration-stage.mjs

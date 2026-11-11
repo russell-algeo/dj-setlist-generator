@@ -7,7 +7,28 @@ at rollout because they do not take this lock. No timeout-based takeover.
 """
 CAP = 2
 LOCK_SQL = "SELECT pg_advisory_xact_lock(183601, 2)"
-ROWS_SQL = """SELECT r.id,r.target_set_id,r.status,r.source_metadata,
+def _object_fields_sql(expression, fields):
+    # Retain malformed/scalar/null values exactly so existing validators still
+    # fail closed. Missing versus explicit null keys are equivalent for these
+    # get-only consumers; no owner identity or lifecycle rule is changed.
+    pairs = ','.join("'%s',%s->'%s'" % (key, expression, key) for key in fields)
+    return "CASE WHEN jsonb_typeof(%s)='object' THEN jsonb_build_object(%s) ELSE %s END" % (expression, pairs, expression)
+
+
+def _admission_metadata_sql():
+    groups = {
+        'yoon_resume': ('review_required','in_flight','workflow_run_id','run_attempt'),
+        'yoon_analysis': ('workflow_run_id','run_attempt'),
+        'yoon_spotify_enrichment': ('status','owner'),
+        'yoon_spotify_recheck_v1': ('status','owner'),
+        'yoon_metadata_enrichment_v1': ('status','owner'),
+        'yoon_queue_v1': ('version','status','generation','owner'),
+    }
+    pairs = ','.join("'%s',%s" % (key, _object_fields_sql("r.source_metadata->'%s'" % key, fields)) for key, fields in groups.items())
+    return "CASE WHEN jsonb_typeof(r.source_metadata)='object' THEN jsonb_build_object(%s) ELSE r.source_metadata END" % pairs
+
+
+ROWS_SQL = """SELECT r.id,r.target_set_id,r.status,""" + _admission_metadata_sql() + """ AS source_metadata,
  EXISTS(SELECT 1 FROM ops.segment_hits h WHERE h.set_run_id=r.id
    AND h.raw_data->'private_jackson_v2'->>'in_flight'='true') AS uncertain_hit,
  EXISTS(SELECT 1 FROM ops.set_run_leases l WHERE l.set_run_id=r.id

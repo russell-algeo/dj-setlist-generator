@@ -258,7 +258,27 @@ class PrivateQueue:
         # Do not filter by status: malformed, null or falsely complete entries
         # are blockers, not an empty queue. No mutations or external calls here.
         with self.connect() as conn, conn.cursor() as cur:
-            cur.execute("""SELECT r.*,EXISTS(SELECT 1 FROM ops.set_run_leases l WHERE l.set_run_id=r.id
+            # Project only fields used by requires_review. Preserve additional
+            # queue owner keys in the state for the existing identity comparison.
+            cur.execute("""SELECT r.id,r.submission_id,r.target_set_id,r.collection_id,r.requested_by,r.status,
+                CASE WHEN jsonb_typeof(r.source_metadata)='object' THEN jsonb_build_object(
+                    'yoon_fixed_input',r.source_metadata->'yoon_fixed_input',
+                    'yoon_resume',CASE WHEN jsonb_typeof(r.source_metadata->'yoon_resume')='object' THEN
+                      (SELECT coalesce(jsonb_object_agg(k,v),'{}'::jsonb)
+                       FROM jsonb_each(CASE WHEN jsonb_typeof(r.source_metadata->'yoon_resume')='object'
+                         THEN r.source_metadata->'yoon_resume' ELSE '{}'::jsonb END) AS e(k,v)
+                       WHERE k IN ('version','members','review_required','in_flight','reason','status','workflow_run_id','run_attempt')
+                         OR CASE WHEN jsonb_typeof(r.source_metadata#>'{yoon_queue_v1,owner}')='object'
+                           THEN (r.source_metadata#>'{yoon_queue_v1,owner}') ? k ELSE false END)
+                      ELSE r.source_metadata->'yoon_resume' END,
+                    'yoon_queue_v1',CASE WHEN jsonb_typeof(r.source_metadata->'yoon_queue_v1')='object' THEN
+                      (SELECT coalesce(jsonb_object_agg(k,v),'{}'::jsonb)
+                       FROM jsonb_each(CASE WHEN jsonb_typeof(r.source_metadata->'yoon_queue_v1')='object'
+                         THEN r.source_metadata->'yoon_queue_v1' ELSE '{}'::jsonb END) AS e(k,v)
+                       WHERE k IN ('version','identity','status','generation','owner','reason'))
+                      ELSE r.source_metadata->'yoon_queue_v1' END)
+                  ELSE r.source_metadata END AS source_metadata,
+                EXISTS(SELECT 1 FROM ops.set_run_leases l WHERE l.set_run_id=r.id
                     AND l.status='claimed') AS claimed_lease,
                 EXISTS(SELECT 1 FROM ops.segment_hits h WHERE h.set_run_id=r.id
                     AND h.raw_data->'private_jackson_v2'->>'in_flight'='true') AS uncertain_hit
