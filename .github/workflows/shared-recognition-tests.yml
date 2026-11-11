@@ -44,6 +44,7 @@ jobs:
           node scripts/test-yoon-owner-projection-pglite.mjs
           node scripts/test-yoon-passive-guard-pglite.mjs
           node scripts/test-yoon-egress-projection-pglite.mjs
+          node scripts/test-yoon-enrichment-projection-pglite.mjs
           node scripts/test-yoon-windows-projection-pglite.mjs
           node scripts/test-yoon-spotify-pglite.mjs
           node scripts/test-private-migration-stages.mjs

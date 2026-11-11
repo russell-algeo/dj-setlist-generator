@@ -175,8 +175,8 @@ class Store:
             members = [dict(user_id=str(m['user_id']),role=m['role']) for m in cur.fetchall()]
             if len(members)!=2 or members!=state.get('members'):
                 raise RuntimeError('private_audience_changed')
-            cur.execute('SELECT segment_index,raw_data FROM ops.segment_hits '
-                        'WHERE set_run_id=%s ORDER BY segment_index FOR SHARE', (self.run_id,))
+            from worker.jobs.yoon_enrichment_projection import evidence_sql
+            cur.execute(evidence_sql(self.run_id), (self.run_id,))
             hits = cur.fetchall()
             origin = None
             if state.get('origin'):
