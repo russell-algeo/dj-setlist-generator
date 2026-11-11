@@ -152,10 +152,10 @@ class LockTests(unittest.TestCase):
             c.execute("INSERT INTO authn.users(id,email) VALUES('synthetic-owner','owner@example.invalid'),('synthetic-viewer','viewer@example.invalid')")
             now = c.execute('SELECT extract(epoch FROM clock_timestamp())::float8 AS now').fetchone()['now']
             common = dict(version=1, created_at=now, continuations=1, requests=0, throttle_requests=0, session_started=now, session_requests=0, next_allowed_at=0, review_required=False)
-            c.execute("INSERT INTO ops.submissions(id,requested_by,mode,status,visibility) VALUES(%s,'synthetic-owner','set','running','public')", (SUB,))
+            c.execute("INSERT INTO ops.submissions(id,requested_by,mode,status) VALUES(%s,'synthetic-owner','set','running')", (SUB,))
             state = dict(common, owner='9001:1', policy_version=3, request_limit=8, in_flight=False, in_flight_until=0, provider_next_allowed_at=0, geometry=dict(segment_duration=30, segment_overlap=15, segment_count=1))
             metadata = dict(active_workflow_run_id='9001', dispatch_generation='g', shared_recognition=state)
-            c.execute("INSERT INTO ops.set_runs(id,submission_id,requested_by,status,stage,source_url,publication_visibility,source_metadata) VALUES(%s,%s,'synthetic-owner','recognizing','recognizing','local:synthetic','public',%s::jsonb)", (RUN, SUB, json.dumps(metadata)))
+            c.execute("INSERT INTO ops.set_runs(id,submission_id,requested_by,status,stage,source_url,source_metadata) VALUES(%s,%s,'synthetic-owner','recognizing','recognizing','local:synthetic',%s::jsonb)", (RUN, SUB, json.dumps(metadata)))
             self.lease = c.execute('INSERT INTO ops.set_run_leases(set_run_id,slot_index,segment_start_index,segment_end_index,status,claimed_by) VALUES(%s,0,0,0,%s,%s) RETURNING id', (RUN, 'claimed', 'worker')).fetchone()['id']
         return Harness(self)
 
