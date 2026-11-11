@@ -99,7 +99,8 @@ class Store:
         self.owner = {'workflow_run_id': workflow_id, 'run_attempt': attempt}
         self.target = None
         from worker.db import connect
-        self.connect = connect
+        from worker.jobs.yoon_db_accounting import measured_connect
+        self.connect = measured_connect(connect)
 
     def read(self):
         with self.connect() as conn, conn.cursor() as cur:

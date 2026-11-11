@@ -52,6 +52,16 @@ def report(phase, error):
         pass
 
 
+def report_db_io(meter):
+    # One aggregate line per process, including failed sessions. No data/SQL.
+    if _fd is None:
+        return
+    try:
+        os.write(_fd, meter.line().encode('ascii'))
+    except Exception:
+        pass
+
+
 @contextmanager
 def phase(name):
     try:
@@ -66,7 +76,7 @@ def phase(name):
 
 def run():
     global _fd, _emitted
-    if sys.argv[1:] not in (['prepare'], ['recognize']):
+    if sys.argv[1:] not in (['prepare'], ['recognize'], ['release']):
         return 2
     # Preserve only the original diagnostic destination; suppress all library,
     # import, subprocess and traceback output before importing the private job.
@@ -76,8 +86,13 @@ def run():
         with open(os.devnull, 'w') as sink:
             os.dup2(sink.fileno(), 1)
             os.dup2(sink.fileno(), 2)
-        from worker.jobs.yoon_once import main
-        return main()
+        from worker.jobs.yoon_db_accounting import session
+        with session() as meter:
+            try:
+                from worker.jobs.yoon_once import main
+                return main()
+            finally:
+                report_db_io(meter)
     except Exception as error:
         report('entry', error)
         return 1

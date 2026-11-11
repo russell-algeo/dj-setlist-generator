@@ -13,7 +13,8 @@ class WorkflowTests(unittest.TestCase):
         job=self.jobs['private-release']
         for token in ['worker.callbacks','worker.jobs.process_set','upload-artifact','GH_PAT','PRODUCTION_DATABASE']:
             self.assertNotIn(token,job)
-        self.assertIn('python -m worker.jobs.yoon_once release >/dev/null 2>&1',job)
+        self.assertIn('python -m worker.jobs.yoon_recognition_diagnostics release',job)
+        self.assertNotIn('python -m worker.jobs.yoon_once',job)
         expr=re.search(r'if: \$\{\{ (.*?) \}\}',job).group(1)
         for enrichment,private,target,ref,tests in itertools.product(['true','false',''],['true','false',''],['development','production'],['refs/heads/preview','refs/heads/remote-deployment'],['success','failure','cancelled','skipped']):
             value=expr

@@ -86,11 +86,12 @@ class ResumeStore:
         if not workflow_id.isdecimal() or not attempt.isdecimal():
             raise RuntimeError('invalid_private_owner')
         self.owner = {'workflow_run_id': workflow_id, 'run_attempt': attempt}
-        self.connect = connect or default_connect
+        from worker.jobs.yoon_db_accounting import measured_connect
+        self.connect = measured_connect(connect or default_connect)
         self.source = JACKSON
 
     @contextmanager
-    def locked(self, *, owner=True, admission=False):
+    def locked(self, *, owner=True, admission=False, _owner_check=False):
         from worker.jobs.yoon_once import PRIVATE_GUARD, validate_descriptor
         with recognition_transaction(self.connect) as conn, conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '5s'")
@@ -98,7 +99,40 @@ class ResumeStore:
             if admission:
                 from worker.jobs.yoon_admission import lock
                 lock(cur)
-            cur.execute('''SELECT r.*, extract(epoch from clock_timestamp())::float8 AS db_now
+            # Keep validation in Python, including malformed/falsey JSON semantics.
+            # Default reads retain complete descriptor, resume and queue: unknown
+            # state fields must survive save_state, and queue identity is exact.
+            # Non-object roots pass through unchanged rather than being repaired.
+            # This changes only returned columns, not predicates or lock order.
+            # Only check_owner requests this read-only projection. All mutation
+            # paths and require_owner retain full state. Non-object resume values
+            # must pass through: Python dict(value or {}) also accepts pair lists.
+            if _owner_check:
+                projection = """SELECT r.collection_id,r.status,
+                    CASE WHEN jsonb_typeof(r.source_metadata)='object' THEN
+                        (SELECT coalesce(jsonb_object_agg(key,
+                            CASE WHEN key='yoon_resume' AND jsonb_typeof(value)='object' THEN
+                                (SELECT coalesce(jsonb_object_agg(sk,sv),'{}'::jsonb)
+                                 FROM jsonb_each(value) AS state_fields(sk,sv)
+                                 WHERE sk IN ('version','initialization_mode','origin',
+                                     'provenance_seeded','source_id','source_pins','members',
+                                     'workflow_run_id','run_attempt','review_required'))
+                            ELSE value END),'{}'::jsonb)
+                         FROM jsonb_each(r.source_metadata)
+                         WHERE key IN ('yoon_fixed_input','yoon_resume'))
+                    ELSE r.source_metadata END AS source_metadata
+"""
+            else:
+                projection = """SELECT r.id,r.submission_id,r.target_set_id,
+                r.collection_id,r.requested_by,r.status,
+                CASE WHEN jsonb_typeof(r.source_metadata)='object' THEN
+                    (SELECT coalesce(jsonb_object_agg(key,value),'{}'::jsonb)
+                     FROM jsonb_each(r.source_metadata)
+                     WHERE key IN ('yoon_fixed_input','yoon_resume','yoon_queue_v1'))
+                ELSE r.source_metadata END AS source_metadata,
+                extract(epoch from clock_timestamp())::float8 AS db_now
+"""
+            cur.execute(projection + '''
                 FROM ops.set_runs r, app.sets s, ops.submissions u, app.archive_collections c WHERE ''' + PRIVATE_GUARD + '''
                 AND u.cancel_requested_at IS NULL AND u.create_playlist=false
                 AND r.requested_by=u.requested_by AND c.id=r.collection_id
@@ -277,6 +311,13 @@ class ResumeStore:
         if cur.fetchone()['n']!=origin['valid_windows']:
             raise RuntimeError('private_origin_coverage_changed')
         state['provenance_seeded'] = True
+
+    @retry_lock_timeouts
+    def check_owner(self):
+        """Validate current scope/owner/review without returning mutable state."""
+        with self.locked(_owner_check=True) as (_, _, state):
+            if state.get('review_required'):
+                raise QueuePause('private_resume_review_required')
 
     @retry_lock_timeouts
     def require_owner(self):

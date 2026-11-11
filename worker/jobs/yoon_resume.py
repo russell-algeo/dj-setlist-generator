@@ -69,7 +69,7 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
 
     def before_attempt(segment):
         with phase('reserve'):
-            store.require_owner()
+            store.check_owner()
             return store.reserve(segment['index'],slot_index)
 
     def on_attempt(result,ticket,delay_seconds):
@@ -97,7 +97,7 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
                     # Check cancellation/owner throughout an inherited cooldown.
                     await asyncio.sleep(min(wait,15))
                     with phase('owner'):
-                        store.require_owner()
+                        store.check_owner()
                     continue
                 # Extract only missing windows. A seeded successful window is
                 # never sent again, including gaps inside a scheduler partition.
@@ -126,7 +126,7 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
                             # an in-flight stop can be noticed up to 8s later.
                             done,_ = await asyncio.wait({task},timeout=10)
                             with phase('owner'):
-                                store.require_owner()
+                                store.check_owner()
                             if done:
                                 with phase('batch'):
                                     await task

@@ -13,6 +13,7 @@ class FakeStore:
         self.now=0;self.state=initial_state(0)|dict(session_started=0,session_requests=0,audio_sha256=digest,continuations=1)
         self.valid=set(range(4));self.calls=[];self.completed=False;self.tickets={};self.finished=[];self.extractions=[]
     def require_owner(self):return self.state
+    def check_owner(self): self.require_owner()
     def clock_state(self):return self.now,self.state
     def next_windows(self,slot_index=0,limit=10):
         return [{'segment_index':i} for i in range(479) if i not in self.valid and (i//20)%2==slot_index][:limit],0

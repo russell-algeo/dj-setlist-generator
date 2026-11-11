@@ -34,6 +34,9 @@ class Store:
             raise self.owner_error
         return dict(source_id=JACKSON.id, audio_sha256=hashlib.sha256(b'synthetic').hexdigest())
 
+    def check_owner(self):
+        self.require_owner()
+
     def clock_state(self):
         return self.now, dict(self.state)
 

@@ -32,6 +32,9 @@ class Store:
             raise self.owner_error
         return dict(self.state)
 
+    def check_owner(self):
+        self.require_owner()
+
     def clock_state(self):
         return self.now, dict(self.state)
 

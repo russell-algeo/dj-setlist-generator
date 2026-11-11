@@ -53,6 +53,7 @@ class HaloSourceTests(unittest.TestCase):
                     audio_sha256=hashlib.sha256(b'synthetic').hexdigest())
                 self.valid=set();self.calls=[]
             def require_owner(self):return self.state
+            def check_owner(self): self.require_owner()
             def clock_state(self):return 0,self.state
             def next_windows(self,slot_index,limit):
                 return [{'segment_index':i} for i in range(HALO.windows) if i not in self.valid][:limit],0

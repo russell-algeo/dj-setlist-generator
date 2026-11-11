@@ -70,12 +70,14 @@ sys.modules[m.__name__]=m
 sys.argv=['diagnostics','recognize']
 raise SystemExit(d.run())
 '''
-        for operation in ('recognize', 'prepare'):
+        for operation in ('recognize', 'prepare', 'release'):
             with self.subTest(operation=operation):
                 result = subprocess.run([sys.executable, '-c', code.replace("'recognize'", repr(operation))], capture_output=True)
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout, b'')
-                self.assertEqual(result.stderr, b'private_recognition phase=entry exception=ValueError sqlstate=none\n')
+                from worker.jobs.yoon_db_accounting import Meter
+                self.assertEqual(result.stderr, Meter().line().encode('ascii')
+                    + b'private_recognition phase=entry exception=ValueError sqlstate=none\n')
 
     def test_entry_bootstrap_and_close_fail_without_traceback(self):
         for operation in ('dup', 'dup2', 'close'):
@@ -106,7 +108,8 @@ raise SystemExit(result)
         workflow = Path('.github/workflows/process-set.yml').read_text()
         self.assertIn('python -m worker.jobs.yoon_recognition_diagnostics recognize', workflow)
         self.assertIn('python -m worker.jobs.yoon_recognition_diagnostics prepare', workflow)
-        self.assertIn('python -m worker.jobs.yoon_once release >/dev/null 2>&1', workflow)
+        self.assertIn('python -m worker.jobs.yoon_recognition_diagnostics release', workflow)
+        self.assertNotIn('python -m worker.jobs.yoon_once release', workflow)
 
 
 class AdapterTests(unittest.TestCase):

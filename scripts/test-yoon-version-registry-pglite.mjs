@@ -115,6 +115,9 @@ os.environ['SET_LIST_DISPATCH_GENERATION']=reservation['generation']
 s=ResumeStore(run,'9001','1',connect=connect)
 s.claim()
 check(s.require_owner()['fresh_source_initialized'])
+full_state=s.require_owner()
+check(s.check_owner() is None)
+check(s.require_owner()==full_state)
 print(json.dumps({'done':True,'checks':checks}),file=sys.__stdout__,flush=True)
 `;
 const child=spawn(process.env.PYTHON||'python3',['-c',py],{stdio:['pipe','pipe','pipe']});let stderr='',done=false;child.stderr.on('data',d=>stderr+=d);

@@ -350,6 +350,8 @@ jobs:
           export NODE_PATH="$RUNNER_TEMP/private-tests/node_modules"
           export PYTHON="$(command -v python)"
           node scripts/test-yoon-resume-pglite.mjs
+          node scripts/test-yoon-owner-projection-pglite.mjs
+          node scripts/test-yoon-passive-guard-pglite.mjs
           node scripts/test-yoon-queue-pglite.mjs
           node scripts/test-yoon-egress-projection-pglite.mjs
           node scripts/test-yoon-windows-projection-pglite.mjs
@@ -485,7 +487,7 @@ jobs:
       - name: Release only the private continuation owner
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-        run: python -m worker.jobs.yoon_once release >/dev/null 2>&1
+        run: python -m worker.jobs.yoon_recognition_diagnostics release
 
   private-enrichment:
     if: ${{ github.event.inputs.resume_mode != 'private_queue' && (github.event.inputs.private_enrichment_only == 'true' && github.event.inputs.private_analysis == 'true' && github.event.inputs.deployment_target == 'development' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' && fromJSON(github.event.inputs.private_enrichment_expected || '{}').rich_metadata != true ) }}
