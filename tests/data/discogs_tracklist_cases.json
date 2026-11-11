@@ -1,0 +1,391 @@
+{
+  "fixture_notice": "Offline provider-shaped fixtures, not live Discogs receipts. Halo identities/release IDs and supported inclusion/version facts come from the 2026-11-10 audit. Sparse negative tracklists and placeholder labels/artists are deliberate synthetic adversarial cases; the incomplete Fries & Bridges audit is not asserted to prove absence from the real release.",
+  "cases": [
+    {
+      "name": "halo_mirror_boys_wrong_release",
+      "artist": "The Mirror Boys",
+      "title": "See the Music (1 AM Mix)",
+      "accept": false,
+      "release": {
+        "id": 1754177,
+        "title": "I Am The Source Of Light I Am Not A Mirror",
+        "artists": [
+          {
+            "name": "Reformed Faction"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "EP"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "I Am The Source Of Light",
+            "position": "1",
+            "type_": "track"
+          }
+        ]
+      }
+    },
+    {
+      "name": "halo_fries_bridges_overlapping_compilation_artists",
+      "artist": "Fries & Bridges",
+      "title": "Inside Out (Original Mix)",
+      "accept": false,
+      "release": {
+        "id": 6418285,
+        "title": "Ibiza Summerhouse Megamix 2012",
+        "artists": [
+          {
+            "name": "Various"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "Compilation",
+              "Mixed"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "Inside Out",
+            "position": "1",
+            "type_": "track",
+            "artists": [
+              {
+                "name": "Disco Fries"
+              },
+              {
+                "name": "Dacia Bridges"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "halo_sam_wrong_old_compilation",
+      "artist": "S.A.M.",
+      "title": "Got Me Down (Extended Mix)",
+      "accept": false,
+      "release": {
+        "id": 1871618,
+        "title": "100 Hits Dance Mix",
+        "artists": [
+          {
+            "name": "Various"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "Compilation",
+              "Mixed"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "Got Me Down",
+            "position": "1",
+            "type_": "track",
+            "artists": [
+              {
+                "name": "Unrelated Artist"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "halo_hippe_version_conflict",
+      "artist": "Hipp-E",
+      "title": "Fade Take",
+      "accept": false,
+      "release": {
+        "id": 1232978,
+        "title": "Renaissance 3D: Tom Middleton",
+        "artists": [
+          {
+            "name": "Tom Middleton"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "Compilation",
+              "Mixed"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "Fade (Palm Skin Productions Smooth Edit)",
+            "position": "1",
+            "type_": "track",
+            "artists": [
+              {
+                "name": "Hipp-E"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "halo_compound_compilation",
+      "artist": "Grooveyard & Michel de Hey",
+      "title": "Compound (M.I.R.K.O. Remix)",
+      "accept": true,
+      "release": {
+        "id": 1457944,
+        "title": "Sounds For Yourself",
+        "artists": [
+          {
+            "name": "Benny Rodrigues"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "Compilation",
+              "Mixed"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "Compound (M.I.R.K.O. Remix)",
+            "position": "1",
+            "type_": "track",
+            "artists": [
+              {
+                "name": "Grooveyard"
+              },
+              {
+                "name": "Michel de Hey"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "halo_tribalation_compilation",
+      "artist": "Tribalation",
+      "title": "Falling Down (Original Mix)",
+      "accept": true,
+      "release": {
+        "id": 1118178,
+        "title": "No Shoes No Cake",
+        "artists": [
+          {
+            "name": "Tyrant"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "Compilation",
+              "Mixed"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "Falling Down",
+            "position": "1",
+            "type_": "track",
+            "artists": [
+              {
+                "name": "Tribalation"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "halo_dj_garth_eti_compilation",
+      "artist": "DJ Garth & ETI",
+      "title": "20 Minutes of Disco Glory (Acid Rock Mix)",
+      "accept": true,
+      "release": {
+        "id": 27519315,
+        "title": "Conflict Free Paella",
+        "artists": [
+          {
+            "name": "Various"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "Compilation",
+              "Mixed"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "20 Minutes Of Disco Glory (Acid Rock Mix)",
+            "position": "1",
+            "type_": "track",
+            "artists": [
+              {
+                "name": "DJ Garth"
+              },
+              {
+                "name": "ETI"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "halo_tigerskin_ep",
+      "artist": "Tigerskin",
+      "title": "Checker",
+      "accept": true,
+      "release": {
+        "id": 514557,
+        "title": "The Trick EP",
+        "artists": [
+          {
+            "name": "Tigerskin"
+          }
+        ],
+        "formats": [
+          {
+            "name": "CD",
+            "descriptions": [
+              "EP"
+            ]
+          }
+        ],
+        "genres": [
+          "Electronic"
+        ],
+        "styles": [
+          "House"
+        ],
+        "labels": [
+          {
+            "name": "Fixture release label",
+            "id": 123
+          }
+        ],
+        "tracklist": [
+          {
+            "title": "Checker",
+            "position": "1",
+            "type_": "track",
+            "artists": [
+              {
+                "name": "Tigerskin"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

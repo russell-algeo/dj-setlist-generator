@@ -22,12 +22,15 @@ export const resolveArchiveTrackLinks = (input: {
     // A versioned per-entry null is authoritative. A historical null can
     // simply mean enrichment was disabled; preserve that legacy fallback.
     const own = Boolean(text(entry[key])) || Number(entry.link_matching_version) >= 2 ||
+      (platform === "discogs" && Number(entry.discogs_matching_version) >= 1) ||
       Object.hasOwn(record(entry.platform_matches), platform);
     const metadata = own ? entry : track;
     const url = own ? text(entry[key]) : input[`${platform}Url`] ?? text(track[key]);
     const evidence = record(record(metadata.platform_matches)[platform]);
     const hasEvidence = Object.keys(evidence).length > 0;
-    const requiresEvidence = Number(metadata.link_matching_version) >= 2 && platform !== "discogs";
+    const requiresEvidence = platform === "discogs"
+      ? Number(metadata.discogs_matching_version) >= 1
+      : Number(metadata.link_matching_version) >= 2;
     const confirmed = evidence.status === "matched" && evidence.url === url && Boolean(url);
     const status: ArchiveLinkStatus = confirmed ? "confirmed" : hasEvidence || requiresEvidence ? "unverified" : "legacy";
     urls[`${platform}Url`] = status === "unverified" ? null : url;
