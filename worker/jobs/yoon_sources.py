@@ -88,10 +88,15 @@ CATALOG = {source.id: source for source in (JACKSON, DONALD, HALO, GRISHA, HIGHK
 
 from worker.jobs.yoon_remaining_sources import build_remaining_sources, JOINED_CATALOG, reviewed_remaining_joined
 CATALOG.update(build_remaining_sources(Source))
+from worker.jobs.yoon_version_sources import build_version_sources, reviewed_version_source
+VERSION_CATALOG = build_version_sources(Source)
+CATALOG.update(VERSION_CATALOG)
 
 def reviewed_source(value):
     if not isinstance(value, dict):
         raise RuntimeError('fixed_input_mismatch')
+    if value.get('source_id') in VERSION_CATALOG:
+        return reviewed_version_source(value, VERSION_CATALOG)
     if value.get('source_id') in JOINED_CATALOG:
         return reviewed_remaining_joined(value)
     if value.get('source_id') == HIGHKIN.id:

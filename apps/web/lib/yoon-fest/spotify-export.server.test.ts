@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { buildYoonExportPlan, exportYoonPlaylist, type YoonExportDeps } from "./spotify-export.server";
 import { actor, authorizeFixture, fixture, principals } from "./fixtures.test-support";
 const request = (body: unknown = { entityType: "set", slug: "synthetic-set", confidenceFilter: "all" }, origin = "https://example.test") => new Request("https://example.test/api/yoon-fest/spotify/export", { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify(body) });
-const make = (): YoonExportDeps => ({ actor: vi.fn().mockResolvedValue(actor()), authorize: authorizeFixture, collection: vi.fn().mockReturnValue(fixture),
+const make = (): YoonExportDeps => ({ actor: vi.fn().mockResolvedValue(actor()), authorize: authorizeFixture, collection: vi.fn().mockReturnValue(fixture), releasedSet: vi.fn((_actor, slug) => fixture.sets.find((set) => set.slug === slug) ?? null),
   refresh: vi.fn().mockResolvedValue({ accessToken: "synthetic-secret-not-for-response", spotifyUserId: "synthetic-spotify-account", scopes: ["playlist-modify-private"], expiresIn: 60 }),
   fetch: vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ id: "synthetic-playlist", name: "Synthetic Set", external_urls: { spotify: "https://open.spotify.com/playlist/synthetic-playlist" } }) }).mockResolvedValue({ ok: true }),
 });
 describe("private Yoon Spotify export", () => {
-  it.each([null, actor("outsider"), actor("outsider", { isAdmin: true, isAllowlisted: true })])("denies before data resolution or Spotify access", async (viewer) => { const deps = make(); deps.actor = async () => viewer; expect((await exportYoonPlaylist(request(), deps)).status).toBe(404); expect(deps.collection).not.toHaveBeenCalled(); expect(deps.refresh).not.toHaveBeenCalled(); expect(deps.fetch).not.toHaveBeenCalled(); });
-  it.each(["https://outsider.test", "null", ""])("rejects cross-origin/originless write %s", async (origin) => { const deps = make(); expect((await exportYoonPlaylist(request(undefined, origin), deps)).status).toBe(403); expect(deps.collection).not.toHaveBeenCalled(); expect(deps.fetch).not.toHaveBeenCalled(); });
+  it.each([null, actor("outsider"), actor("outsider", { isAdmin: true, isAllowlisted: true })])("denies before data resolution or Spotify access", async (viewer) => { const deps = make(); deps.actor = async () => viewer; expect((await exportYoonPlaylist(request(), deps)).status).toBe(404); expect(deps.collection).not.toHaveBeenCalled(); expect(deps.releasedSet).not.toHaveBeenCalled(); expect(deps.refresh).not.toHaveBeenCalled(); expect(deps.fetch).not.toHaveBeenCalled(); });
+  it.each(["https://outsider.test", "null", ""])("rejects cross-origin/originless write %s", async (origin) => { const deps = make(); expect((await exportYoonPlaylist(request(undefined, origin), deps)).status).toBe(403); expect(deps.collection).not.toHaveBeenCalled(); expect(deps.releasedSet).not.toHaveBeenCalled(); expect(deps.fetch).not.toHaveBeenCalled(); });
   it("creates the requested playlist only in the authenticated actor's account", async () => {
     const deps = make(); const response = await exportYoonPlaylist(request(), deps);
     expect(response.status).toBe(201); expect(deps.refresh).toHaveBeenCalledWith(principals.russellUserId);
@@ -39,4 +39,22 @@ describe("private Yoon Spotify export", () => {
   });
   it("reports partial creation without retrying or exposing raw errors", async () => { const deps = make(); vi.mocked(deps.fetch).mockReset().mockResolvedValueOnce({ ok: true, json: async () => ({ id: "partial", name: "Synthetic" }) } as Response).mockResolvedValueOnce({ ok: false, text: async () => "sensitive remote details" } as Response); const r = await exportYoonPlaylist(request(), deps); expect(r.status).toBe(502); const body = await r.text(); expect(body).toContain("Check it in Spotify"); expect(body).not.toContain("sensitive remote details"); expect(deps.fetch).toHaveBeenCalledTimes(2); });
   it("does not create when the existing grant lacks playlist permission", async () => { const deps = make(); vi.mocked(deps.refresh).mockResolvedValue({ accessToken: "secret", spotifyUserId: "id", scopes: [], expiresIn: 60 }); expect((await exportYoonPlaylist(request(), deps)).status).toBe(502); expect(deps.fetch).not.toHaveBeenCalled(); });
+});
+
+it("exports explicit released history without falling back to the currently selected collection", async () => {
+  const deps = make(); deps.collection = vi.fn().mockReturnValue({ ...fixture, sets: [] });
+  expect((await exportYoonPlaylist(request(), deps)).status).toBe(201);
+  expect(deps.releasedSet).toHaveBeenCalledWith(actor(), "synthetic-set");
+  expect(deps.collection).not.toHaveBeenCalled();
+});
+it.each(["staged", "unknown", "malformed"])("denies a member an excluded %s export before any Spotify call", async () => {
+  const deps = make(); deps.releasedSet = vi.fn().mockReturnValue(null);
+  const response = await exportYoonPlaylist(request(), deps);
+  expect(response.status).toBe(404); expect(response.headers.get("Cache-Control")).toContain("no-store");
+  expect(deps.refresh).not.toHaveBeenCalled(); expect(deps.fetch).not.toHaveBeenCalled();
+});
+it("festival export resolves only the selected collection and never enumerates history", async () => {
+  const deps = make();
+  expect((await exportYoonPlaylist(request({ entityType: "festival", slug: "yoon-fest", confidenceFilter: "all" }), deps)).status).toBe(201);
+  expect(deps.collection).toHaveBeenCalledWith(actor()); expect(deps.releasedSet).not.toHaveBeenCalled();
 });

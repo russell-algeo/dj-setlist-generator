@@ -10,13 +10,13 @@ export function collectionMemberPredicate(collectionId: SQLWrapper, userId: stri
 }
 
 export function readableSetPredicate(userId: string | null): SQL {
-  return or(eq(sets.visibility, "public"), and(eq(sets.visibility, "private"), collectionMemberPredicate(sets.collectionId, userId)))!;
+  return or(eq(sets.visibility, "public"), and(eq(sets.visibility, "private"), sql`app.yoon_version_readable(${sets.id}, false)`, collectionMemberPredicate(sets.collectionId, userId)))!;
 }
 
 export function readableSubmissionPredicate(userId: string, isAdmin: boolean): SQL {
   return or(
     and(eq(submissions.visibility, "public"), isAdmin ? sql`true` : eq(submissions.requestedBy, userId)),
-    and(eq(submissions.visibility, "private"), collectionMemberPredicate(submissions.collectionId, userId)),
+    and(eq(submissions.visibility, "private"), sql`app.yoon_submission_version_readable(${submissions.id})`, collectionMemberPredicate(submissions.collectionId, userId)),
   )!;
 }
 
@@ -24,7 +24,7 @@ export function readableSubmissionPredicate(userId: string, isAdmin: boolean): S
 export function manageableSubmissionPredicate(userId: string, isAdmin: boolean): SQL {
   return or(
     and(eq(submissions.visibility, "public"), isAdmin ? sql`true` : eq(submissions.requestedBy, userId)),
-    and(eq(submissions.visibility, "private"), sql`exists (select 1 from app.archive_collection_members member
+    and(eq(submissions.visibility, "private"), sql`app.yoon_submission_version_readable(${submissions.id})`, sql`exists (select 1 from app.archive_collection_members member
       where member.collection_id = ${submissions.collectionId} and member.user_id = ${userId} and member.role = 'manager')`),
   )!;
 }

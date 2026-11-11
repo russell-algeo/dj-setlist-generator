@@ -128,6 +128,7 @@ BEGIN
      THEN RAISE EXCEPTION 'private_queue_existing_identity_changed'; END IF;
      CONTINUE;
    END IF;
+   PERFORM ops.assert_yoon_version_execution(current_row.id, 'enqueue', NULL);
    IF current_row.status IS DISTINCT FROM expected->>'status'
       OR current_row.status NOT IN ('private_resume_pending','private_resume_paused','private_resume_complete')
       OR encode(digest((current_row.source_metadata-'yoon_queue_v1')::text,'sha256'),'hex') IS DISTINCT FROM expected->>'state_sha256'

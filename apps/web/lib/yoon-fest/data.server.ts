@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { unstable_noStore as noStore } from "next/cache";
 import type { SessionActor } from "@/lib/auth/session";
 import type { ArchiveSetDetail } from "@/lib/archive/types";
@@ -15,24 +15,38 @@ const record = (value: unknown): Record<string, unknown> => value && typeof valu
 
 // Same Neon tables as the public archive. Membership is part of each data query,
 // not just a page guard. No shared cache, fixture fallback, or URL-based ownership.
-export async function loadYoonCollection(actor: SessionActor): Promise<YoonCollection> {
+type VersionLookup = { kind: "selected" } | { kind: "slug"; slug: string } | { kind: "asset"; assetId: string };
+
+// No exported all-history collection reader: historical access requires an exact identity.
+async function loadYoonVersions(actor: SessionActor, lookup: VersionLookup): Promise<YoonCollection> {
   noStore();
   await assertYoonAccess(actor);
+  // A route segment is untrusted text; never let an invalid UUID become a DB error.
+  if (lookup.kind === "asset" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lookup.assetId)) {
+    return { collection: "yoon-fest", revision: "neon", sets: [] };
+  }
   const db = getDb();
   const membership = and(eq(archiveCollectionMembers.collectionId, sets.collectionId), eq(archiveCollectionMembers.userId, actor.userId));
   const privateCollection = and(eq(sets.visibility, "private"), eq(archiveCollections.slug, "yoon-fest"));
+  const version = sql`app.yoon_version_readable(${sets.id}, ${lookup.kind === "selected"})`;
+  const identity = lookup.kind === "slug" ? eq(sets.slug, lookup.slug)
+    : lookup.kind === "asset" ? eq(setMedia.id, lookup.assetId) : undefined;
   const rows = await db.select({ id: sets.id, slug: sets.slug, title: sets.title, metadata: sets.metadata, updatedAt: sets.updatedAt,
     audioId: setMedia.id, revision: setMedia.revision, duration: setMedia.durationSeconds,
     contentType: setMedia.contentType, sourceSpans: setMedia.sourceSpans, sources: setMedia.recordingSources })
     .from(sets).innerJoin(archiveCollections, eq(archiveCollections.id, sets.collectionId))
     .innerJoin(archiveCollectionMembers, membership).innerJoin(setMedia, eq(setMedia.setId, sets.id))
-    .where(privateCollection).orderBy(asc(sets.createdAt), asc(sets.id));
+    .where(and(privateCollection, version, identity)).orderBy(asc(sets.createdAt), asc(sets.id));
   const entries = rows.length ? await db.select({ setId: setEntries.setId, position: setEntries.position,
     artist: setEntries.displayArtist, title: setEntries.displayTitle, start: setEntries.startTimeSeconds,
     end: setEntries.endTimeSeconds, detectionCount: setEntries.detectionCount, clusterDensity: setEntries.clusterDensity, clusterSpan: setEntries.clusterSpan, confidence: setEntries.confidence, metadata: setEntries.metadata })
     .from(setEntries).innerJoin(sets, eq(sets.id, setEntries.setId))
     .innerJoin(archiveCollections, eq(archiveCollections.id, sets.collectionId))
-    .innerJoin(archiveCollectionMembers, membership).where(privateCollection)
+    .innerJoin(archiveCollectionMembers, membership)
+    // Pin entries to the resolved immutable versions, not a second selection snapshot.
+    // Released history remains readable if promotion happens between these queries.
+    .where(and(privateCollection, inArray(sets.id, rows.map((row) => row.id)),
+      sql`app.yoon_version_readable(${sets.id}, false)`))
     .orderBy(asc(setEntries.position)) : [];
   return yoonCollectionSchema.parse({ collection: "yoon-fest", revision: "neon", sets: rows.map((row) => {
     const metadata = record(row.metadata); const mixInfo = record(metadata.mixInfo);
@@ -62,9 +76,17 @@ export async function loadYoonCollection(actor: SessionActor): Promise<YoonColle
   }) });
 }
 
+export async function loadYoonCollection(actor: SessionActor): Promise<YoonCollection> {
+  return loadYoonVersions(actor, { kind: "selected" });
+}
+
+export async function getYoonSetByAsset(actor: SessionActor, assetId: string): Promise<YoonSet | null> {
+  return (await loadYoonVersions(actor, { kind: "asset", assetId })).sets[0] ?? null;
+}
+
 export async function getYoonSets(actor: SessionActor) { return (await loadYoonCollection(actor)).sets; }
 export async function getYoonSet(actor: SessionActor, slug: string) {
-  return (await getYoonSets(actor)).find((set) => set.slug === slug) ?? null;
+  return (await loadYoonVersions(actor, { kind: "slug", slug })).sets[0] ?? null;
 }
 
 // Explicit projection: never serialize the private source metadata into React props.

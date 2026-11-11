@@ -78,6 +78,8 @@ def occupied(row):
 def check(cur, run_id, target_set_id, *, generation=None):
     # Caller owns the global admission transaction lock and the target row lock.
     # Release never creates occupancy and therefore needs no global lock.
+    cur.execute('SELECT ops.assert_yoon_version_execution(%s, %s, %s)',
+                (str(run_id), 'admit', generation))
     cur.execute(ROWS_SQL)
     active = []
     for row in cur.fetchall():

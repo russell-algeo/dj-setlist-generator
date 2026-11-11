@@ -349,6 +349,10 @@ jobs:
           node scripts/test-yoon-queue-enqueue-pglite.mjs
           node --import "$RUNNER_TEMP/private-tests/node_modules/tsx/dist/loader.mjs" scripts/test-yoon-queue-dispatch-pglite.ts
           node scripts/test-private-migration-stages.mjs
+          node scripts/test-yoon-registry-migration-stage.mjs
+          node scripts/test-yoon-registry-acl-pglite.mjs
+          node scripts/test-yoon-version-registry-pglite.mjs
+          node scripts/test-yoon-version-sources-pglite.mjs
   private-prepare:
     outputs:
       complete: ${{ steps.private_prepare.outputs.complete }}

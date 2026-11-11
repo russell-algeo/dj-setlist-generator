@@ -6,7 +6,7 @@ const { select, authorize, joins, predicates, queue } = vi.hoisted(() => ({ sele
 vi.mock("@/lib/db/client", () => ({ getDb: () => ({ select }) }));
 vi.mock("./access.server", () => ({ assertYoonAccess: authorize }));
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }));
-import { loadYoonCollection, toYoonSetDetail } from "./data.server";
+import { getYoonSet, getYoonSetByAsset, loadYoonCollection, toYoonSetDetail } from "./data.server";
 const example = fixture.sets[0]!;
 describe("private collection reader", () => {
   it.skipIf(!process.env.YOON_PARITY_PLAN_FILE)("projects the local private production receipt end to end (fixture is never committed)", async () => {
@@ -95,7 +95,71 @@ describe("private collection reader", () => {
     const result = await loadYoonCollection(actor()); expect(result.sets).toMatchObject(fixture.sets);
     const compile = (value: unknown) => new PgDialect().sqlToQuery(value as Parameters<PgDialect["sqlToQuery"]>[0]);
     expect(joins.map(compile).filter((q) => q.params.includes(actor().userId))).toHaveLength(2);
-    for (const query of predicates.map(compile)) expect(query.params).toEqual(["private", "yoon-fest"]);
+    const [selection, entries] = predicates.map(compile);
+    expect(selection!.params).toEqual(["private", "yoon-fest", true]);
+    expect(selection!.sql).toContain("app.yoon_version_readable");
+    expect(entries!.sql).toContain("app.yoon_version_readable");
+    expect(entries!.sql).toContain(", false)");
+    expect(entries!.params).toEqual(["private", "yoon-fest", example.id]);
     expect(JSON.stringify(result)).not.toContain("private_raw_evidence");
+  });
+});
+
+describe("version identity query boundaries", () => {
+  beforeEach(() => {
+    vi.clearAllMocks(); joins.length = 0; predicates.length = 0; queue.length = 0;
+    authorize.mockResolvedValue(undefined);
+    select.mockImplementation(() => {
+      const rows = queue.shift() ?? [];
+      const builder = { innerJoin: (_table: unknown, condition: unknown) => { joins.push(condition); return builder; },
+        where: (condition: unknown) => { predicates.push(condition); return builder; }, orderBy: async () => rows };
+      return { from: () => builder };
+    });
+  });
+  const compile = (value: unknown) => new PgDialect().sqlToQuery(value as Parameters<PgDialect["sqlToQuery"]>[0]);
+  const row = (id = example.id, slug = example.slug, audioId = example.audio.assetId) => ({
+    id, slug, title: example.title,
+    metadata: { mixInfo: { artist_name: example.performer }, boundaryStatus: example.boundaryStatus, boundaryNote: example.boundaryNote },
+    audioId, revision: example.audio.revision, duration: "20", contentType: "audio/wav", sourceSpans: example.spans, sources: example.audio.sources,
+  });
+  it.each(["slug", "asset"] as const)("resolves released history by exact %s without a selected-only collection lookup", async (kind) => {
+    queue.push([row()], []);
+    const result = kind === "slug" ? await getYoonSet(actor(), example.slug) : await getYoonSetByAsset(actor(), example.audio.assetId);
+    expect(result?.id).toBe(example.id);
+    const [lookup, entries] = predicates.map(compile);
+    expect(lookup!.sql).toContain("app.yoon_version_readable");
+    expect(lookup!.params).toEqual(["private", "yoon-fest", false, kind === "slug" ? example.slug : example.audio.assetId]);
+    expect(entries!.params).toEqual(["private", "yoon-fest", example.id]);
+    expect(joins.map(compile).filter((q) => q.params.includes(actor().userId))).toHaveLength(2);
+    expect(JSON.stringify(toYoonSetDetail(result!))).not.toContain(example.audio.sources[0]!.url);
+  });
+  it("pins selected results and media to the same resolved version even across a pointer switch", async () => {
+    const v2Id = "00000000-0000-4000-8000-000000000002";
+    const v2Asset = "00000000-0000-4000-8000-000000000003";
+    queue.push([row(v2Id, "synthetic-v2", v2Asset)], [{ setId: v2Id, position: 1, artist: "V2", title: "Fresh results", start: 0, end: 20, confidence: "HIGH", metadata: {} }]);
+    const selected = (await loadYoonCollection(actor())).sets;
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toMatchObject({ id: v2Id, audio: { assetId: v2Asset }, tracks: [{ artist: "V2", title: "Fresh results" }] });
+    const [lookup, entries] = predicates.map(compile);
+    expect(lookup!.params).toContain(true);
+    expect(entries!.params).toContain(v2Id);
+    expect(entries!.params).not.toContain(example.id);
+    expect(entries!.sql).toContain(", false)");
+  });
+  it.each(["staged", "unknown", "malformed"])("returns no detail, media or entries when the registry excludes %s", async (identity) => {
+    expect(await getYoonSet(actor(), identity)).toBeNull();
+    expect(await getYoonSetByAsset(actor(), "00000000-0000-4000-8000-000000000099")).toBeNull();
+    expect(select).toHaveBeenCalledTimes(2); // No entry reads for excluded rows.
+    for (const q of predicates.map(compile)) expect(q.sql).toContain("app.yoon_version_readable");
+  });
+  it("denies malformed asset identifiers without a UUID cast or database lookup", async () => {
+    expect(await getYoonSetByAsset(actor(), "not-a-uuid")).toBeNull();
+    expect(select).not.toHaveBeenCalled();
+  });
+  it.each([actor("outsider"), actor("outsider", { isAdmin: true })])("does not resolve historical identity for an unauthorized actor", async (viewer) => {
+    authorize.mockRejectedValue(new Error("Not found"));
+    await expect(getYoonSet(viewer, example.slug)).rejects.toThrow("Not found");
+    await expect(getYoonSetByAsset(viewer, example.audio.assetId)).rejects.toThrow("Not found");
+    expect(select).not.toHaveBeenCalled();
   });
 });

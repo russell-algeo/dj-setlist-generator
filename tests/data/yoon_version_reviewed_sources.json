@@ -1,0 +1,1949 @@
+{
+  "model_version": "user-mean-gaps-v2-20261110",
+  "pinned_inputs": {
+    "source-impact-v2.json": "161a47a34868f6825a2c1ec8898a607e6dc38e21e4f55422f9fdbf35eca7a092",
+    "timing-map-v2.json": "358efd6c0909982df7f315c5539d8da90512c027d6ed27122a8a47b813dcd89b"
+  },
+  "legacy_sources": {
+    "jackson-sunday": {
+      "source_sha256": "aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 3120,
+      "source_end_seconds": 10320
+    },
+    "donald-two-hour": {
+      "source_sha256": "f8dd7ca1282c64ae4889fdb06fdb3a5e1a373849fe3062f7f47f8c86cdb95d1c",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 3371,
+      "source_end_seconds": 10571
+    },
+    "halo-varga-sunday": {
+      "source_sha256": "aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 10320,
+      "source_end_seconds": 15720
+    },
+    "grisha-sunday": {
+      "source_sha256": "a67425f4a8f30a20912ff337b4bf7706cff6e25acfa88a48e4647592f4d31da6",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 4934.883265306123,
+      "source_end_seconds": 12134.883265306122,
+      "source_start_frame": 217628352,
+      "source_end_frame": 535148352,
+      "source_sample_rate": 44100
+    },
+    "highkin-sunday": {
+      "source_parts": [
+        {
+          "filename": "260621_0129_3-4.wav",
+          "sha256": "a67425f4a8f30a20912ff337b4bf7706cff6e25acfa88a48e4647592f4d31da6",
+          "bytes": 4290463660,
+          "start_frame": 535148352,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260621_0130_3-4.wav",
+          "sha256": "aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 137592000,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 7200,
+      "source_total_frames": 317520000
+    },
+    "deep-house-dad-capes-sunday": {
+      "source_sha256": "f8dd7ca1282c64ae4889fdb06fdb3a5e1a373849fe3062f7f47f8c86cdb95d1c",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 10364.649795918367,
+      "source_end_seconds": 15764.649795918367,
+      "source_start_frame": 457081056,
+      "source_end_frame": 695221056,
+      "source_sample_rate": 44100
+    },
+    "brett-johnson-sunday": {
+      "source_sha256": "8e8bc76d49a050424fe01bad5e368033eda4a41466bb20176397e78686d15fac",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 4905.116734693877,
+      "source_end_seconds": 12105.116734693878,
+      "source_start_frame": 216315648,
+      "source_end_frame": 533835648,
+      "source_sample_rate": 44100
+    },
+    "sky-rivers-adam-rose-sunday": {
+      "source_sha256": "2fc487280143ebc13dcac26280c0f74eb778a4b7ae6cbea8d9bd4b719636c3e5",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 4949.766530612245,
+      "source_end_seconds": 13949.766530612245,
+      "source_start_frame": 218284704,
+      "source_end_frame": 615184704,
+      "source_sample_rate": 44100
+    },
+    "choice-friday": {
+      "source_sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 5375.645714285714,
+      "source_end_seconds": 12575.645714285714,
+      "source_start_frame": 237065976,
+      "source_end_frame": 554585976,
+      "source_sample_rate": 44100
+    },
+    "sydka-live-friday": {
+      "source_sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 1760.762448979592,
+      "source_end_seconds": 7160.762448979592,
+      "source_start_frame": 77649624,
+      "source_end_frame": 315789624,
+      "source_sample_rate": 44100
+    },
+    "jake-mora-friday": {
+      "source_sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 7160.762448979592,
+      "source_end_seconds": 12560.762448979593,
+      "source_start_frame": 315789624,
+      "source_end_frame": 553929624,
+      "source_sample_rate": 44100
+    },
+    "artur-saturday": {
+      "source_sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 1745.8791836734695,
+      "source_end_seconds": 7145.879183673469,
+      "source_start_frame": 76993272,
+      "source_end_frame": 315133272,
+      "source_sample_rate": 44100
+    },
+    "airgordon-saturday": {
+      "source_sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 7145.879183673469,
+      "source_end_seconds": 12545.879183673469,
+      "source_start_frame": 315133272,
+      "source_end_frame": 553273272,
+      "source_sample_rate": 44100
+    },
+    "barbie-fish-santiago-gammelli-saturday": {
+      "source_sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 1730.995918367347,
+      "source_end_seconds": 8930.995918367347,
+      "source_start_frame": 76336920,
+      "source_end_frame": 393856920,
+      "source_sample_rate": 44100
+    },
+    "pily-saturday": {
+      "source_sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 8930.995918367347,
+      "source_end_seconds": 14330.995918367347,
+      "source_start_frame": 393856920,
+      "source_end_frame": 631996920,
+      "source_sample_rate": 44100
+    },
+    "jay-dee-saturday": {
+      "source_sha256": "343530f5fa70b004fa05395933f968851fa8b1fb6f646a5bb3b83f4bbd6a7bfd",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 4994.416326530612,
+      "source_end_seconds": 10394.416326530612,
+      "source_start_frame": 220253760,
+      "source_end_frame": 458393760,
+      "source_sample_rate": 44100
+    },
+    "adam-rose-miro-saturday": {
+      "source_sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 1379.5330612244898,
+      "source_end_seconds": 8579.53306122449,
+      "source_start_frame": 60837408,
+      "source_end_frame": 378357408,
+      "source_sample_rate": 44100
+    },
+    "sinead-saturday": {
+      "source_sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+      "source_bytes": 4290463660,
+      "source_start_seconds": 8579.53306122449,
+      "source_end_seconds": 13979.53306122449,
+      "source_start_frame": 378357408,
+      "source_end_frame": 616497408,
+      "source_sample_rate": 44100
+    },
+    "hank-friday": {
+      "source_parts": [
+        {
+          "filename": "260619_0119_3-4.wav",
+          "sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+          "bytes": 4290463660,
+          "start_frame": 554585976,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 77649624,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 5400,
+      "source_total_frames": 238140000
+    },
+    "honeydu-saturday": {
+      "source_parts": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "bytes": 4290463660,
+          "start_frame": 553929624,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 76993272,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 5400,
+      "source_total_frames": 238140000
+    },
+    "hunter-foshee-saturday": {
+      "source_parts": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "bytes": 4290463660,
+          "start_frame": 553273272,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260620_0122_3-4.wav",
+          "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 76336920,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 5400,
+      "source_total_frames": 238140000
+    },
+    "doza-lawnchair-generals-saturday": {
+      "source_parts": [
+        {
+          "filename": "260620_0125_3-4.wav",
+          "sha256": "343530f5fa70b004fa05395933f968851fa8b1fb6f646a5bb3b83f4bbd6a7bfd",
+          "bytes": 4290463660,
+          "start_frame": 458393760,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260620_0126_3-4.wav",
+          "sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 60837408,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 7200,
+      "source_total_frames": 317520000
+    },
+    "krane-saturday": {
+      "source_parts": [
+        {
+          "filename": "260620_0126_3-4.wav",
+          "sha256": "f6ea42dab6d80e97c86c08a40a986f53a8538bdb79323b5558f18da67057d010",
+          "bytes": 4290463660,
+          "start_frame": 616497408,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260621_0127_3-4.wav",
+          "sha256": "f8dd7ca1282c64ae4889fdb06fdb3a5e1a373849fe3062f7f47f8c86cdb95d1c",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 139561056,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 5400,
+      "source_total_frames": 238140000
+    },
+    "max-coletto-hazy-sunday": {
+      "source_parts": [
+        {
+          "filename": "260621_0127_3-4.wav",
+          "sha256": "f8dd7ca1282c64ae4889fdb06fdb3a5e1a373849fe3062f7f47f8c86cdb95d1c",
+          "bytes": 4290463660,
+          "start_frame": 695221056,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260621_0128_3-4.wav",
+          "sha256": "2fc487280143ebc13dcac26280c0f74eb778a4b7ae6cbea8d9bd4b719636c3e5",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 218284704,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 5400,
+      "source_total_frames": 238140000
+    },
+    "4yo4u-jahnsen-local-jerry-sunday": {
+      "source_parts": [
+        {
+          "filename": "260621_0128_3-4.wav",
+          "sha256": "2fc487280143ebc13dcac26280c0f74eb778a4b7ae6cbea8d9bd4b719636c3e5",
+          "bytes": 4290463660,
+          "start_frame": 615184704,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260621_0129_3-4.wav",
+          "sha256": "a67425f4a8f30a20912ff337b4bf7706cff6e25acfa88a48e4647592f4d31da6",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 217628352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 7200,
+      "source_total_frames": 317520000
+    },
+    "mungo-sound-machine-sunday": {
+      "source_parts": [
+        {
+          "filename": "260621_0130_3-4.wav",
+          "sha256": "aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae",
+          "bytes": 4290463660,
+          "start_frame": 693252000,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260621_0131_3-4.wav",
+          "sha256": "8e8bc76d49a050424fe01bad5e368033eda4a41466bb20176397e78686d15fac",
+          "bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame": 216315648,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 5400,
+      "source_total_frames": 238140000
+    },
+    "danny-daze-sunday": {
+      "source_parts": [
+        {
+          "filename": "260621_0131_3-4.wav",
+          "sha256": "8e8bc76d49a050424fe01bad5e368033eda4a41466bb20176397e78686d15fac",
+          "bytes": 4290463660,
+          "start_frame": 533835648,
+          "end_frame": 715076352,
+          "total_frames": 715076352,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        },
+        {
+          "filename": "260621_0132_3-4.wav",
+          "sha256": "3f80aaabf7357e6848fccbfa75d9d43e0724388126ae88a8d3cc62b1b93c2cb7",
+          "bytes": 1856824492,
+          "start_frame": 0,
+          "end_frame": 136279296,
+          "total_frames": 309469824,
+          "sample_rate": 44100,
+          "channels": 2,
+          "sample_width": 3
+        }
+      ],
+      "source_duration_seconds": 7200,
+      "source_total_frames": 317520000
+    }
+  },
+  "plans": [
+    {
+      "slot": 20,
+      "title": "Airgordon",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "airgordon-saturday-mean-gaps-v2",
+      "predecessor_source_id": "airgordon-saturday",
+      "logical_set_id": "993fcd7f-b399-585e-b673-57c5d8a5ae43",
+      "predecessor_ids": {
+        "set_id": "993fcd7f-b399-585e-b673-57c5d8a5ae43",
+        "submission_id": "d7d514cf-c3b1-5c2e-8c2e-d2737b351846",
+        "run_id": "91d990fd-64db-59a9-b325-0dc3e74c8e25",
+        "media_id": "34e9eb44-bad0-53e0-96d8-e635db52551f"
+      },
+      "proposed_ids": {
+        "set_id": "ef5f147f-f403-56bb-a5ac-9b585906c02e",
+        "submission_id": "7aa4c603-c82b-5cf3-a811-f1ee2aa5979b",
+        "run_id": "54a97b8c-157a-5ea7-b64a-d0351e737d4e",
+        "media_id": "a1a2c207-4823-5632-82e4-c9ae56ca6d97"
+      },
+      "predecessor_descriptor_pins": {
+        "source_sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 7145.879183673469,
+        "source_end_seconds": 12545.879183673469,
+        "source_start_frame": 315133272,
+        "source_end_frame": 553273272,
+        "source_sample_rate": 44100
+      },
+      "descriptor_without_private_locator": {
+        "source_sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 7085.016099773243,
+        "source_end_seconds": 12485.016099773242,
+        "source_start_frame": 312449210,
+        "source_end_frame": 550589210,
+        "source_sample_rate": 44100,
+        "source_id": "airgordon-saturday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "source_bytes": 4290463660,
+          "start_frame": 312449210,
+          "end_frame_exclusive": 550589210,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 624898419,
+            "denominator": 2,
+            "decimal": 312449209.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 1101178419,
+            "denominator": 2,
+            "decimal": 550589209.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0121_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 312449210,
+          "endSample": 550589210
+        }
+      ],
+      "media_revision": "airgordon-saturday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 19,
+      "title": "Artur",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "artur-saturday-mean-gaps-v2",
+      "predecessor_source_id": "artur-saturday",
+      "logical_set_id": "ec17fc00-fcaf-536d-929b-394d4dec7242",
+      "predecessor_ids": {
+        "set_id": "ec17fc00-fcaf-536d-929b-394d4dec7242",
+        "submission_id": "9c5adaba-5fa5-5c78-b0a8-9d7d33a7a869",
+        "run_id": "0d9d7fa7-dd0a-56a6-9d1e-b197ba8a9fd7",
+        "media_id": "254eed50-523a-5388-9c40-0a29576b630d"
+      },
+      "proposed_ids": {
+        "set_id": "8a3804db-90e9-5afa-b65e-02c22526826e",
+        "submission_id": "813d36ae-a097-51ff-ac83-3fd7575bfaaf",
+        "run_id": "31d068aa-1d30-5018-9b93-c01ddfaf3fd7",
+        "media_id": "b3432519-7fed-5c39-9f43-bf89df5b4f81"
+      },
+      "predecessor_descriptor_pins": {
+        "source_sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 1745.8791836734695,
+        "source_end_seconds": 7145.879183673469,
+        "source_start_frame": 76993272,
+        "source_end_frame": 315133272,
+        "source_sample_rate": 44100
+      },
+      "descriptor_without_private_locator": {
+        "source_sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 1685.0160997732426,
+        "source_end_seconds": 7085.016099773243,
+        "source_start_frame": 74309210,
+        "source_end_frame": 312449210,
+        "source_sample_rate": 44100,
+        "source_id": "artur-saturday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "source_bytes": 4290463660,
+          "start_frame": 74309210,
+          "end_frame_exclusive": 312449210,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 148618419,
+            "denominator": 2,
+            "decimal": 74309209.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 624898419,
+            "denominator": 2,
+            "decimal": 312449209.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0121_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 74309210,
+          "endSample": 312449210
+        }
+      ],
+      "media_revision": "artur-saturday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 22,
+      "title": "Barbie Fish & Santiago Gammelli",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "barbie-fish-santiago-gammelli-saturday-mean-gaps-v2",
+      "predecessor_source_id": "barbie-fish-santiago-gammelli-saturday",
+      "logical_set_id": "db7fca04-ba53-51ab-937f-b7e572113e67",
+      "predecessor_ids": {
+        "set_id": "db7fca04-ba53-51ab-937f-b7e572113e67",
+        "submission_id": "bca5d5cc-f2b5-5a99-a5fc-7fe49eb5dd42",
+        "run_id": "a8abefc1-7ff2-528c-af13-13b6e8bc26eb",
+        "media_id": "f6824912-37c7-57c2-a522-4c91e0cd9880"
+      },
+      "proposed_ids": {
+        "set_id": "4311c755-7012-5a00-b0c7-729fe982223b",
+        "submission_id": "ab1715a9-e5ef-584f-bc66-487455d0bc73",
+        "run_id": "a8102221-e559-53df-a680-7f0299aaec47",
+        "media_id": "592326f3-3a8f-5390-b90b-bc39394b044b"
+      },
+      "predecessor_descriptor_pins": {
+        "source_sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 1730.995918367347,
+        "source_end_seconds": 8930.995918367347,
+        "source_start_frame": 76336920,
+        "source_end_frame": 393856920,
+        "source_sample_rate": 44100
+      },
+      "descriptor_without_private_locator": {
+        "source_sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 1670.1328344671201,
+        "source_end_seconds": 8870.13283446712,
+        "source_start_frame": 73652858,
+        "source_end_frame": 391172858,
+        "source_sample_rate": 44100,
+        "source_id": "barbie-fish-santiago-gammelli-saturday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0122_3-4.wav",
+          "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+          "source_bytes": 4290463660,
+          "start_frame": 73652858,
+          "end_frame_exclusive": 391172858,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0122_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 147305715,
+            "denominator": 2,
+            "decimal": 73652857.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 782345715,
+            "denominator": 2,
+            "decimal": 391172857.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 635040001,
+            "denominator": 88200,
+            "decimal": 7200.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0122_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 73652858,
+          "endSample": 391172858
+        }
+      ],
+      "media_revision": "barbie-fish-santiago-gammelli-saturday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 7200,
+      "expected_windows": 479,
+      "changed_windows": 479,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 14,
+      "title": "Choice",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "choice-friday-mean-gaps-v2",
+      "predecessor_source_id": "choice-friday",
+      "logical_set_id": "6c6f4b7c-779b-5eb2-b464-a079343150c4",
+      "predecessor_ids": {
+        "set_id": "6c6f4b7c-779b-5eb2-b464-a079343150c4",
+        "submission_id": "296d2472-f879-5a89-8381-23216eb56f41",
+        "run_id": "3fde15c7-ea18-5848-813e-99cd3a2bead6",
+        "media_id": "cc9c3096-8dc5-5948-a669-bd7e065a0eb0"
+      },
+      "proposed_ids": {
+        "set_id": "4c38a89c-288a-59b5-a4f0-ef0fd3362116",
+        "submission_id": "11968f9e-56c6-5108-ae46-a27c29b9272a",
+        "run_id": "d9f58e84-7d4e-599d-92c8-b894cc867e50",
+        "media_id": "a28304ac-c128-5d5d-86c4-3dda16b7f199"
+      },
+      "predecessor_descriptor_pins": {
+        "source_sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 5375.645714285714,
+        "source_end_seconds": 12575.645714285714,
+        "source_start_frame": 237065976,
+        "source_end_frame": 554585976,
+        "source_sample_rate": 44100
+      },
+      "descriptor_without_private_locator": {
+        "source_sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 5314.782630385487,
+        "source_end_seconds": 12514.782630385487,
+        "source_start_frame": 234381914,
+        "source_end_frame": 551901914,
+        "source_sample_rate": 44100,
+        "source_id": "choice-friday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260619_0119_3-4.wav",
+          "sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+          "source_bytes": 4290463660,
+          "start_frame": 234381914,
+          "end_frame_exclusive": 551901914,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260619_0119_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 468763827,
+            "denominator": 2,
+            "decimal": 234381913.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 1103803827,
+            "denominator": 2,
+            "decimal": 551901913.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 635040001,
+            "denominator": 88200,
+            "decimal": 7200.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260619_0119_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 234381914,
+          "endSample": 551901914
+        }
+      ],
+      "media_revision": "choice-friday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 7200,
+      "expected_windows": 479,
+      "changed_windows": 479,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 15,
+      "title": "Hank",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "hank-friday-mean-gaps-v2",
+      "predecessor_source_id": "hank-friday",
+      "logical_set_id": "dfd9efb0-b206-5593-bfc1-00856049f71d",
+      "predecessor_ids": {
+        "set_id": "dfd9efb0-b206-5593-bfc1-00856049f71d",
+        "submission_id": "698925ef-d8a3-5a4c-add7-eb679b866238",
+        "run_id": "abe9ff9b-4c27-55de-99fc-ac543a8842f2",
+        "media_id": "f7338c6e-77e1-5077-bbf8-335c602c7ead"
+      },
+      "proposed_ids": {
+        "set_id": "dc8a5ee0-2f1b-5022-991b-31f5aac16ba1",
+        "submission_id": "ec02a2f5-2526-58b9-8c76-8078251a788c",
+        "run_id": "802964dd-5976-5d0d-85cc-71dbaca129ab",
+        "media_id": "f4b0e232-4e82-5119-aa0f-2afd45472a75"
+      },
+      "predecessor_descriptor_pins": {
+        "source_parts": [
+          {
+            "filename": "260619_0119_3-4.wav",
+            "sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+            "bytes": 4290463660,
+            "start_frame": 554585976,
+            "end_frame": 715076352,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          },
+          {
+            "filename": "260620_0120_3-4.wav",
+            "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+            "bytes": 4290463660,
+            "start_frame": 0,
+            "end_frame": 77649624,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          }
+        ],
+        "source_duration_seconds": 5400,
+        "source_total_frames": 238140000
+      },
+      "descriptor_without_private_locator": {
+        "source_parts": [
+          {
+            "filename": "260619_0119_3-4.wav",
+            "sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+            "bytes": 4290463660,
+            "start_frame": 551901914,
+            "end_frame": 715076352,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          },
+          {
+            "filename": "260620_0120_3-4.wav",
+            "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+            "bytes": 4290463660,
+            "start_frame": 0,
+            "end_frame": 74965562,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          }
+        ],
+        "source_duration_seconds": 5400,
+        "source_total_frames": 238140000,
+        "source_id": "hank-friday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260619_0119_3-4.wav",
+          "sha256": "e89ad04e8f69ad25c47f2f153862087c203dfd0b8fbe53c1a7f7a3119299c073",
+          "source_bytes": 4290463660,
+          "start_frame": 551901914,
+          "end_frame_exclusive": 715076352,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "source_bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame_exclusive": 74965562,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260619_0119_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 1103803827,
+            "denominator": 2,
+            "decimal": 551901913.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 715076352,
+            "denominator": 1,
+            "decimal": 715076352.0
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 108782959,
+            "denominator": 29400,
+            "decimal": 3700.1006462585033
+          }
+        },
+        {
+          "filename": "260620_0120_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 149931123,
+            "denominator": 2,
+            "decimal": 74965561.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 108782959,
+            "denominator": 29400,
+            "decimal": 3700.1006462585033
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260619_0119_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 551901914,
+          "endSample": 715076352
+        },
+        {
+          "recordingId": "260620_0120_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 0,
+          "endSample": 74965562
+        }
+      ],
+      "media_revision": "hank-friday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 18,
+      "title": "Honeyd\u00fc",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "honeydu-saturday-mean-gaps-v2",
+      "predecessor_source_id": "honeydu-saturday",
+      "logical_set_id": "afe8b2e3-3aeb-5d5e-ab7b-b74207cd585b",
+      "predecessor_ids": {
+        "set_id": "afe8b2e3-3aeb-5d5e-ab7b-b74207cd585b",
+        "submission_id": "e43e73b2-de06-5ce5-b183-5c9eb0ee922a",
+        "run_id": "9339db97-f9f6-5022-b1d7-6b2267c6f413",
+        "media_id": "4346fc0b-96f9-5667-bf0c-4da6f1eee515"
+      },
+      "proposed_ids": {
+        "set_id": "32d52955-0b61-5d55-afae-c40ba65305d8",
+        "submission_id": "53b9cb68-add5-56d1-bcbe-ec38ae69794c",
+        "run_id": "b38d2fb4-21a2-5570-b0d5-50dac12c9099",
+        "media_id": "0a46a088-28c7-5426-b231-13c433feef0a"
+      },
+      "predecessor_descriptor_pins": {
+        "source_parts": [
+          {
+            "filename": "260620_0120_3-4.wav",
+            "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+            "bytes": 4290463660,
+            "start_frame": 553929624,
+            "end_frame": 715076352,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          },
+          {
+            "filename": "260620_0121_3-4.wav",
+            "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+            "bytes": 4290463660,
+            "start_frame": 0,
+            "end_frame": 76993272,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          }
+        ],
+        "source_duration_seconds": 5400,
+        "source_total_frames": 238140000
+      },
+      "descriptor_without_private_locator": {
+        "source_parts": [
+          {
+            "filename": "260620_0120_3-4.wav",
+            "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+            "bytes": 4290463660,
+            "start_frame": 551245562,
+            "end_frame": 715076352,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          },
+          {
+            "filename": "260620_0121_3-4.wav",
+            "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+            "bytes": 4290463660,
+            "start_frame": 0,
+            "end_frame": 74309210,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          }
+        ],
+        "source_duration_seconds": 5400,
+        "source_total_frames": 238140000,
+        "source_id": "honeydu-saturday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "source_bytes": 4290463660,
+          "start_frame": 551245562,
+          "end_frame_exclusive": 715076352,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "source_bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame_exclusive": 74309210,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 1102491123,
+            "denominator": 2,
+            "decimal": 551245561.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 715076352,
+            "denominator": 1,
+            "decimal": 715076352.0
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 109220527,
+            "denominator": 29400,
+            "decimal": 3714.983911564626
+          }
+        },
+        {
+          "filename": "260620_0121_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 148618419,
+            "denominator": 2,
+            "decimal": 74309209.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 109220527,
+            "denominator": 29400,
+            "decimal": 3714.983911564626
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0120_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 551245562,
+          "endSample": 715076352
+        },
+        {
+          "recordingId": "260620_0121_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 0,
+          "endSample": 74309210
+        }
+      ],
+      "media_revision": "honeydu-saturday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 21,
+      "title": "Hunter Foshee",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "hunter-foshee-saturday-mean-gaps-v2",
+      "predecessor_source_id": "hunter-foshee-saturday",
+      "logical_set_id": "de51a97f-563f-570b-af6a-a741457beaee",
+      "predecessor_ids": {
+        "set_id": "de51a97f-563f-570b-af6a-a741457beaee",
+        "submission_id": "285a6866-5856-5435-b9cd-0457f7ae9a3b",
+        "run_id": "5a8e6b9f-5aaf-58fa-a8c1-dff7d2723da1",
+        "media_id": "65ce1607-1bd7-5e3e-a126-e159525ffb4a"
+      },
+      "proposed_ids": {
+        "set_id": "e788dc31-017d-5660-88ea-c559c0f3727a",
+        "submission_id": "c85047cc-eb0c-561f-a7ad-9610c807716e",
+        "run_id": "f7ceea97-b612-5dbd-9e7f-44776b6dedd9",
+        "media_id": "fee7db96-782b-5948-af8e-56344339d610"
+      },
+      "predecessor_descriptor_pins": {
+        "source_parts": [
+          {
+            "filename": "260620_0121_3-4.wav",
+            "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+            "bytes": 4290463660,
+            "start_frame": 553273272,
+            "end_frame": 715076352,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          },
+          {
+            "filename": "260620_0122_3-4.wav",
+            "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+            "bytes": 4290463660,
+            "start_frame": 0,
+            "end_frame": 76336920,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          }
+        ],
+        "source_duration_seconds": 5400,
+        "source_total_frames": 238140000
+      },
+      "descriptor_without_private_locator": {
+        "source_parts": [
+          {
+            "filename": "260620_0121_3-4.wav",
+            "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+            "bytes": 4290463660,
+            "start_frame": 550589210,
+            "end_frame": 715076352,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          },
+          {
+            "filename": "260620_0122_3-4.wav",
+            "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+            "bytes": 4290463660,
+            "start_frame": 0,
+            "end_frame": 73652858,
+            "total_frames": 715076352,
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 3
+          }
+        ],
+        "source_duration_seconds": 5400,
+        "source_total_frames": 238140000,
+        "source_id": "hunter-foshee-saturday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "sha256": "f7035c693dc4d95546196fa02357ba6ea5fa144e5eaa627af885d026e905a944",
+          "source_bytes": 4290463660,
+          "start_frame": 550589210,
+          "end_frame_exclusive": 715076352,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        },
+        {
+          "filename": "260620_0122_3-4.wav",
+          "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+          "source_bytes": 4290463660,
+          "start_frame": 0,
+          "end_frame_exclusive": 73652858,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0121_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 1101178419,
+            "denominator": 2,
+            "decimal": 550589209.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 715076352,
+            "denominator": 1,
+            "decimal": 715076352.0
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 21931619,
+            "denominator": 5880,
+            "decimal": 3729.867176870748
+          }
+        },
+        {
+          "filename": "260620_0122_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 147305715,
+            "denominator": 2,
+            "decimal": 73652857.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 0,
+            "denominator": 1,
+            "decimal": 0.0
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 21931619,
+            "denominator": 5880,
+            "decimal": 3729.867176870748
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0121_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 550589210,
+          "endSample": 715076352
+        },
+        {
+          "recordingId": "260620_0122_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 0,
+          "endSample": 73652858
+        }
+      ],
+      "media_revision": "hunter-foshee-saturday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 17,
+      "title": "Jake Mora",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "jake-mora-friday-mean-gaps-v2",
+      "predecessor_source_id": "jake-mora-friday",
+      "logical_set_id": "542c7611-1d80-5b46-8d37-76b243c02655",
+      "predecessor_ids": {
+        "set_id": "542c7611-1d80-5b46-8d37-76b243c02655",
+        "submission_id": "3e817a8e-f5d5-5b4e-a95c-11508f117c45",
+        "run_id": "d414fde0-1dc1-5f22-8502-cec4d6188308",
+        "media_id": "31b25e6e-fc4b-51a7-9f53-62ce12f2b3c8"
+      },
+      "proposed_ids": {
+        "set_id": "fac7dd34-e762-5696-a056-94a195055f25",
+        "submission_id": "0a6b1720-9bd6-513f-9f19-b3b21f7eb571",
+        "run_id": "42022ca4-f217-53b9-b31b-88046e4fe106",
+        "media_id": "ec78e819-88f7-51a1-b7be-16c8cd778c4c"
+      },
+      "predecessor_descriptor_pins": {
+        "source_sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 7160.762448979592,
+        "source_end_seconds": 12560.762448979593,
+        "source_start_frame": 315789624,
+        "source_end_frame": 553929624,
+        "source_sample_rate": 44100
+      },
+      "descriptor_without_private_locator": {
+        "source_sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 7099.899365079365,
+        "source_end_seconds": 12499.899365079365,
+        "source_start_frame": 313105562,
+        "source_end_frame": 551245562,
+        "source_sample_rate": 44100,
+        "source_id": "jake-mora-friday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "source_bytes": 4290463660,
+          "start_frame": 313105562,
+          "end_frame_exclusive": 551245562,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 626211123,
+            "denominator": 2,
+            "decimal": 313105561.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 1102491123,
+            "denominator": 2,
+            "decimal": 551245561.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0120_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 313105562,
+          "endSample": 551245562
+        }
+      ],
+      "media_revision": "jake-mora-friday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 23,
+      "title": "Pily",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "pily-saturday-mean-gaps-v2",
+      "predecessor_source_id": "pily-saturday",
+      "logical_set_id": "21eb3202-c5f8-5cbb-a30d-2e4ec5eb0d46",
+      "predecessor_ids": {
+        "set_id": "21eb3202-c5f8-5cbb-a30d-2e4ec5eb0d46",
+        "submission_id": "0077eb90-6cb9-567a-ae83-1ca5451b031e",
+        "run_id": "596beb1e-8da6-5a47-80e0-446840a9b928",
+        "media_id": "7a7b9c7d-a5e0-5fbe-a4dc-d58ead98b669"
+      },
+      "proposed_ids": {
+        "set_id": "ad408430-388c-512f-a4f8-277ad83dd0f7",
+        "submission_id": "d7bfe57d-ceae-54e1-a91e-473f27f33317",
+        "run_id": "827423fa-6a5a-5567-a5ca-6859b0a44310",
+        "media_id": "51e770b8-372b-5cee-8787-b6223fc68516"
+      },
+      "predecessor_descriptor_pins": {
+        "source_sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 8930.995918367347,
+        "source_end_seconds": 14330.995918367347,
+        "source_start_frame": 393856920,
+        "source_end_frame": 631996920,
+        "source_sample_rate": 44100
+      },
+      "descriptor_without_private_locator": {
+        "source_sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 8870.13283446712,
+        "source_end_seconds": 14270.13283446712,
+        "source_start_frame": 391172858,
+        "source_end_frame": 629312858,
+        "source_sample_rate": 44100,
+        "source_id": "pily-saturday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0122_3-4.wav",
+          "sha256": "cf1842a175f02bd8ea5afe2dd38ddd8778d26dff8482fb2c9abba1ea920f5ff9",
+          "source_bytes": 4290463660,
+          "start_frame": 391172858,
+          "end_frame_exclusive": 629312858,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0122_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 782345715,
+            "denominator": 2,
+            "decimal": 391172857.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 1258625715,
+            "denominator": 2,
+            "decimal": 629312857.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0122_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 391172858,
+          "endSample": 629312858
+        }
+      ],
+      "media_revision": "pily-saturday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    },
+    {
+      "slot": 16,
+      "title": "Sydka (LIVE)",
+      "model_version": "user-mean-gaps-v2-20261110",
+      "source_id": "sydka-live-friday-mean-gaps-v2",
+      "predecessor_source_id": "sydka-live-friday",
+      "logical_set_id": "c7a89fd3-0c13-578b-8c67-89e920144bd5",
+      "predecessor_ids": {
+        "set_id": "c7a89fd3-0c13-578b-8c67-89e920144bd5",
+        "submission_id": "44214082-4f61-5214-a21f-426adc390862",
+        "run_id": "8993b31c-5d31-54a3-acfd-2f80d49e775c",
+        "media_id": "e60a0401-c17d-525b-aed6-720d3786cb5c"
+      },
+      "proposed_ids": {
+        "set_id": "2caf5a88-a4c2-582f-89ae-1c7fbb21ebaa",
+        "submission_id": "005f65c6-ebed-5cbf-b6bd-8083b469902c",
+        "run_id": "defa8bf1-5443-51bf-bfda-8b20969e9f9a",
+        "media_id": "0af8942a-8bc8-5fd6-8ffc-e9ee88b3a14c"
+      },
+      "predecessor_descriptor_pins": {
+        "source_sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 1760.762448979592,
+        "source_end_seconds": 7160.762448979592,
+        "source_start_frame": 77649624,
+        "source_end_frame": 315789624,
+        "source_sample_rate": 44100
+      },
+      "descriptor_without_private_locator": {
+        "source_sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+        "source_bytes": 4290463660,
+        "source_start_seconds": 1699.899365079365,
+        "source_end_seconds": 7099.899365079365,
+        "source_start_frame": 74965562,
+        "source_end_frame": 313105562,
+        "source_sample_rate": 44100,
+        "source_id": "sydka-live-friday-mean-gaps-v2",
+        "recognition_mode": "resumable"
+      },
+      "parts": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "sha256": "bc52ca6689a9551f70aaa1742d3066da2b3f21f5628815d43c514d8fc0a0dd17",
+          "source_bytes": 4290463660,
+          "start_frame": 74965562,
+          "end_frame_exclusive": 313105562,
+          "sample_rate": 44100,
+          "total_frames": 715076352,
+          "channels": 2,
+          "bits": 24
+        }
+      ],
+      "exact_projected_endpoints": [
+        {
+          "filename": "260620_0120_3-4.wav",
+          "exact_start_frame": {
+            "numerator": 149931123,
+            "denominator": 2,
+            "decimal": 74965561.5
+          },
+          "exact_end_frame_exclusive": {
+            "numerator": 626211123,
+            "denominator": 2,
+            "decimal": 313105561.5
+          },
+          "start_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "end_rounding_error_frames": {
+            "numerator": 1,
+            "denominator": 2,
+            "decimal": 0.5
+          },
+          "rounded_playback_set_offset_start_seconds": {
+            "numerator": 1,
+            "denominator": 88200,
+            "decimal": 1.1337868480725624e-05
+          },
+          "rounded_playback_set_offset_end_seconds": {
+            "numerator": 476280001,
+            "denominator": 88200,
+            "decimal": 5400.000011337868
+          }
+        }
+      ],
+      "proposed_playback_spans": [
+        {
+          "recordingId": "260620_0120_3-4.wav",
+          "sampleRate": 44100,
+          "startSample": 74965562,
+          "endSample": 313105562
+        }
+      ],
+      "media_revision": "sydka-live-friday-mean-gaps-v2-original-wav-v2",
+      "duration_seconds": 5400,
+      "expected_windows": 359,
+      "changed_windows": 359,
+      "old_windows_exactly_reusable": 0,
+      "required_fresh_recognition": true,
+      "modeled_crop_shift_seconds": {
+        "numerator": -10225,
+        "denominator": 168,
+        "decimal": -60.86309523809524
+      },
+      "realized_crop_shift_frames": -2684062,
+      "realized_crop_shift_seconds": {
+        "numerator": -1342031,
+        "denominator": 22050,
+        "decimal": -60.863083900226755
+      },
+      "per_endpoint_rounding_error_max_seconds": {
+        "numerator": 1,
+        "denominator": 88200,
+        "decimal": 1.1337868480725624e-05
+      },
+      "collection_id": "1d50c599-3150-43f9-a7e9-50d00fc996b7",
+      "requested_by": "65c06333-323d-48a8-9389-f03946d32264",
+      "audience_unchanged": true,
+      "seed_status": "blocked_until_version_aware_readers_and_logical_family_queue_guard_are_verified",
+      "queue_enrolled": false,
+      "promoted": false,
+      "bounds": "User-selected four-gap mean timing model v2; performer boundaries remain schedule-provisional. Nearest-sample half-up conversion; exact rational endpoints retained in provenance. No acoustic verification."
+    }
+  ]
+}

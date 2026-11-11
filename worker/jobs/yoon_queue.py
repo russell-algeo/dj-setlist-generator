@@ -156,6 +156,8 @@ class PrivateQueue:
                     validate_identity(row, state, queue)
                     result['existing'] += 1
                     continue
+                cur.execute('SELECT ops.assert_yoon_version_execution(%s, %s, %s)',
+                            (run_id, 'enqueue', None))
                 cur.execute('''SELECT id FROM ops.set_runs WHERE target_set_id=%s AND id<>%s
                     AND source_metadata ? 'yoon_queue_v1' LIMIT 1''', (row['target_set_id'], run_id))
                 if cur.fetchone():

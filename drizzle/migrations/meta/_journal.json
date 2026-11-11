@@ -162,6 +162,13 @@
       "when": 1794268800005,
       "tag": "0023_shared_recognition_throttle",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794355200000,
+      "tag": "0024_yoon_version_registry",
+      "breakpoints": true
     }
   ]
 }

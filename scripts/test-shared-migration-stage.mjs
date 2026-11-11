@@ -58,8 +58,11 @@ assert.deepEqual(await rows(),after);
 const claimBody=(await db.query("SELECT pg_get_functiondef('ops.claim_next_dispatchable_set_run(integer)'::regprocedure) AS body")).rows[0].body;
 const finalEntry=journal.entries[cutoff+1];
 assert.equal(finalEntry.tag,'0023_shared_recognition_throttle');
-assert.equal(journal.entries.length,cutoff+2);
-await migrate(orm,options(root+'drizzle/migrations'));
+assert.ok(journal.entries.length>=cutoff+2);
+// This regression owns only 0021 through 0023, independent of later migrations.
+copyFileSync(root+'drizzle/migrations/'+finalEntry.tag+'.sql',join(stage,finalEntry.tag+'.sql'));
+writeFileSync(join(stage,'meta/_journal.json'),JSON.stringify({...journal,entries:journal.entries.slice(0,cutoff+2)}));
+await migrate(orm,options(stage));
 const final=await rows();
 assert.equal(final.length,after.length+1);
 assert.deepEqual(final.slice(0,-1),after);
@@ -68,7 +71,7 @@ assert.equal(Number(final.at(-1).created_at),finalEntry.when);
 assert.equal((await db.query("SELECT obj_description('ops.claim_next_dispatchable_set_run(integer)'::regprocedure,'pg_proc') AS marker")).rows[0].marker,'shared-recognition-throttle-v3');
 assert.equal((await db.query("SELECT pg_get_functiondef('ops.claim_next_dispatchable_set_run(integer)'::regprocedure) AS body")).rows[0].body,claimBody);
 assert.equal((await db.query("SELECT obj_description('ops.cleanup_expired_ops_data()'::regprocedure,'pg_proc') AS marker")).rows[0].marker,'private-recognition-retention-v1');
-await migrate(orm,options(root+'drizzle/migrations'));
+await migrate(orm,options(stage));
 assert.deepEqual(await rows(),final);
 console.log('PASS actual Drizzle 0021-to-0022-to-0023 upgrades, exact journal hashes/timestamps, v2/v3 markers, claim-body/private-marker preservation and per-stage idempotence.');
 } finally {

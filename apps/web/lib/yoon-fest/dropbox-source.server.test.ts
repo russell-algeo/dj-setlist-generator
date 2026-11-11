@@ -120,7 +120,7 @@ describe("validated collection and media route integration", () => {
     collection.sets[0]!.audio.sources[0]!.url = source;
     const assetId = collection.sets[0]!.audio.assetId;
     const request = new Request(`https://example.test/api/yoon-fest/media/${assetId}`, { method });
-    const deps = { actor: async () => actor(), authorize: authorizeFixture, collection: vi.fn().mockReturnValue(collection) };
+    const deps = { actor: async () => actor(), authorize: authorizeFixture, releasedAsset: vi.fn().mockReturnValue(collection.sets[0]) };
     const response = await serveYoonMedia(request, assetId, deps);
     expect(response.status).toBe(307);
     expect(response.headers.get("Location")).toBe(raw);
@@ -136,12 +136,12 @@ describe("validated collection and media route integration", () => {
   it.each(["anonymous", "nonmember"])("never reads or releases a folder capability to %s", async (principal) => {
     const { serveYoonMedia } = await import("./media.server");
     const { actor, authorizeFixture } = await import("./fixtures.test-support");
-    const collection = vi.fn();
+    const releasedAsset = vi.fn();
     const response = await serveYoonMedia(new Request("https://example.test/api/yoon-fest/media/synthetic"), "synthetic", {
-      actor: async () => principal === "anonymous" ? null : actor("outsider"), authorize: authorizeFixture, collection,
+      actor: async () => principal === "anonymous" ? null : actor("outsider"), authorize: authorizeFixture, releasedAsset,
     });
     expect(response.status).toBe(404);
     expect(response.headers.get("Location")).toBeNull();
-    expect(collection).not.toHaveBeenCalled();
+    expect(releasedAsset).not.toHaveBeenCalled();
   });
 });

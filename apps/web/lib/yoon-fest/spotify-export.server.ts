@@ -5,8 +5,8 @@ import { buildSetSpotifyExportCandidates } from "@/lib/archive/spotify-export";
 import { addPlaylistTracks, createPlaylist, ensureSpotifyPlaylistScope } from "@/lib/spotify/playlist.server";
 import { refreshSpotifyAccessTokenForUser } from "@/lib/spotify/server";
 import { hasYoonAccess, getYoonActor, YOON_PRIVATE_HEADERS } from "./access.server";
-import type { YoonCollection } from "./collection-model.server";
-import { loadYoonCollection } from "./data.server";
+import type { YoonCollection, YoonSet } from "./collection-model.server";
+import { loadYoonCollection, getYoonSet } from "./data.server";
 import { toYoonSetDetail } from "./data.server";
 
 export const yoonExportSchema = z.object({
@@ -17,10 +17,11 @@ export type YoonExportRequest = z.infer<typeof yoonExportSchema>;
 export type YoonExportDeps = {
   actor: () => Promise<SessionActor | null>; authorize: (actor: SessionActor | null) => Promise<boolean>;
   collection: (actor: SessionActor) => YoonCollection | Promise<YoonCollection>;
+  releasedSet: (actor: SessionActor, slug: string) => YoonSet | null | Promise<YoonSet | null>;
   refresh: typeof refreshSpotifyAccessTokenForUser; fetch: typeof fetch;
 };
 const defaults: YoonExportDeps = {
-  actor: getYoonActor, authorize: hasYoonAccess, collection: loadYoonCollection,
+  actor: getYoonActor, authorize: hasYoonAccess, collection: loadYoonCollection, releasedSet: getYoonSet,
   refresh: refreshSpotifyAccessTokenForUser, fetch,
 };
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: YOON_PRIVATE_HEADERS });
@@ -52,7 +53,10 @@ export async function exportYoonPlaylist(request: Request, deps: YoonExportDeps 
     if (body.length > 4096) return json({ error: "Request too large" }, 413);
     input = yoonExportSchema.parse(JSON.parse(body));
   } catch { return json({ error: "Invalid export request" }, 400); }
-  const plan = buildYoonExportPlan(await deps.collection(actor), input);
+  const historical = input.entityType === "set" ? await deps.releasedSet(actor, input.slug) : null;
+  const collection: YoonCollection = input.entityType === "festival" ? await deps.collection(actor)
+    : { collection: "yoon-fest", revision: "neon", sets: historical ? [historical] : [] };
+  const plan = buildYoonExportPlan(collection, input);
   if (!plan) return json({ error: "Not found" }, 404);
   if (!plan.spotifyTrackIds.length) return json({ error: "No Spotify-resolved tracks are available for export" }, 422);
   let playlist: Awaited<ReturnType<typeof createPlaylist>> | null = null;

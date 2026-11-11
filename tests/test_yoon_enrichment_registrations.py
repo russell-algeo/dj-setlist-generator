@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 from worker.jobs.yoon_enrichment_registrations import ADDITIONAL_ENRICHMENT_RUNS
 from worker.jobs.yoon_sources import CATALOG
+from worker.jobs.yoon_version_sources import VERSION_ENRICHMENT_RUNS
 from worker.jobs.yoon_spotify_enrich import validate, digest, Store, REVIEWED_RUNS, DONALD_SCOPE, DONALD_MEMBERS
 from worker.jobs.yoon_spotify_enrich import RUN, DONALD_RUN, HALO_RUN, GRISHA_RUN, HIGHKIN_RUN, DEEP_HOUSE_RUN, BRETT_RUN
 
@@ -42,7 +43,7 @@ class FiniteRegistrationTests(unittest.TestCase):
         old={RUN,DONALD_RUN,HALO_RUN,GRISHA_RUN,HIGHKIN_RUN,DEEP_HOUSE_RUN,BRETT_RUN}
         self.assertEqual(len(ADDITIONAL_ENRICHMENT_RUNS),20)
         self.assertFalse(old & ADDITIONAL_ENRICHMENT_RUNS.keys())
-        self.assertEqual(REVIEWED_RUNS,old | ADDITIONAL_ENRICHMENT_RUNS.keys())
+        self.assertEqual(REVIEWED_RUNS,old | ADDITIONAL_ENRICHMENT_RUNS.keys() | VERSION_ENRICHMENT_RUNS.keys())
         for run in ADDITIONAL_ENRICHMENT_RUNS:
             with self.subTest(run=run):
                 args=fixture(run);self.assertEqual(validate(*args),args[1]['clustered_setlist'])

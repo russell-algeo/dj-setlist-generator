@@ -485,7 +485,9 @@ class ResumeStore:
     def finalize_ready(self):
         # A clean paused run with every durable response can finish even when all
         # provider budgets are exhausted. No ownership takeover or provider call.
-        with self.locked(owner=False) as (cur,row,state):
+        # Quiescent finalization can change queue/version state; use the common
+        # global-before-row order. Active per-window transactions stay unchanged.
+        with self.locked(owner=False, admission=True) as (cur,row,state):
             # A queue-owned worker must recheck explicit review/pause fences
             # after dispatch, including its complete-coverage fast path. Legacy
             # nonqueued finalization retains its existing behavior.

@@ -16,7 +16,7 @@ def row(i, status='private_resume_running', **extra):
 
 class Cursor:
     def __init__(self,rows): self.rows=rows;self.sql=[]
-    def execute(self,sql): self.sql.append(sql)
+    def execute(self,sql,params=None): self.sql.append(sql)
     def fetchall(self): return self.rows
     def fetchone(self): return {'transaction_isolation':'read committed'}
 

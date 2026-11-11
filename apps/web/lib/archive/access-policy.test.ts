@@ -24,3 +24,18 @@ describe("shared item access predicates", () => {
     expect(read.sql).not.toContain("member.role"); expect(manage.sql).toContain("member.role = 'manager'");
   });
 });
+
+describe("generic private version predicates", () => {
+  it.each([null, "synthetic-member", "synthetic-outsider"])("requires a released set in addition to membership for %s", (userId) => {
+    const query = compile(readableSetPredicate(userId));
+    expect(query.sql).toContain('app.yoon_version_readable("app"."sets"."id", false)');
+    expect(query.params).toEqual(userId ? ["public", "private", userId] : ["public", "private"]);
+  });
+  it.each([false, true])("gates both read and manage of private submissions even for admin=%s", (admin) => {
+    for (const predicate of [readableSubmissionPredicate, manageableSubmissionPredicate]) {
+      const query = compile(predicate("synthetic-member", admin));
+      expect(query.sql).toContain('app.yoon_submission_version_readable("ops"."submissions"."id")');
+      expect(query.sql).toContain("archive_collection_members");
+    }
+  });
+});

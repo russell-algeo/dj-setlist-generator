@@ -18,6 +18,10 @@ from worker.jobs.yoon_recognition import PrivateRecognitionSession, policy_for
 from worker.jobs.yoon_sources import JACKSON, reviewed_source
 from worker.jobs.yoon_highkin_source import HIGHKIN, assemble_highkin
 from worker.jobs.yoon_remaining_sources import JOINED_CATALOG, assemble_remaining
+from worker.jobs.yoon_sources import VERSION_CATALOG
+from worker.jobs.yoon_highkin_source import JoinedSource
+from worker.jobs.yoon_version_sources import assemble_version
+VERSION_JOINED = {key: value for key, value in VERSION_CATALOG.items() if isinstance(value, JoinedSource)}
 
 SOURCE_SHA = 'aa01c4b637efe4e59bac051ef67ce4014e270a1f41fad8b6cbba95310fa58aae'
 SOURCE_BYTES = 4290463660
@@ -36,7 +40,7 @@ PRIVATE_GUARD = '''
 
 def validate_descriptor(value):
     source = reviewed_source(value)
-    if source == HIGHKIN or source.id in JOINED_CATALOG:
+    if source == HIGHKIN or source.id in JOINED_CATALOG or source.id in VERSION_JOINED:
         urls = value.get('source_urls')
         if (not isinstance(urls, list) or len(urls) != 2 or
                 any(not isinstance(url, str) or not allowed_source(url) for url in urls)
@@ -170,7 +174,7 @@ def prepare(store, root):
     master = root / 'source.wav'
     audio = root / 'audio' / 'input.mp3'
     audio.parent.mkdir(parents=True, exist_ok=True)
-    if source_spec.id in JOINED_CATALOG:
+    if source_spec.id in JOINED_CATALOG or source_spec.id in VERSION_JOINED:
         return prepare_remaining_joined(store, root, source, mode, audio)
     if source_spec == HIGHKIN:
         return prepare_highkin(store, root, source, mode, audio)
@@ -237,7 +241,7 @@ def prepare_highkin(store, root, urls, mode, audio):
 
 
 def prepare_remaining_joined(store, root, urls, mode, audio):
-    source_spec = JOINED_CATALOG.get(store.source.id)
+    source_spec = JOINED_CATALOG.get(store.source.id) or VERSION_JOINED.get(store.source.id)
     if source_spec is None or source_spec != store.source:
         raise RuntimeError('fixed_input_mismatch')
     # Additional fixed reviewed joins. Existing Highkin preparation remains unchanged.
@@ -256,7 +260,8 @@ def prepare_remaining_joined(store, root, urls, mode, audio):
             store.require_owner()
             fetch(url, path, piece)
         store.require_owner()
-        assembled = assemble_remaining(descriptor, originals, joined)
+        assembled = (assemble_version(descriptor, originals, joined, VERSION_CATALOG)
+                     if source_spec.id in VERSION_JOINED else assemble_remaining(descriptor, originals, joined))
         store.require_owner()
         subprocess.run(['ffmpeg', '-nostdin', '-y', '-v', 'error', '-i', str(joined),
             '-vn', '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100', str(audio)],

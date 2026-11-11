@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 import wave
 
-from worker.jobs.yoon_sources import CATALOG, JACKSON, DONALD, HALO, GRISHA, HIGHKIN, DEEP_HOUSE, BRETT, SKY, reviewed_source
+from worker.jobs.yoon_sources import CATALOG, JACKSON, DONALD, HALO, GRISHA, HIGHKIN, DEEP_HOUSE, BRETT, SKY, VERSION_CATALOG, reviewed_source
 from worker.jobs.yoon_remaining_sources import JOINED_CATALOG, SINGLE_DEFINITIONS, assemble_remaining
 from worker.jobs.yoon_highkin_source import Piece, JoinedSource, _assemble
 from worker.jobs.yoon_once import prepare, validate_descriptor
@@ -25,7 +25,7 @@ def descriptor(source):
 
 class RemainingSourceTests(unittest.TestCase):
     def test_exact_finite_inventory_and_existing_sources(self):
-        self.assertEqual(len(CATALOG),27)
+        self.assertEqual(len(set(CATALOG) - set(VERSION_CATALOG)),27)
         self.assertEqual(len(SINGLE_DEFINITIONS),10)
         self.assertEqual(len(JOINED_CATALOG),9)
         self.assertEqual({CATALOG[x[0]].windows for x in SINGLE_DEFINITIONS},{359,479})
