@@ -66,7 +66,7 @@ def phase(name):
 
 def run():
     global _fd, _emitted
-    if sys.argv[1:] != ['recognize']:
+    if sys.argv[1:] not in (['prepare'], ['recognize']):
         return 2
     # Preserve only the original diagnostic destination; suppress all library,
     # import, subprocess and traceback output before importing the private job.

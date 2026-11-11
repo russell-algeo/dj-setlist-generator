@@ -169,6 +169,13 @@
       "when": 1794355200000,
       "tag": "0024_yoon_version_registry",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794355200001,
+      "tag": "0025_yoon_bounded_family_checks",
+      "breakpoints": true
     }
   ]
 }

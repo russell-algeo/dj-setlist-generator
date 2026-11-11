@@ -394,7 +394,7 @@ jobs:
         id: private_prepare
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-        run: python -m worker.jobs.yoon_once prepare >/dev/null 2>&1
+        run: python -m worker.jobs.yoon_recognition_diagnostics prepare
       - uses: actions/upload-artifact@v4
         if: ${{ steps.private_prepare.outputs.complete != 'true' }}
         with:

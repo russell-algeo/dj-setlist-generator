@@ -70,10 +70,12 @@ sys.modules[m.__name__]=m
 sys.argv=['diagnostics','recognize']
 raise SystemExit(d.run())
 '''
-        result = subprocess.run([sys.executable, '-c', code], capture_output=True)
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout, b'')
-        self.assertEqual(result.stderr, b'private_recognition phase=entry exception=ValueError sqlstate=none\n')
+        for operation in ('recognize', 'prepare'):
+            with self.subTest(operation=operation):
+                result = subprocess.run([sys.executable, '-c', code.replace("'recognize'", repr(operation))], capture_output=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, b'')
+                self.assertEqual(result.stderr, b'private_recognition phase=entry exception=ValueError sqlstate=none\n')
 
     def test_entry_bootstrap_and_close_fail_without_traceback(self):
         for operation in ('dup', 'dup2', 'close'):
@@ -103,8 +105,8 @@ raise SystemExit(result)
     def test_workflow_exposes_only_sanitized_recognition_entry(self):
         workflow = Path('.github/workflows/process-set.yml').read_text()
         self.assertIn('python -m worker.jobs.yoon_recognition_diagnostics recognize', workflow)
-        for operation in ('prepare', 'release'):
-            self.assertIn(f'python -m worker.jobs.yoon_once {operation} >/dev/null 2>&1', workflow)
+        self.assertIn('python -m worker.jobs.yoon_recognition_diagnostics prepare', workflow)
+        self.assertIn('python -m worker.jobs.yoon_once release >/dev/null 2>&1', workflow)
 
 
 class AdapterTests(unittest.TestCase):

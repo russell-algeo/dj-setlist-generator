@@ -18,7 +18,7 @@ for(const devRoles of [false,true]){
  const db=new PGlite({extensions:{pgcrypto}}),q=(sql,p=[])=>db.query(sql,p);
  try{
  await db.exec('CREATE ROLE set_list_worker; CREATE ROLE neondb_owner');
- for(const f of readdirSync(migrations).filter(f=>/^\d.*\.sql$/.test(f)&&!f.startsWith('0024_')).sort())await db.exec(readFileSync(new URL(f,migrations),'utf8'));
+ for(const f of readdirSync(migrations).filter(f=>/^\d.*\.sql$/.test(f)&&f<'0024_').sort())await db.exec(readFileSync(new URL(f,migrations),'utf8'));
  await db.exec(`GRANT ALL ON SCHEMA ops,app,authn TO neondb_owner;
  GRANT ALL ON ALL TABLES IN SCHEMA ops,app,authn TO neondb_owner;
  GRANT ALL ON ALL SEQUENCES IN SCHEMA ops,app,authn TO neondb_owner;
@@ -45,6 +45,10 @@ for(const devRoles of [false,true]){
  }
  await db.exec(seal);await db.exec('COMMIT');
  const after=await acl();eq(after.defaults,before.defaults);
+ // Later body-only migration must preserve the sealed permissions as well.
+ await db.exec('BEGIN; SET LOCAL ROLE neondb_owner');
+ await db.exec(readFileSync(new URL('0025_yoon_bounded_family_checks.sql',migrations),'utf8'));
+ await db.exec('COMMIT');eq(await acl(),after);
  for(const kind of ['tables','functions'])for(const row of before[kind])eq(after[kind].find(x=>x.oid===row.oid),row);
  const roles=devRoles?scope.roles:['set_list_worker'];
  for(const role of roles){

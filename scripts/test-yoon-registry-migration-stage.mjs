@@ -15,6 +15,9 @@ const {migrate}=require('drizzle-orm/pglite/migrator');
 const root=fileURLToPath(new URL('../',import.meta.url));
 const folder=join(root,'drizzle/migrations');
 const journal=JSON.parse(readFileSync(join(folder,'meta/_journal.json'),'utf8'));
+// Keep this historical upgrade test scoped to its sealed migration, even when
+// later additive migrations are present in the journal.
+journal.entries=journal.entries.filter(e=>e.idx<=23);
 const entry=journal.entries.at(-1);
 assert.equal(entry.tag,'0024_yoon_version_registry');
 assert.equal(entry.idx,23);
@@ -45,7 +48,8 @@ try {
  await assert.rejects(migrate(orm,options(temp)),/yoon_forced_migration_failure/);checks++;
  assert.equal((await db.query("SELECT to_regclass('ops.yoon_versions') registry")).rows[0].registry,null);checks++;
  assert.deepEqual(await ledger(),original);checks++;
- await migrate(orm,options(folder));
+ writeFileSync(join(temp,entry.tag+'.sql'),sql);
+ await migrate(orm,options(temp));
  const after=await ledger();
  assert.equal(after.length,original.length+1);checks++;
  assert.deepEqual(after.filter(r=>r.origin==='drizzle'),original.filter(r=>r.origin==='drizzle'));checks++;
@@ -58,6 +62,7 @@ try {
  assert.equal((await db.query('SELECT app.yoon_version_readable($1,false) ok',[sid])).rows[0].ok,true);checks++;
  assert.equal((await db.query("SELECT has_table_privilege('set_list_worker','ops.yoon_versions','SELECT') ok")).rows[0].ok,true);checks++;
  assert.equal((await db.query("SELECT has_table_privilege('set_list_worker','ops.yoon_versions','UPDATE') ok")).rows[0].ok,false);checks++;
- await migrate(orm,options(folder));assert.deepEqual(await ledger(),after);checks++;
+ writeFileSync(join(temp,entry.tag+'.sql'),sql);
+ await migrate(orm,options(temp));assert.deepEqual(await ledger(),after);checks++;
  console.log(`PASS ${checks} actual Drizzle 0023-to-0024 upgrade, forced rollback, exact public ledger, independent ledger preservation, existing data, no bootstrap, read-only worker grants and replay checks; SHA256 ${hash}`);
 } finally {await db.close();rmSync(temp,{recursive:true,force:true})}
