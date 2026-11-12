@@ -1002,6 +1002,7 @@ export function ArchiveSetExplorer({
   const prevTrackPressTsRef = useRef(0);
   const ytPlayerRef = useRef<YouTubePlayer | null>(null);
   const scWidgetRef = useRef<SoundCloudWidget | null>(null);
+  const playerGenerationRef = useRef(0);
   const audioFocusPort = useRef({
     isSetPlaying: (): boolean => false,
     pauseSet: () => {},
@@ -1495,6 +1496,7 @@ export function ArchiveSetExplorer({
   };
 
   const destroyPlayers = (updateReactState = true) => {
+    playerGenerationRef.current += 1;
     nativeControllerRef.current?.dispose();
     nativeControllerRef.current = null;
     stopPlayerPoll();
@@ -1587,6 +1589,16 @@ export function ArchiveSetExplorer({
     }
   };
 
+  // Widget/iframe identities can be reused by the SDK. Fence every async
+  // reply against the generation that issued it, including after unmount.
+  const captureSoundCloudGeneration = (widget: SoundCloudWidget) => {
+    const generation = playerGenerationRef.current;
+    const frame = soundCloudFrameRef.current;
+    return () => generation === playerGenerationRef.current &&
+      scWidgetRef.current === widget && frame !== null &&
+      soundCloudFrameRef.current === frame && frame.isConnected && Boolean(frame.contentWindow);
+  };
+
   const pollPlayerTime = () => {
     if (activeSource.kind === "native-audio" && nativeAudioRef.current) {
       updateFromPolledTime(nativeControllerRef.current?.tick() ?? 0);
@@ -1622,12 +1634,18 @@ export function ArchiveSetExplorer({
     }
 
     if (activeSource.kind === "soundcloud" && scWidgetRef.current?.getPosition) {
-      scWidgetRef.current.isPaused?.((paused) => {
+      const widget = scWidgetRef.current;
+      const isCurrent = captureSoundCloudGeneration(widget);
+      if (!isCurrent()) return;
+      widget.isPaused?.((paused) => {
+        if (!isCurrent()) return;
         if (paused && isPlayingRef.current) {
           setIsPlaying(false);
         }
       });
-      scWidgetRef.current.getPosition((milliseconds: number) => {
+      if (!isCurrent()) return;
+      widget.getPosition((milliseconds: number) => {
+        if (!isCurrent()) return;
         const seconds = Number(milliseconds) / 1000;
         if (Number.isFinite(seconds)) {
           updateFromPolledTime(seconds);
@@ -1665,7 +1683,10 @@ export function ArchiveSetExplorer({
       scWidgetRef.current?.getPosition &&
       playerReadyRef.current
     ) {
-      scWidgetRef.current.getPosition((milliseconds: number) => {
+      const widget = scWidgetRef.current;
+      const isCurrent = captureSoundCloudGeneration(widget);
+      widget.getPosition((milliseconds: number) => {
+        if (!isCurrent()) return;
         const seconds = Number(milliseconds) / 1000;
         if (Number.isFinite(seconds)) {
           updateFromPolledTime(seconds);
@@ -1677,7 +1698,8 @@ export function ArchiveSetExplorer({
     persistPlaybackPositionForTime(currentTimeRef.current, force);
   };
 
-  const restoreSoundCloudAfterWarmup = (widget: SoundCloudWidget, onDone: () => void) => {
+  const restoreSoundCloudAfterWarmup = (widget: SoundCloudWidget, onDone: () => void, isCurrent: () => boolean) => {
+    if (!isCurrent()) return;
     clearSoundCloudWarmupTimer();
     soundCloudWarmupActiveRef.current = false;
     soundCloudWarmupFinishingRef.current = false;
@@ -1685,7 +1707,7 @@ export function ArchiveSetExplorer({
     playbackStartedRef.current = false;
     setIsPlaying(false);
     window.setTimeout(() => {
-      if (scWidgetRef.current === widget) {
+      if (isCurrent()) {
         onDone();
       }
     }, 120);
@@ -1699,7 +1721,8 @@ export function ArchiveSetExplorer({
     widget.pause?.();
   };
 
-  const startSoundCloudWarmup = (widget: SoundCloudWidget, onDone: () => void) => {
+  const startSoundCloudWarmup = (widget: SoundCloudWidget, onDone: () => void, isCurrent: () => boolean) => {
+    if (!isCurrent()) return;
     if (!widget.setVolume || !widget.play || !widget.pause) {
       onDone();
       return;
@@ -1711,11 +1734,11 @@ export function ArchiveSetExplorer({
     widget.setVolume(0);
     widget.play();
     soundCloudWarmupTimerRef.current = window.setTimeout(() => {
-      if (!soundCloudWarmupActiveRef.current || scWidgetRef.current !== widget) {
+      if (!isCurrent() || !soundCloudWarmupActiveRef.current) {
         return;
       }
       widget.pause?.();
-      restoreSoundCloudAfterWarmup(widget, onDone);
+      restoreSoundCloudAfterWarmup(widget, onDone, isCurrent);
     }, 5200);
   };
 
@@ -2344,8 +2367,14 @@ export function ArchiveSetExplorer({
 
           const widget = playerWindow.SC.Widget(soundCloudFrameRef.current);
           scWidgetRef.current = widget;
+          const isCurrent = captureSoundCloudGeneration(widget);
+          const bindCurrent = (eventName: string, callback: (event?: SoundCloudWidgetEvent) => void) => {
+            widget.bind(eventName, (event) => {
+              if (isCurrent()) callback(event);
+            });
+          };
           const enableSoundCloudControls = () => {
-            if (cancelled || playerReadyRef.current) {
+            if (cancelled || !isCurrent() || playerReadyRef.current) {
               return;
             }
             widget.setVolume?.(100);
@@ -2359,7 +2388,7 @@ export function ArchiveSetExplorer({
             pollPlayerTime();
           };
           const scheduleSoundCloudControlsReady = () => {
-            if (cancelled || playerReadyRef.current || soundCloudReadyTimerRef.current != null) {
+            if (cancelled || !isCurrent() || playerReadyRef.current || soundCloudReadyTimerRef.current != null) {
               return;
             }
             const mobileWarmupMs = window.matchMedia(
@@ -2368,15 +2397,16 @@ export function ArchiveSetExplorer({
               ? 3200
               : 900;
             soundCloudReadyTimerRef.current = window.setTimeout(() => {
+              if (!isCurrent()) return;
               soundCloudReadyTimerRef.current = null;
               enableSoundCloudControls();
             }, mobileWarmupMs);
           };
 
-          widget.bind(playerWindow.SC.Widget.Events.READY, () => {
-            startSoundCloudWarmup(widget, enableSoundCloudControls);
+          bindCurrent(playerWindow.SC.Widget.Events.READY, () => {
+            startSoundCloudWarmup(widget, enableSoundCloudControls, isCurrent);
           });
-          widget.bind(playerWindow.SC.Widget.Events.LOAD_PROGRESS, (event?: SoundCloudWidgetEvent) => {
+          bindCurrent(playerWindow.SC.Widget.Events.LOAD_PROGRESS, (event?: SoundCloudWidgetEvent) => {
             if (soundCloudWarmupActiveRef.current) {
               return;
             }
@@ -2387,7 +2417,7 @@ export function ArchiveSetExplorer({
             }
             scheduleSoundCloudControlsReady();
           });
-          widget.bind(playerWindow.SC.Widget.Events.PLAY, () => {
+          bindCurrent(playerWindow.SC.Widget.Events.PLAY, () => {
             if (soundCloudWarmupActiveRef.current) {
               return;
             }
@@ -2400,9 +2430,9 @@ export function ArchiveSetExplorer({
             startPlayerPoll();
             pollPlayerTime();
           });
-          widget.bind(playerWindow.SC.Widget.Events.PAUSE, () => {
+          bindCurrent(playerWindow.SC.Widget.Events.PAUSE, () => {
             if (soundCloudWarmupActiveRef.current) {
-              restoreSoundCloudAfterWarmup(widget, enableSoundCloudControls);
+              restoreSoundCloudAfterWarmup(widget, enableSoundCloudControls, isCurrent);
               return;
             }
             scrubPausePendingRef.current = false;
@@ -2412,14 +2442,14 @@ export function ArchiveSetExplorer({
             pollPlayerTime();
             persistLatestPlayerPosition(true);
           });
-          widget.bind(playerWindow.SC.Widget.Events.FINISH, () => {
+          bindCurrent(playerWindow.SC.Widget.Events.FINISH, () => {
             scrubPausePendingRef.current = false;
             scrubPlaybackIntentRef.current = false;
             setIsPlaying(false);
             pollPlayerTime();
             persistLatestPlayerPosition(true);
           });
-          widget.bind(playerWindow.SC.Widget.Events.SEEK, (event?: SoundCloudWidgetEvent) => {
+          bindCurrent(playerWindow.SC.Widget.Events.SEEK, (event?: SoundCloudWidgetEvent) => {
             const seconds = resolveSoundCloudEventSeconds(event);
             if (seconds != null) {
               updateFromPolledTime(seconds);
@@ -2427,7 +2457,7 @@ export function ArchiveSetExplorer({
             }
             pollPlayerTime();
           });
-          widget.bind(
+          bindCurrent(
             playerWindow.SC.Widget.Events.PLAY_PROGRESS,
             (event?: SoundCloudWidgetEvent) => {
               if (soundCloudWarmupActiveRef.current) {
