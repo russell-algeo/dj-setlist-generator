@@ -1,16 +1,17 @@
-import { Children, isValidElement, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { SetSeekControl } from "./set-seek-control";
 import { RecordedSetControls } from "./recorded-set-controls";
 
 const base = {
   currentTime: 0, duration: 7200, isPlaying: false, ready: true, buffering: false,
   unavailable: false, error: null, onTogglePlay: vi.fn(), onSeek: vi.fn(),
 };
-function input(node: ReactNode): ReactElement<{ onChange: (event: ChangeEvent<HTMLInputElement>) => void }> | undefined {
+function input(node: ReactNode): ReactElement<{ onCommit: (seconds: number) => void; disabled: boolean; duration: number }> | undefined {
   for (const child of Children.toArray(node)) {
     if (!isValidElement<{ children?: ReactNode }>(child)) continue;
-    if (child.type === "input") return child as ReturnType<typeof input>;
+    if (child.type === SetSeekControl) return child as ReturnType<typeof input>;
     const nested = input(child.props.children);
     if (nested) return nested;
   }
@@ -54,14 +55,13 @@ describe("set-relative recording controls", () => {
     expect(unavailable.match(/<input[^>]*>/)?.[0]).toContain("disabled");
   });
 
-  it("forwards repeated range changes, clamps them and ignores disabled/invalid input", () => {
+  it("delegates committed seeks and availability to the shared control", () => {
     const onSeek = vi.fn();
-    const change = (value: string) => ({ currentTarget: { value } }) as ChangeEvent<HTMLInputElement>;
     const range = input(RecordedSetControls({ ...base, onSeek }))!;
-    for (const value of ["10", "4000", "3000", "-5", "9000", "invalid"]) range.props.onChange(change(value));
-    expect(onSeek.mock.calls).toEqual([[10], [4000], [3000], [0], [7200]]);
-    input(RecordedSetControls({ ...base, onSeek, ready: false }))!.props.onChange(change("12"));
-    input(RecordedSetControls({ ...base, onSeek, unavailable: true }))!.props.onChange(change("12"));
-    expect(onSeek).toHaveBeenCalledTimes(5);
+    expect(range.props.onCommit).toBe(onSeek);
+    expect(range.props.duration).toBe(7200);
+    expect(range.props.disabled).toBe(false);
+    expect(input(RecordedSetControls({ ...base, ready: false }))!.props.disabled).toBe(true);
+    expect(input(RecordedSetControls({ ...base, unavailable: true }))!.props.disabled).toBe(true);
   });
 });

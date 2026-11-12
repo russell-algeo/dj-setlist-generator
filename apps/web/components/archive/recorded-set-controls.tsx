@@ -1,5 +1,6 @@
 "use client";
 
+import { SetSeekControl } from "@/components/archive/set-seek-control";
 import { formatDuration } from "@/lib/archive/utils";
 
 // Presentation only: the explorer and its existing native controller own the
@@ -44,21 +45,12 @@ export function RecordedSetControls({
           <span>{elapsed}</span><span aria-hidden="true"> / </span><span>{totalLabel}</span>
         </div>
       </div>
-      <input
+      <SetSeekControl
         className="recorded-set-seek"
-        type="range"
-        min={0}
-        max={total}
-        step={1}
-        value={position}
-        aria-label="Seek within set"
-        aria-valuetext={`${elapsed} of ${totalLabel}`}
+        currentTime={position}
+        duration={total}
         disabled={disabled || !ready}
-        onChange={(event) => {
-          if (disabled || !ready) return;
-          const seconds = Number(event.currentTarget.value);
-          if (Number.isFinite(seconds)) onSeek(Math.max(0, Math.min(total, seconds)));
-        }}
+        onCommit={onSeek}
       />
       <div className="recorded-set-status">
         {error ? <p role="alert">{error}</p> : <p role="status" aria-live="polite">{status}</p>}

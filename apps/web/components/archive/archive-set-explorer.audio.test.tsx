@@ -142,4 +142,68 @@ describe("recording browser-event integration", () => {
     await click("Replay set"); await metadata();
     expect(audio.currentTime).toBe(3120); expect(paused).toBe(false);
   });
+  const pointer = async (type: string, target = slider()) => {
+    await act(async () => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0 });
+      Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "touch" }, isPrimary: { value: true } });
+      target.dispatchEvent(event);
+    });
+  };
+
+  it("does not pause, restart or seek native playback for intermediate drag samples", async () => {
+    await click("Play set");
+    const pauses = vi.mocked(HTMLMediaElement.prototype.pause).mock.calls.length;
+    const plays = vi.mocked(HTMLMediaElement.prototype.play).mock.calls.length;
+    await pointer("pointerdown");
+    for (const seconds of [1, 2, 3, 4, 5, 6, 7]) await scrub(seconds);
+    expect(audio.currentTime).toBe(3120);
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(pauses);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(plays);
+    await pointer("pointerup");
+    expect(audio.currentTime).toBe(3127); expect(paused).toBe(false);
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(pauses + 1);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(plays + 1);
+  });
+
+  it("keeps paused dragging paused and respects a later system pause", async () => {
+    await pointer("pointerdown"); await scrub(3); await pointer("pointerup");
+    expect(audio.currentTime).toBe(3123); expect(paused).toBe(true);
+    await click("Play set"); await pointer("pointerdown"); await scrub(7);
+    await act(async () => { audio.pause(); });
+    await pointer("pointerup");
+    expect(audio.currentTime).toBe(3127); expect(paused).toBe(true);
+  });
+
+  it("the dock also commits once and does not turn a paused set on", async () => {
+    const dock = container.querySelector<HTMLInputElement>("#dockProgress")!;
+    await pointer("pointerdown", dock);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(dock, "6");
+      dock.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(audio.currentTime).toBe(3120);
+    await pointer("pointerup", dock);
+    expect(audio.currentTime).toBe(3126); expect(paused).toBe(true);
+  });
+
+  it("source revision replacement discards the old recording and dock gestures", async () => {
+    await pointer("pointerdown"); await scrub(7); const oldSlider = slider();
+    await act(async () => root.render(<ArchiveSetExplorer detail={detail} initialListened={null} initialQuery=""
+      management={{ canDeleteSet: false, deleteImpact: null, setWillBeRemoved: false, submittedByViewer: false }}
+      privateContext={{ ...privateContext, audio: { ...privateContext.audio, revision: "new-revision" } }} />));
+    audio = container.querySelector("audio")!; await metadata();
+    await pointer("pointerup", oldSlider);
+    expect(audio.currentTime).toBe(3120); expect(paused).toBe(true); expect(slider().value).toBe("0");
+  });
+
+  it("mapping replacement with the same source and revision discards an old gesture", async () => {
+    await pointer("pointerdown"); await scrub(7); const oldSlider = slider();
+    await act(async () => root.render(<ArchiveSetExplorer detail={detail} initialListened={null} initialQuery=""
+      management={{ canDeleteSet: false, deleteImpact: null, setWillBeRemoved: false, submittedByViewer: false }}
+      privateContext={{ ...privateContext, audio: { ...privateContext.audio,
+        segments: [{ ...privateContext.audio.segments[0]!, startSeconds: 4000 }, privateContext.audio.segments[1]!] } }} />));
+    await metadata(); await pointer("pointerup", oldSlider);
+    expect(audio.currentTime).toBe(4000); expect(paused).toBe(true);
+  });
+
 });
