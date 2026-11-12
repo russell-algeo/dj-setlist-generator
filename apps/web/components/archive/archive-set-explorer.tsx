@@ -1656,8 +1656,12 @@ export function ArchiveSetExplorer({
       }
     }
 
+    // React removes the old iframe before passive source/unmount cleanup.
+    // The SDK cannot postMessage to it then; persist the cached clock below.
     if (
       activeSource.kind === "soundcloud" &&
+      soundCloudFrameRef.current?.isConnected &&
+      soundCloudFrameRef.current.contentWindow &&
       scWidgetRef.current?.getPosition &&
       playerReadyRef.current
     ) {
