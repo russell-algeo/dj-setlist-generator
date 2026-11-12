@@ -1,0 +1,63 @@
+name: sampling-study-preparation
+on:
+  push:
+    branches: [hal/sampling-study-20261112]
+  workflow_dispatch:
+    inputs:
+      reference_sha256:
+        description: Reviewed reference snapshot digest (not a claim of complete truth)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: sampling-study-preparation
+  cancel-in-progress: false
+jobs:
+  register:
+    if: ${{ github.event_name == 'push' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/hal/sampling-study-20261112' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Registration only, no checkout or external calls
+        run: printf '%s\n' 'Sampling study workflow registered. No source, database or provider work.'
+  prepare:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/hal/sampling-study-20261112' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install yt-dlp==2026.10.26
+      - run: ./.github/scripts/ensure-ffmpeg.sh
+      - name: Fixed public excerpts only, no credentials or provider calls
+        env:
+          REFERENCE_SHA256: ${{ inputs.reference_sha256 }}
+        run: |
+          python - <<'PY'
+          import os
+          from worker.jobs.sampling_study_media import prepare,MediaFence
+          from worker.jobs.sampling_study_manifest import digest
+          try:
+              m=prepare('sampling-inputs',os.environ['REFERENCE_SHA256'])
+              print('Prepared manifest SHA256:',digest(m))
+          except Exception as exc:
+              print(str(exc) if isinstance(exc,MediaFence) else 'source_preparation_failed')
+              raise SystemExit(1) from None
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sampling-preparation-manifest
+          path: |
+            sampling-inputs/manifest.json
+            sampling-inputs/preparation.json
+          retention-days: 3
+          if-no-files-found: error
+# Deliberately NO recognize job, database secrets, result/audio uploads, scheduler,
+# dispatch API, automatic source registration or activation. Recognition requires
+# the separately reviewed exclusive-window operational controller and grant.

@@ -107,8 +107,9 @@ class AdmissionTests(unittest.TestCase):
         here=Path(__file__).resolve().parents[1]
         # Reviewed policy3 changes the common retry engine, not private-only pacing.
         # Database-only lock retries are reviewed separately; provider transport,
-        # aggregation and source recognizer remain pinned unchanged.
-        pins={'worker/jobs/shared_recognition.py': '5b3ffa77ff131992671cfb9d512f82b8428102bb4825325101126d8b473395c0', 'worker/jobs/yoon_resume.py': 'a29136c9adca394639e9d17041eeb009173f19cf304a48dfbb31b24eee9c9f77', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': 'd7d93f4ea8ac591baf868533876d5ec90462edf0355700752a6dc9cbd1a075c5', 'recognition_transport.py': '3eb691ef807eb82fe2e69dcdd1f8c398d28e7cc6f6c5d8acf038989693796a4b', 'worker/jobs/yoon_resume_policy.py': '50fca4b2c3413b255b37555783ecf0c2db1ae916df604d8b4813ca4eec0a80f8', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
+        # aggregation remain pinned unchanged. The optional hash-bound bytes
+        # handoff was independently reviewed; ordinary path/retry/pacing unchanged.
+        pins={'worker/jobs/shared_recognition.py': '5b3ffa77ff131992671cfb9d512f82b8428102bb4825325101126d8b473395c0', 'worker/jobs/yoon_resume.py': 'a29136c9adca394639e9d17041eeb009173f19cf304a48dfbb31b24eee9c9f77', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': '9b3941ac2d78d6c4589d8365584cf4ab9c4b4a8f266061ee68a08d071373c547', 'recognition_transport.py': '3eb691ef807eb82fe2e69dcdd1f8c398d28e7cc6f6c5d8acf038989693796a4b', 'worker/jobs/yoon_resume_policy.py': '50fca4b2c3413b255b37555783ecf0c2db1ae916df604d8b4813ca4eec0a80f8', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
         for name,expected in pins.items():
             self.assertEqual(hashlib.sha256((here/name).read_bytes()).hexdigest(),expected,name)
     def test_per_run_workflow_group(self):

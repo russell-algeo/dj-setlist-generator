@@ -100,16 +100,29 @@ class TrackRecognizer:
                     return False
                 await asyncio.sleep(remaining)
 
+    @staticmethod
+    def _audio_input(segment):
+        """Ordinary file behavior unchanged; prepared bytes are hash-bound."""
+        if 'audio_bytes' not in segment:
+            return str(segment['file'])
+        from hashlib import sha256
+        value = segment['audio_bytes']
+        if (type(value) is not bytes or not 44 <= len(value) <= 8 * 1024 * 1024
+                or sha256(value).hexdigest() != segment.get('audio_sha256')):
+            raise RequestAuthorizationError('immutable_audio_binding_required')
+        return value
+
     async def recognize_segment(self, segment: dict) -> Recognition:
         """One bounded provider attempt, returning only sanitized failure diagnostics."""
         start_time = time.time()
         token = self.transport.begin() if self.transport is not None else None
         try:
+            audio_input = self._audio_input(segment)
             if self.transport is not None:
-                result = await asyncio.wait_for(self.shazam.recognize(str(segment['file'])),
+                result = await asyncio.wait_for(self.shazam.recognize(audio_input),
                                                 self.attempt_timeout)
             else:
-                result = await self.shazam.recognize(str(segment['file']))
+                result = await self.shazam.recognize(audio_input)
             validate_response(result)
             elapsed = time.time() - start_time
 
