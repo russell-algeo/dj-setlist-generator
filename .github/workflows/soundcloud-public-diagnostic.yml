@@ -1,0 +1,108 @@
+name: soundcloud-public-metadata-diagnostic
+on:
+  push:
+    branches: [hal/soundcloud-diagnostic-20261112]
+    paths: [.github/workflows/soundcloud-public-diagnostic.yml]
+permissions: {}
+concurrency:
+  group: soundcloud-public-diagnostic-20261112
+  cancel-in-progress: false
+jobs:
+  public-metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install historical and current stable yt-dlp from PyPI
+        run: python -m pip install --disable-pip-version-check 'yt-dlp[default,curl-cffi]==2026.10.26'
+      - name: Public metadata only, no app checkout or secrets
+        run: |
+          timeout 240s python - <<'PY'
+          """Bounded public metadata diagnostic. No app imports, audio, credentials or DB."""
+          import hashlib
+          import json
+          import re
+          from urllib.parse import urlsplit
+          import yt_dlp
+          from yt_dlp.extractor.soundcloud import SoundcloudBaseIE
+          from yt_dlp.version import __version__
+          
+          BROWSER_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+          
+          
+          def emit(value):
+              print(json.dumps(value, sort_keys=True), flush=True)
+          
+          
+          class SafeLogger:
+              def debug(self, message):
+                  pass
+          
+              def warning(self, message):
+                  emit({'warning': True, 'client_id_related': 'client id' in message.lower()})
+          
+              def error(self, message):
+                  emit({'error': True, 'client_id_related': 'client id' in message.lower()})
+          
+          
+          original = SoundcloudBaseIE._download_webpage
+          request_count = 0
+          
+          
+          def observed(self, url, *args, **kwargs):
+              global request_count
+              request_count += 1
+              if request_count > 32:
+                  raise RuntimeError('Diagnostic request cap reached')
+              parsed = urlsplit(url)
+              if parsed.scheme != 'https' or not (
+                  parsed.hostname in {'soundcloud.com', 'www.soundcloud.com'}
+                  or (parsed.hostname or '').endswith('.sndcdn.com')
+              ):
+                  raise RuntimeError('Unexpected webpage host')
+              try:
+                  content = original(self, url, *args, **kwargs)
+              except Exception as exc:
+                  emit({'stage': 'webpage', 'host': parsed.hostname,
+                        'error_type': type(exc).__name__})
+                  raise
+              if isinstance(content, str):
+                  scripts = re.findall(r'<script[^>]+src="([^"]+)"', content)
+                  lowered = content.lower()
+                  emit({'stage': 'webpage', 'host': parsed.hostname,
+                        'is_home': parsed.path in {'', '/'},
+                        'bytes': len(content.encode()), 'sha256': hashlib.sha256(content.encode()).hexdigest(),
+                        'script_count': len(scripts),
+                        'script_hosts': sorted(set(urlsplit(s).hostname for s in scripts if urlsplit(s).hostname)),
+                        'client_id_pattern_present': bool(re.search(r'client_id\s*:\s*"[0-9a-zA-Z]{32}"', content)),
+                        'block_markers': [term for term in ('captcha', 'access denied', 'verify you are human',
+                            'request blocked', 'unusual traffic', 'enable javascript') if term in lowered]})
+              return content
+          
+          
+          SoundcloudBaseIE._download_webpage = observed
+          emit({'yt_dlp_version': __version__, 'download': False, 'cache': False, 'cookies': False,
+                'scope': 'public SoundCloud homepage/script shape and one Phil Weeks search result per profile'})
+          for profile, headers in [('default', {}), ('browser_user_agent_no_cookies', {'User-Agent': BROWSER_UA})]:
+              request_count = 0
+              emit({'profile': profile, 'stage': 'start'})
+              opts = {'quiet': True, 'no_warnings': True, 'logger': SafeLogger(), 'cachedir': False,
+                      'socket_timeout': 15, 'retries': 0, 'extractor_retries': 0,
+                      'skip_download': True, 'extract_flat': True, 'noplaylist': True,
+                      'http_headers': headers}
+              try:
+                  with yt_dlp.YoutubeDL(opts) as ydl:
+                      result = ydl.extract_info('scsearch1:Phil Weeks', download=False, process=False)
+                      entry = next(iter(result['entries']), None)
+                      emit({'profile': profile, 'metadata_ok': entry is not None,
+                            'result': {key: entry.get(key) for key in ('id', 'title', 'duration', 'uploader', 'webpage_url')} if entry else None})
+              except Exception as exc:
+                  message = str(exc).lower()
+                  emit({'profile': profile, 'metadata_ok': False, 'error_type': type(exc).__name__,
+                        'client_id_error': 'client id' in message,
+                        'http_403': '403' in message, 'http_429': '429' in message})
+          emit({'stage': 'complete'})
+          PY
