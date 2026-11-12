@@ -157,6 +157,8 @@ describe("recording browser-event integration", () => {
     await pointer("pointerdown");
     for (const seconds of [1, 2, 3, 4, 5, 6, 7]) await scrub(seconds);
     expect(audio.currentTime).toBe(3120);
+    expect(container.querySelector(".recorded-set-time span")!.textContent).toBe("0:07");
+    expect(container.textContent).not.toContain("Seek to");
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(pauses);
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(plays);
     await pointer("pointerup");

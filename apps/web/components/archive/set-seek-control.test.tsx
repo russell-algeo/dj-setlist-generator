@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { formatDuration } from "@/lib/archive/utils";
 import { SetSeekControl } from "./set-seek-control";
 
 describe("commit-on-release set seek control", () => {
@@ -10,7 +11,9 @@ describe("commit-on-release set seek control", () => {
   let onCommit: ReturnType<typeof vi.fn<(seconds: number) => void>>;
   let props: { currentTime: number; duration: number; disabled: boolean; source: string };
   const input = () => host.querySelector("input")!;
-  const render = async () => act(async () => root.render(<SetSeekControl key={props.source} {...props} onCommit={onCommit} />));
+  const render = async () => act(async () => root.render(<SetSeekControl key={props.source} {...props} onCommit={onCommit}
+    appearance="timeline" className="dock-progress" id="dockProgress"
+    renderBefore={(seconds) => <div className="dock-time"><span id="dockCurrentTime">{formatDuration(seconds)}</span><span>{formatDuration(props.duration)}</span></div>} />));
   const pointer = async (type: string, pointerType = "mouse", pointerId = 1, target = input()) => act(async () => {
     const event = new MouseEvent(type, { bubbles: true, button: 0 });
     Object.defineProperties(event, { pointerId: { value: pointerId }, pointerType: { value: pointerType }, isPrimary: { value: true } });
@@ -36,7 +39,9 @@ describe("commit-on-release set seek control", () => {
     expect(onCommit).not.toHaveBeenCalled();
     expect(input().value).toBe("199");
     expect(input().getAttribute("aria-valuetext")).toBe("3:19 of 10:00");
-    expect(host.textContent).toContain("Seek to 3:19");
+    expect(host.querySelector("#dockCurrentTime")!.textContent).toBe("3:19");
+    expect(parseFloat(host.querySelector<HTMLElement>("#dockProgressFill")!.style.width)).toBeCloseTo(199 / 600 * 100, 3);
+    expect(host.textContent).not.toContain("Seek to");
     props.currentTime = 30; await render();
     expect(input().value).toBe("199");
     await pointer("pointerup", type);
@@ -59,6 +64,7 @@ describe("commit-on-release set seek control", () => {
     await pointer("pointerdown"); await change(99); await pointer(event);
     await change(120); await pointer("pointerup");
     expect(onCommit).not.toHaveBeenCalled(); expect(input().value).toBe("10");
+    expect(host.querySelector("#dockCurrentTime")!.textContent).toBe("0:10");
     await pointer("pointerdown"); await change(140); await pointer("pointerup");
     expect(onCommit.mock.calls).toEqual([[140]]);
   });
@@ -79,6 +85,8 @@ describe("commit-on-release set seek control", () => {
 
   it("preserves native accessibility and accepts assistive changes without a pointer", async () => {
     expect(input().type).toBe("range"); expect(input().min).toBe("0"); expect(input().max).toBe("600");
+    expect(host.querySelector(".dock-progress")!.getAttribute("aria-hidden")).toBe("true");
+    expect(input().className).toBe("set-seek-input");
     expect(input().step).toBe("1"); expect(input().getAttribute("aria-label")).toBe("Seek within set");
     await change(35); expect(onCommit.mock.calls).toEqual([[35]]);
   });
@@ -88,6 +96,7 @@ describe("commit-on-release set seek control", () => {
     props.disabled = true; await render(); expect(input().disabled).toBe(true);
     props.disabled = false; await render(); await pointer("pointerup");
     expect(onCommit).not.toHaveBeenCalled(); expect(input().value).toBe("10");
+    expect(host.querySelector("#dockCurrentTime")!.textContent).toBe("0:10");
   });
 
   it("discards a pending source's gesture and uses the new source's callback", async () => {
@@ -108,6 +117,7 @@ describe("commit-on-release set seek control", () => {
     await pointer("pointerdown"); await change(500);
     props.duration = 100; await render(); await pointer("pointerup");
     expect(onCommit).not.toHaveBeenCalled(); expect(input().value).toBe("10");
+    expect(host.querySelector("#dockCurrentTime")!.textContent).toBe("0:10");
   });
 
 });

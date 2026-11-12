@@ -22,7 +22,6 @@ export function RecordedSetControls({
   const total = Number.isFinite(duration) ? Math.max(0, duration) : 0;
   const position = Number.isFinite(currentTime) ? Math.max(0, Math.min(currentTime, total)) : 0;
   const disabled = unavailable || total <= 0;
-  const elapsed = formatDuration(position);
   const totalLabel = formatDuration(total);
   const playLabel = isPlaying ? "Pause set" : position >= total && total > 0 ? "Replay set" : "Play set";
   const status = error ? null : !ready ? "Loading recording. Press Play to start." :
@@ -30,23 +29,28 @@ export function RecordedSetControls({
 
   return (
     <div className="recorded-set-controls" role="group" aria-label="Set playback">
-      <div className="recorded-set-controls-row">
-        <button
-          className="recorded-set-play"
-          type="button"
-          aria-label={playLabel}
-          disabled={disabled}
-          onClick={onTogglePlay}
-        >
-          <span aria-hidden="true">{isPlaying ? "❚❚" : "▶"}</span>
-          <span>{isPlaying ? "Pause" : position >= total && total > 0 ? "Replay" : "Play"}</span>
-        </button>
-        <div className="recorded-set-time" aria-label={`${elapsed} elapsed of ${totalLabel}`}>
-          <span>{elapsed}</span><span aria-hidden="true"> / </span><span>{totalLabel}</span>
-        </div>
-      </div>
       <SetSeekControl
         className="recorded-set-seek"
+        renderBefore={(displayedTime) => {
+          const elapsed = formatDuration(displayedTime);
+          return (
+            <div className="recorded-set-controls-row">
+              <button
+                className="recorded-set-play"
+                type="button"
+                aria-label={playLabel}
+                disabled={disabled}
+                onClick={onTogglePlay}
+              >
+                <span aria-hidden="true">{isPlaying ? "❚❚" : "▶"}</span>
+                <span>{isPlaying ? "Pause" : position >= total && total > 0 ? "Replay" : "Play"}</span>
+              </button>
+              <div className="recorded-set-time" aria-label={`${elapsed} elapsed of ${totalLabel}`}>
+                <span>{elapsed}</span><span aria-hidden="true"> / </span><span>{totalLabel}</span>
+              </div>
+            </div>
+          );
+        }}
         currentTime={position}
         duration={total}
         disabled={disabled || !ready}

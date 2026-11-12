@@ -2594,7 +2594,6 @@ export function ArchiveSetExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const currentTimeLabel = formatDuration(currentTime);
   const seekSourceKey = JSON.stringify([detail.id, detail.duration, activeSource.kind,
     activeSource.sourceUrl, privateContext?.audio.revision, privateContext?.audio.segments]);
   const commitScrub = (seconds: number) => {
@@ -3516,13 +3515,16 @@ export function ArchiveSetExplorer({
               </div>
 
               <div className="dock-range">
-                <div className="dock-time">
-                  <span id="dockCurrentTime">{currentTimeLabel}</span>
-                  <span>{detail.durationFmt}</span>
-                </div>
                 <SetSeekControl
                   key={seekSourceKey}
                   className="dock-progress"
+                  appearance="timeline"
+                  renderBefore={(displayedTime) => (
+                    <div className="dock-time">
+                      <span id="dockCurrentTime">{formatDuration(displayedTime)}</span>
+                      <span>{detail.durationFmt}</span>
+                    </div>
+                  )}
                   id="dockProgress"
                   label="Seek within set from playback dock"
                   currentTime={currentTime}

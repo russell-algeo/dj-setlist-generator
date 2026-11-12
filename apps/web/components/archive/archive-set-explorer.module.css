@@ -2179,30 +2179,30 @@
   touch-action: pan-y;
 }
 
-.root :global(input.dock-progress) {
-  display: block;
+.root :global(.set-seek-timeline) {
+  position: relative;
+  height: 10px;
+}
+
+/* Keep the original thin timeline. The native slider is an invisible larger
+   hit target, retaining keyboard and assistive-technology semantics. */
+.root :global(.set-seek-input) {
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  top: -11px;
   width: 100%;
   height: 32px;
   margin: 0;
-  border: 0;
-  accent-color: var(--lime);
+  opacity: 0;
+  cursor: pointer;
 }
 
-.root :global(input.dock-progress:focus-visible) {
+.root :global(.set-seek-input:disabled) {
+  cursor: not-allowed;
+}
+
+.root :global(.set-seek-input:focus-visible + .dock-progress) {
   outline: 2px solid var(--lime);
   outline-offset: 3px;
-}
-
-.root :global(.set-seek-preview) {
-  position: absolute;
-  right: 0;
-  bottom: 100%;
-  padding: 4px 7px;
-  border: 1px solid var(--line);
-  background: #141414;
-  color: var(--lime);
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  pointer-events: none;
-  white-space: nowrap;
 }

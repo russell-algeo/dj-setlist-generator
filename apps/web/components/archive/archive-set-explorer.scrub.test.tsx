@@ -59,6 +59,9 @@ describe("embedded set scrubbing intent", () => {
   it("does not turn a paused embed on when a drag commits", async () => {
     await pointer("pointerdown"); await change(30); await change(40);
     expect(player.seekTo).not.toHaveBeenCalled();
+    expect(host.querySelector("#dockCurrentTime")!.textContent).toBe("0:40");
+    expect(host.querySelector(".dock-time")!.lastElementChild!.textContent).toBe("10:00");
+    expect(host.textContent).not.toContain("Seek to");
     await pointer("pointerup"); expect(player.seekTo.mock.calls).toEqual([[40, true]]);
     expect(player.pauseVideo).toHaveBeenCalledOnce(); expect(player.playVideo).not.toHaveBeenCalled();
   });
