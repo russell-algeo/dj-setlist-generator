@@ -210,7 +210,11 @@ class MetadataStore(Store):
             self.write(cur, dict(version=1, status='reserved', ticket=ticket,
                 owner=self.owner, input=self.expected, publication_digest=self.publication_digest))
             mix = deepcopy(snapshot['set']['metadata'].get('mixInfo') or {})
-            if not mix.get('artist_name') or not mix.get('title'):
+            # Private skeletons may keep title only on the snapshot-bound set row.
+            # Do not override an explicitly present invalid redundant title.
+            if 'title' not in mix:
+                mix['title'] = snapshot['set'].get('title')
+            if not mix.get('artist_name') or not isinstance(mix.get('title'), str) or not mix['title'].strip():
                 raise RuntimeError('private_mix_info_required')
             # Private download URLs remain in protected media, not provider queries.
             if mix.get('url'):
