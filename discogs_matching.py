@@ -72,6 +72,32 @@ def title_version_match(expected, observed):
     return None
 
 
+def _explicit_title_feature(title):
+    """Extract one bracketed feature credit, never a remix/version suffix.
+
+    Only explicit feat./feat/featuring syntax is eligible. Everything outside
+    that one bracket stays in the recording title and must still match exactly.
+    Unbracketed, nested or multiple feature credits remain review-only.
+    """
+    brackets = list(re.finditer(r'\([^()\[\]]*\)|\[[^()\[\]]*\]', title))
+    residual = re.sub(r'\([^()\[\]]*\)|\[[^()\[\]]*\]', '', title)
+    if any(mark in residual for mark in '()[]'):
+        return None
+    features = []
+    for bracket in brackets:
+        match = re.fullmatch(r'\s*(?:feat\.?|featuring)\s+(.+?)\s*',
+                             bracket[0][1:-1], flags=re.I)
+        if match:
+            features.append((bracket, match[1]))
+    if len(features) != 1:
+        return None
+    bracket, credit = features[0]
+    remaining = (title[:bracket.start()] + ' ' + title[bracket.end():]).strip()
+    if not normalize_text(remaining) or not _credits(credit):
+        return None
+    return remaining, credit
+
+
 def _compilation(release):
     artists = release.get('artists')
     if isinstance(artists, list) and any(_artist_key(a.get('name')) in ('various', 'variousartists')
@@ -117,10 +143,28 @@ def validate_discogs_release(artist, title, release):
     release_artists = release.get('artists')
     if not isinstance(release_artists, list):
         release_artists = []
+    expected_title = str(title or '')
+    feature = _explicit_title_feature(expected_title)
     for track, artists in _tracks(release):
-        version = title_version_match(str(title or ''), str(track.get('title') or ''))
+        version = title_version_match(expected_title, str(track.get('title') or ''))
+        feature_evidence = {}
         if not version or not artist_credit_matches(artist, artists):
-            continue
+            # The normalization fallback requires explicit track artists. Do
+            # not promote release artists, producers or other extraartists.
+            explicit_artists = track.get('artists')
+            if not feature or not _credits(str(artist or '')) or not explicit_artists:
+                continue
+            base_title, featured_credit = feature
+            version = title_version_match(base_title, str(track.get('title') or ''))
+            if not version or not artist_credit_matches(
+                    f'{artist} & {featured_credit}', explicit_artists):
+                continue
+            artists = explicit_artists
+            feature_evidence = {
+                'credit_comparison': 'explicit_featured_credit_from_title',
+                'requested_artist': artist, 'requested_title': expected_title,
+                'featured_credit': featured_credit,
+            }
         url = f"https://www.discogs.com/release/{release['id']}"
         return {
             'status': 'matched', 'reason': 'release_tracklist_artist_title_version',
@@ -132,6 +176,7 @@ def validate_discogs_release(artist, title, release):
             'release_artists': [a.get('name') for a in release_artists if isinstance(a, dict) and isinstance(a.get('name'), str) and a.get('name')],
             'metadata_scope': 'release', 'original_release_verified': False,
             'compilation': _compilation(release),
+            **feature_evidence,
         }
     return None
 

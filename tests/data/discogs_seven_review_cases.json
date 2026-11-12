@@ -1,0 +1,2489 @@
+{
+  "provenance": "Selected public-release fields from preserved November 11, 2026 receipts. Full tracklists retained; no database row IDs or user data. Only the independently verified feature-credit case changes acceptance.",
+  "cases": [
+    {
+      "artist": "Chambray & Laurent Garnier",
+      "title": "Feelin' Good (Edit)",
+      "receipt_sha256": "2f00fd0d7812cb9decf8512a9bde6832953cce983ebe8ce751a7de515db0aca6",
+      "source_url": "https://api.discogs.com/releases/14539008",
+      "accept": false,
+      "release": {
+        "id": 14539008,
+        "title": "Defected Presents Most Rated 2020",
+        "formats": [
+          {
+            "name": "CD",
+            "qty": "3",
+            "descriptions": [
+              "Compilation"
+            ]
+          }
+        ],
+        "artists": [
+          {
+            "name": "Various",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": ""
+          }
+        ],
+        "tracklist": [
+          {
+            "position": "1-1",
+            "type_": "track",
+            "title": "Joys (Purple Disco Machine Remix)",
+            "duration": "6:40",
+            "artists": [
+              {
+                "name": "Roberto Surace",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Purple Disco Machine",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-2",
+            "type_": "track",
+            "title": "Stand Up (Extended Mix)",
+            "duration": "5:48",
+            "artists": [
+              {
+                "name": "David Penn",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Ramona Renea",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-3",
+            "type_": "track",
+            "title": "Red Light Green Light (Extended Mix)",
+            "duration": "4:34",
+            "artists": [
+              {
+                "name": "Duke Dumont",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Shaun Ross (2)",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-4",
+            "type_": "track",
+            "title": "Hey Mister (Extended Mix)",
+            "duration": "7:42",
+            "artists": [
+              {
+                "name": "Detroit Swindle",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-5",
+            "type_": "track",
+            "title": "Music Please",
+            "duration": "8:27",
+            "artists": [
+              {
+                "name": "Detlef",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-6",
+            "type_": "track",
+            "title": "Soldier (Club Mix)",
+            "duration": "6:02",
+            "artists": [
+              {
+                "name": "Offaiah",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-7",
+            "type_": "track",
+            "title": "Dr. Funk (Riva Starr Mo' Funk Mix)",
+            "duration": "6:02",
+            "artists": [
+              {
+                "name": "Carl Cox",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Riva Starr",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-8",
+            "type_": "track",
+            "title": "Come On Come On (Extended Mix)",
+            "duration": "6:32",
+            "artists": [
+              {
+                "name": "Darius Syrossian",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-9",
+            "type_": "track",
+            "title": "Natural High (Mike Dunn Extended Black Glitter Mixx)",
+            "duration": "6:46",
+            "artists": [
+              {
+                "name": "Mike Dunn",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Mike Dunn",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1-10",
+            "type_": "track",
+            "title": "Heaven (Mousse T.'s Disco Shizzle Extended Remix)",
+            "duration": "7:07",
+            "artists": [
+              {
+                "name": "The Vision (16)",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Andreya Triana",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Mousse T.",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-1",
+            "type_": "track",
+            "title": "Thee Trk! (Honey Dijon Re-Edit)",
+            "duration": "6:13",
+            "artists": [
+              {
+                "name": "Felix Da Housecat",
+                "anv": "",
+                "join": "x",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Christoph Trücher",
+                "anv": "Chris Trucher",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Honey Dijon",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-2",
+            "type_": "track",
+            "title": "Sitigawana (TMB Dub Mix)",
+            "duration": "5:37",
+            "artists": [
+              {
+                "name": "Rudimental",
+                "anv": "",
+                "join": "&",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "The Martinez Brothers",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Faith Mussa",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-3",
+            "type_": "track",
+            "title": "Force (Extended Mix)",
+            "duration": "7:27",
+            "artists": [
+              {
+                "name": "Catz N' Dogz",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-4",
+            "type_": "track",
+            "title": "If You Really Want Someone (Extended Mix)",
+            "duration": "5:52",
+            "artists": [
+              {
+                "name": "Gettoblaster",
+                "anv": "",
+                "join": "&",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Chris Larsen (4)",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "DJ Dagwood",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-5",
+            "type_": "track",
+            "title": "Waves (Jamie Jones Re-edit)",
+            "duration": "7:17",
+            "artists": [
+              {
+                "name": "Raumakustik",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Jamie Jones (2)",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-6",
+            "type_": "track",
+            "title": "Changing The Situation (Extended Mix)",
+            "duration": "5:42",
+            "artists": [
+              {
+                "name": "Eli Brown (4)",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-7",
+            "type_": "track",
+            "title": "Catch Me (Extended Mix)",
+            "duration": "6:15",
+            "artists": [
+              {
+                "name": "Dirty Channels",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-8",
+            "type_": "track",
+            "title": "Perfect Plan (Extended Mix)",
+            "duration": "6:49",
+            "artists": [
+              {
+                "name": "Carlo",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-9",
+            "type_": "track",
+            "title": "Future Romance (Deetron Extended Remix)",
+            "duration": "6:09",
+            "artists": [
+              {
+                "name": "Fiorious",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Deetron",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2-10",
+            "type_": "track",
+            "title": "Emotion (Extended Mix)",
+            "duration": "6:10",
+            "artists": [
+              {
+                "name": "Purple Disco Machine",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-1",
+            "type_": "track",
+            "title": "Pump It Up (Extended Mix)\t",
+            "duration": "6:11",
+            "artists": [
+              {
+                "name": "Endor (5)",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-2",
+            "type_": "track",
+            "title": "Turbo Time (Original Mix)",
+            "duration": "6:34",
+            "artists": [
+              {
+                "name": "Patrick Topping",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-3",
+            "type_": "track",
+            "title": "My Desire (Sam Divine Remix)",
+            "duration": "6:46",
+            "artists": [
+              {
+                "name": "Amira",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Sam Divine",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-4",
+            "type_": "track",
+            "title": "Boogie 2nite (Extended Mix)",
+            "duration": "8:03",
+            "artists": [
+              {
+                "name": "Seamus Haji",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-5",
+            "type_": "track",
+            "title": "Feelin’ Love (Dr Packer Extended Remix)",
+            "duration": "7:19",
+            "artists": [
+              {
+                "name": "Soulsearcher",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Dr. Packer",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-6",
+            "type_": "track",
+            "title": "Feelin’ Good",
+            "duration": "8:34",
+            "artists": [
+              {
+                "name": "Laurent Garnier",
+                "anv": "",
+                "join": "&",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Chambray",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-7",
+            "type_": "track",
+            "title": "Close (Extended Mix)",
+            "duration": "5:27",
+            "artists": [
+              {
+                "name": "Route 94",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-8",
+            "type_": "track",
+            "title": "Heater (Tube & Berger Remix)",
+            "duration": "6:56",
+            "artists": [
+              {
+                "name": "Samim (2)",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Tube & Berger",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-9",
+            "type_": "track",
+            "title": "Hide U (Chicola Extended Remix)",
+            "duration": "7:39",
+            "artists": [
+              {
+                "name": "Sandy Rivera",
+                "anv": "",
+                "join": "&",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "RAE (2)",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Chicola",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3-10",
+            "type_": "track",
+            "title": "Dance 4 Love '99 (Club Mix)",
+            "duration": "6:02",
+            "artists": [
+              {
+                "name": "Eli Escobar",
+                "anv": "",
+                "join": "&",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Nomi Ruiz",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "artist": "Marcapasos",
+      "title": "Blow Job (Club Mix)",
+      "receipt_sha256": "913652b71845eafc498b08b885e4bee54d8df8afd823a3f46906e5ef67435dde",
+      "source_url": "https://api.discogs.com/releases/6644188",
+      "accept": false,
+      "release": {
+        "id": 6644188,
+        "title": "Blown Job EP",
+        "formats": [
+          {
+            "name": "CDr",
+            "qty": "1",
+            "descriptions": [
+              "EP",
+              "Promo"
+            ]
+          }
+        ],
+        "artists": [
+          {
+            "name": "Marcapasos",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": ""
+          }
+        ],
+        "tracklist": [
+          {
+            "position": "1",
+            "type_": "track",
+            "title": "Sometimes (Radio Edit)",
+            "duration": "3:35"
+          },
+          {
+            "position": "2",
+            "type_": "track",
+            "title": "Sometimes (Original Mix)",
+            "duration": "5:54"
+          },
+          {
+            "position": "3",
+            "type_": "track",
+            "title": "Blown Job (Radio Edit)",
+            "duration": "3:30"
+          },
+          {
+            "position": "4",
+            "type_": "track",
+            "title": "Blown Job (Club Mix)",
+            "duration": "6:53"
+          },
+          {
+            "position": "5",
+            "type_": "track",
+            "title": "So Serious (Extended)",
+            "duration": "6:40"
+          }
+        ]
+      }
+    },
+    {
+      "artist": "Fluke",
+      "title": "Spacey",
+      "receipt_sha256": "d4144f232fd1c0b0a3bf6ee29d22bdd9f5a868d00e2cac876fc485c67260bb33",
+      "source_url": "https://api.discogs.com/releases/1833465",
+      "accept": false,
+      "release": {
+        "id": 1833465,
+        "title": "Six Wheels On My Wagon",
+        "formats": [
+          {
+            "name": "Vinyl",
+            "qty": "2",
+            "descriptions": [
+              "LP",
+              "Album"
+            ]
+          },
+          {
+            "name": "Vinyl",
+            "qty": "1",
+            "descriptions": [
+              "LP",
+              "Mini-Album"
+            ]
+          },
+          {
+            "name": "All Media",
+            "qty": "1",
+            "descriptions": [
+              "Limited Edition"
+            ]
+          }
+        ],
+        "artists": [
+          {
+            "name": "Fluke",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": ""
+          }
+        ],
+        "tracklist": [
+          {
+            "position": "",
+            "type_": "heading",
+            "title": "Six Wheels On My Wagon",
+            "duration": "76:43"
+          },
+          {
+            "position": "A1",
+            "type_": "track",
+            "title": "Groovy Feeling (Make Mine A 99)",
+            "duration": "7:53"
+          },
+          {
+            "position": "A2",
+            "type_": "track",
+            "title": "♥ Letters",
+            "duration": "6:57"
+          },
+          {
+            "position": "A3",
+            "type_": "track",
+            "title": "Glidub",
+            "duration": "7:01"
+          },
+          {
+            "position": "B1",
+            "type_": "track",
+            "title": "Electric Guitar (Humbucker)",
+            "duration": "7:24"
+          },
+          {
+            "position": "B2",
+            "type_": "track",
+            "title": "Top Of The World",
+            "duration": "5:39"
+          },
+          {
+            "position": "B3",
+            "type_": "track",
+            "title": "Slid (Pdfmone)",
+            "duration": "7:40"
+          },
+          {
+            "position": "C1",
+            "type_": "track",
+            "title": "Slowmotion",
+            "duration": "5:40"
+          },
+          {
+            "position": "C2",
+            "type_": "track",
+            "title": "Spacey (Catch 22 Dub)",
+            "duration": "6:08"
+          },
+          {
+            "position": "C3",
+            "type_": "track",
+            "title": "Astrosapiens",
+            "duration": "6:48"
+          },
+          {
+            "position": "D1",
+            "type_": "track",
+            "title": "Oh Yeah",
+            "duration": "6:07"
+          },
+          {
+            "position": "D2",
+            "type_": "track",
+            "title": "Eko",
+            "duration": "5:21"
+          },
+          {
+            "position": "D3",
+            "type_": "track",
+            "title": "Life Support",
+            "duration": "6:28"
+          },
+          {
+            "position": "",
+            "type_": "heading",
+            "title": "The Techno Rose Of Blighty",
+            "duration": "45:13"
+          },
+          {
+            "position": "E1",
+            "type_": "track",
+            "title": "Philly",
+            "duration": "7:10"
+          },
+          {
+            "position": "E2",
+            "type_": "track",
+            "title": "Glorious",
+            "duration": "5:54"
+          },
+          {
+            "position": "E3",
+            "type_": "track",
+            "title": "Cool Hand Flute",
+            "duration": "3:57"
+          },
+          {
+            "position": "E4",
+            "type_": "track",
+            "title": "Joni",
+            "duration": "5:18"
+          },
+          {
+            "position": "F1",
+            "type_": "track",
+            "title": "Easy Peasy",
+            "duration": "4:11"
+          },
+          {
+            "position": "F2",
+            "type_": "track",
+            "title": "Phin",
+            "duration": "6:32"
+          },
+          {
+            "position": "F3",
+            "type_": "track",
+            "title": "Jig",
+            "duration": "5:06"
+          },
+          {
+            "position": "F4",
+            "type_": "track",
+            "title": "Taxi",
+            "duration": "4:13"
+          },
+          {
+            "position": "F5",
+            "type_": "track",
+            "title": "Coolest",
+            "duration": "2:52"
+          }
+        ],
+        "extraartists": [
+          {
+            "name": "Michael Nash (3)",
+            "anv": "",
+            "join": "",
+            "role": "Design [Sleeve]",
+            "tracks": ""
+          },
+          {
+            "name": "Chris Blair",
+            "anv": "",
+            "join": "",
+            "role": "Mastered By",
+            "tracks": ""
+          },
+          {
+            "name": "Jon Fugler",
+            "anv": "Jonathan Fugler",
+            "join": "",
+            "role": "Performer",
+            "tracks": ""
+          },
+          {
+            "name": "Julian Nugent",
+            "anv": "",
+            "join": "",
+            "role": "Performer",
+            "tracks": ""
+          },
+          {
+            "name": "Mike Bryant",
+            "anv": "",
+            "join": "",
+            "role": "Performer",
+            "tracks": ""
+          },
+          {
+            "name": "Mike Tournier",
+            "anv": "Michael Tournier",
+            "join": "",
+            "role": "Performer",
+            "tracks": ""
+          },
+          {
+            "name": "Matthew Donaldson",
+            "anv": "Mathew Donaldson",
+            "join": "",
+            "role": "Photography By [Sleeve]",
+            "tracks": ""
+          },
+          {
+            "name": "Fluke",
+            "anv": "",
+            "join": "",
+            "role": "Written-By, Recorded By",
+            "tracks": ""
+          }
+        ]
+      }
+    },
+    {
+      "artist": "Tuxedomoon",
+      "title": "59 to 1",
+      "receipt_sha256": "b83c2ba90b738867d4aec580d54969b0ee9af1d4c3a91f04147743f036657b18",
+      "source_url": "https://api.discogs.com/releases/251077",
+      "accept": false,
+      "release": {
+        "id": 251077,
+        "title": "Dark Companion / 59 To 1 Remix",
+        "formats": [
+          {
+            "name": "Vinyl",
+            "qty": "1",
+            "descriptions": [
+              "7\"",
+              "Single"
+            ]
+          }
+        ],
+        "artists": [
+          {
+            "name": "Tuxedomoon",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": ""
+          }
+        ],
+        "tracklist": [
+          {
+            "position": "A",
+            "type_": "track",
+            "title": "Dark Companion",
+            "duration": "4:10"
+          },
+          {
+            "position": "B",
+            "type_": "track",
+            "title": "59 To 1 Remix",
+            "duration": "3:54"
+          }
+        ],
+        "extraartists": [
+          {
+            "name": "Patrick Roques",
+            "anv": "",
+            "join": "",
+            "role": "Design [For I.M.C.]",
+            "tracks": ""
+          },
+          {
+            "name": "Leo Kulka",
+            "anv": "LKIKS",
+            "join": "",
+            "role": "Lacquer Cut By",
+            "tracks": ""
+          },
+          {
+            "name": "Mark Sangerman",
+            "anv": "",
+            "join": "",
+            "role": "Photography By",
+            "tracks": ""
+          },
+          {
+            "name": "Tuxedomoon",
+            "anv": "",
+            "join": "",
+            "role": "Written-By",
+            "tracks": ""
+          }
+        ]
+      }
+    },
+    {
+      "artist": "Jaydee",
+      "title": "Plastic Dreams (David Morales Club Mix) [Mixed]",
+      "receipt_sha256": "7177397c60f7bd6a2931cd56b060c97e2a170372b5403689a1ae603ca00a297d",
+      "source_url": "https://api.discogs.com/releases/12668",
+      "accept": false,
+      "release": {
+        "id": 12668,
+        "title": "Ultimate Club Mix",
+        "formats": [
+          {
+            "name": "CD",
+            "qty": "2",
+            "descriptions": [
+              "Compilation",
+              "Mixed"
+            ]
+          }
+        ],
+        "artists": [
+          {
+            "name": "Various",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": ""
+          }
+        ],
+        "tracklist": [
+          {
+            "position": "1.1",
+            "type_": "track",
+            "title": "Renegade Master (Fatboy Slim Old Skool Mix)",
+            "duration": "3:35",
+            "artists": [
+              {
+                "name": "Wildchild",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Fatboy Slim",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.2",
+            "type_": "track",
+            "title": "Never Ever (Booker T's Vocal Mix)",
+            "duration": "4:43",
+            "artists": [
+              {
+                "name": "All Saints",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Booker T",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.3",
+            "type_": "track",
+            "title": "Gunman (Original Mix)",
+            "duration": "2:32",
+            "artists": [
+              {
+                "name": "187 Lockdown",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.4",
+            "type_": "track",
+            "title": "Somebody Else's Guy (Tuff Jam's Classic Garage Mix)",
+            "duration": "4:40",
+            "artists": [
+              {
+                "name": "Ce Ce Peniston",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Tuff Jam",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.5",
+            "type_": "track",
+            "title": "Plastic Dreams (Morales Club Edit)",
+            "duration": "3:28",
+            "artists": [
+              {
+                "name": "Jaydee",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "David Morales",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.6",
+            "type_": "track",
+            "title": "Sugar Is Sweeter (Armand's Drum 'n' Bass Mix)",
+            "duration": "3:58",
+            "artists": [
+              {
+                "name": "CJ Bolland",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Armand van Helden",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              },
+              {
+                "name": "John \"Horse\" McMann",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              },
+              {
+                "name": "Jade 4U",
+                "anv": "",
+                "join": "",
+                "role": "Vocals [Uncredited]",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.7",
+            "type_": "track",
+            "title": "Dreams (Mongorillo Dreams Mix)",
+            "duration": "4:12",
+            "artists": [
+              {
+                "name": "Smokin Beats",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Lynn Eden",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Mongorillo Dreams",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.8",
+            "type_": "track",
+            "title": "Free (Mood II Swing Vocal Mix)",
+            "duration": "3:13",
+            "artists": [
+              {
+                "name": "Ultra Naté",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Mood II Swing",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.9",
+            "type_": "track",
+            "title": "Spin Spin Sugar (Armand's Dark Garage Mix)",
+            "duration": "3:12",
+            "artists": [
+              {
+                "name": "Sneaker Pimps",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Armand van Helden",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.10",
+            "type_": "track",
+            "title": "It's Over Love (Loop Da Loop Mix)",
+            "duration": "5:09",
+            "artists": [
+              {
+                "name": "Todd Terry",
+                "anv": "",
+                "join": "Presents",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Shannon",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Todd Terry",
+                "anv": "",
+                "join": "",
+                "role": "Presenter",
+                "tracks": ""
+              },
+              {
+                "name": "Loop Da Loop",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.11",
+            "type_": "track",
+            "title": "Digital (Armand van Helden's Mix)",
+            "duration": "4:11",
+            "artists": [
+              {
+                "name": "Goldie",
+                "anv": "",
+                "join": "Feat.",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "KRS-One",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Armand van Helden",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.12",
+            "type_": "track",
+            "title": "Hideaway (Deep Dish Radio Edit)",
+            "duration": "2:51",
+            "artists": [
+              {
+                "name": "De'Lacy",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Deep Dish",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.13",
+            "type_": "track",
+            "title": "Nightbird (Tin Tin Out Remix)",
+            "duration": "4:27",
+            "artists": [
+              {
+                "name": "Convert",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Tin Tin Out",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.14",
+            "type_": "track",
+            "title": "Let Me Be Your Fantasy (Dancing Divaz Club Mix)",
+            "duration": "5:17",
+            "artists": [
+              {
+                "name": "Baby D",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Dancing Divaz",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.15",
+            "type_": "track",
+            "title": "You Make Me Feel (Mighty Real) (Don Carlos Club Mix)",
+            "duration": "4:47",
+            "artists": [
+              {
+                "name": "Byron Stingily",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Don Carlos",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.16",
+            "type_": "track",
+            "title": "That's The Way (I Like It) (To The Bottom Of The Glass Dub)",
+            "duration": "2:58",
+            "artists": [
+              {
+                "name": "Clock",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.17",
+            "type_": "track",
+            "title": "Insomnia (Monster Mix)",
+            "duration": "5:40",
+            "artists": [
+              {
+                "name": "Faithless",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.18",
+            "type_": "track",
+            "title": "Meet Her At The Loveparade (Nalin & Kane Remix)",
+            "duration": "3:05",
+            "artists": [
+              {
+                "name": "Da Hool",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Nalin & Kane",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.19",
+            "type_": "track",
+            "title": "Sunchyme (Original Mix)",
+            "duration": "3:06",
+            "artists": [
+              {
+                "name": "Dario G",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "1.20",
+            "type_": "track",
+            "title": "Keep On Jumpin' (The Lisa Marie Sequential Dub)",
+            "duration": "3:30",
+            "artists": [
+              {
+                "name": "Lisa Marie Experience",
+                "anv": "The Lisa Marie Experience",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.1",
+            "type_": "track",
+            "title": "Where Love Lives (Dancing Divaz '96 Radio Edit)",
+            "duration": "3:27",
+            "artists": [
+              {
+                "name": "Alison Limerick",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Dancing Divaz",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.2",
+            "type_": "track",
+            "title": "Push The Feeling On (The Dub Of Doom)",
+            "duration": "2:34",
+            "artists": [
+              {
+                "name": "Nightcrawlers",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Marc Kinchen",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.3",
+            "type_": "track",
+            "title": "The Bomb! (These Sounds Fall Into My Mind)",
+            "duration": "2:35",
+            "artists": [
+              {
+                "name": "Kenny \"Dope\" Gonzalez",
+                "anv": "Kenny Dope",
+                "join": "Presents",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "The Bucketheads",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Kenny \"Dope\" Gonzalez",
+                "anv": "Kenny Dope",
+                "join": "",
+                "role": "Presenter",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.4",
+            "type_": "track",
+            "title": "I Feel Love (Rollo & Sister Bliss Monster Mix)",
+            "duration": "5:29",
+            "artists": [
+              {
+                "name": "Donna Summer",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Rollo & Sister Bliss",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.5",
+            "type_": "track",
+            "title": "Disco's Revenge (Mole Hole Dirty Mix)",
+            "duration": "2:33",
+            "artists": [
+              {
+                "name": "Gusto",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.6",
+            "type_": "track",
+            "title": "Nakasaki (I Need A Lover Tonight) (Original Mix)",
+            "duration": "4:38",
+            "artists": [
+              {
+                "name": "Ken Doh",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.7",
+            "type_": "track",
+            "title": "U Girls (Look So Sexy) (Original Mix)",
+            "duration": "5:12",
+            "artists": [
+              {
+                "name": "Nush",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.8",
+            "type_": "track",
+            "title": "Passion",
+            "duration": "3:49",
+            "artists": [
+              {
+                "name": "Gat Decor",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.9",
+            "type_": "track",
+            "title": "Don't You Want Me (Hooj Mix)",
+            "duration": "4:17",
+            "artists": [
+              {
+                "name": "Felix",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.10",
+            "type_": "track",
+            "title": "I Refuse (What You Want) (Serious Danger Remix)",
+            "duration": "4:16",
+            "artists": [
+              {
+                "name": "Somore",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Damon Trueitt",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Serious Danger",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.11",
+            "type_": "track",
+            "title": "The Gift (Original Mix)",
+            "duration": "4:08",
+            "artists": [
+              {
+                "name": "Way Out West",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.12",
+            "type_": "track",
+            "title": "Not Over Yet (Perfecto Mix)",
+            "duration": "5:13",
+            "artists": [
+              {
+                "name": "Grace",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Perfecto",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.13",
+            "type_": "track",
+            "title": "Higher State Of Consciousness (Dex And Jonesey's Higher Stated Mix)",
+            "duration": "4:58",
+            "artists": [
+              {
+                "name": "Josh Wink",
+                "anv": "Wink",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ],
+            "extraartists": [
+              {
+                "name": "Dex & Jonesey",
+                "anv": "",
+                "join": "",
+                "role": "Remix",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.14",
+            "type_": "track",
+            "title": "There's Nothing I Won't Do (JX Original Mix)",
+            "duration": "3:22",
+            "artists": [
+              {
+                "name": "JX",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.15",
+            "type_": "track",
+            "title": "I'm Alive (Like It A Lot Mix)",
+            "duration": "3:44",
+            "artists": [
+              {
+                "name": "Stretch & Vern",
+                "anv": "Stretch n Vern",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.16",
+            "type_": "track",
+            "title": "Seven Days & One Week",
+            "duration": "6:15",
+            "artists": [
+              {
+                "name": "B.B.E.",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.17",
+            "type_": "track",
+            "title": "Bellissima (Original Mix)",
+            "duration": "3:01",
+            "artists": [
+              {
+                "name": "DJ Quicksilver",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.18",
+            "type_": "track",
+            "title": "Loving You More (Remix 7\" Edit)",
+            "duration": "2:41",
+            "artists": [
+              {
+                "name": "BT",
+                "anv": "",
+                "join": "Featuring",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Vincent Covello",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2.19",
+            "type_": "track",
+            "title": "Born Slippy .NUXX",
+            "duration": "4:30",
+            "artists": [
+              {
+                "name": "Underworld",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          }
+        ],
+        "extraartists": [
+          {
+            "name": "St. Peter & Heaven",
+            "anv": "",
+            "join": "",
+            "role": "DJ Mix",
+            "tracks": ""
+          },
+          {
+            "name": "Nigel Pierce",
+            "anv": "",
+            "join": "",
+            "role": "Engineer",
+            "tracks": ""
+          }
+        ]
+      }
+    },
+    {
+      "artist": "Ranking Ann & Mad Professor",
+      "title": "Moonlight Lover",
+      "receipt_sha256": "98035c1b8c0d77ecfcd633763efd167de6315db4037fc7ea663bb56590c3456a",
+      "source_url": "https://api.discogs.com/releases/1522747",
+      "accept": false,
+      "release": {
+        "id": 1522747,
+        "title": "A Slice Of English Toast",
+        "formats": [
+          {
+            "name": "Vinyl",
+            "qty": "1",
+            "descriptions": [
+              "LP",
+              "Album"
+            ]
+          }
+        ],
+        "artists": [
+          {
+            "name": "Ranking Ann",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": ""
+          }
+        ],
+        "tracklist": [
+          {
+            "position": "A1",
+            "type_": "track",
+            "title": "A Slice Of English Toast",
+            "duration": ""
+          },
+          {
+            "position": "A2",
+            "type_": "track",
+            "title": "Black Rock Possee",
+            "duration": ""
+          },
+          {
+            "position": "A3",
+            "type_": "track",
+            "title": "Problem Lady",
+            "duration": ""
+          },
+          {
+            "position": "B1",
+            "type_": "track",
+            "title": "Moonlight Lover",
+            "duration": ""
+          },
+          {
+            "position": "B2",
+            "type_": "track",
+            "title": "Liberated Woman",
+            "duration": ""
+          },
+          {
+            "position": "B3",
+            "type_": "track",
+            "title": "Love On A Mountain Top",
+            "duration": ""
+          }
+        ],
+        "extraartists": [
+          {
+            "name": "Asher Senator",
+            "anv": "Asher",
+            "join": "",
+            "role": "Backing Vocals",
+            "tracks": ""
+          },
+          {
+            "name": "Audrey Donnegan",
+            "anv": "",
+            "join": "",
+            "role": "Backing Vocals",
+            "tracks": ""
+          },
+          {
+            "name": "Bobby Davidson",
+            "anv": "",
+            "join": "",
+            "role": "Backing Vocals",
+            "tracks": ""
+          },
+          {
+            "name": "Davina Stone",
+            "anv": "",
+            "join": "",
+            "role": "Backing Vocals",
+            "tracks": ""
+          },
+          {
+            "name": "Errol Sly",
+            "anv": "",
+            "join": "",
+            "role": "Backing Vocals",
+            "tracks": ""
+          },
+          {
+            "name": "Bernard Cumberbatch",
+            "anv": "Bernard",
+            "join": "",
+            "role": "Bass",
+            "tracks": ""
+          },
+          {
+            "name": "Deuce (6)",
+            "anv": "",
+            "join": "",
+            "role": "Bass",
+            "tracks": ""
+          },
+          {
+            "name": "Preacher (3)",
+            "anv": "",
+            "join": "",
+            "role": "Bass",
+            "tracks": ""
+          },
+          {
+            "name": "Billy Cross",
+            "anv": "",
+            "join": "",
+            "role": "Drums",
+            "tracks": ""
+          },
+          {
+            "name": "Errol The General",
+            "anv": "",
+            "join": "",
+            "role": "Drums",
+            "tracks": ""
+          },
+          {
+            "name": "Leroy \"Horsemouth\" Wallace",
+            "anv": "Horsemouth",
+            "join": "",
+            "role": "Drums",
+            "tracks": ""
+          },
+          {
+            "name": "Brick (2)",
+            "anv": "",
+            "join": "",
+            "role": "Lead Guitar",
+            "tracks": ""
+          },
+          {
+            "name": "Jah Shaka",
+            "anv": "",
+            "join": "",
+            "role": "Percussion",
+            "tracks": ""
+          },
+          {
+            "name": "Garnett Cross",
+            "anv": "",
+            "join": "",
+            "role": "Piano, Backing Vocals",
+            "tracks": ""
+          },
+          {
+            "name": "Mad Professor",
+            "anv": "",
+            "join": "",
+            "role": "Producer, Piano, Percussion",
+            "tracks": ""
+          },
+          {
+            "name": "Tony Benjamin",
+            "anv": "",
+            "join": "",
+            "role": "Rhythm Guitar, Percussion, Backing Vocals",
+            "tracks": ""
+          },
+          {
+            "name": "Tamla",
+            "anv": "",
+            "join": "",
+            "role": "Steel Drums",
+            "tracks": ""
+          },
+          {
+            "name": "John Schofield",
+            "anv": "",
+            "join": "",
+            "role": "Vibraphone",
+            "tracks": ""
+          }
+        ]
+      }
+    },
+    {
+      "artist": "Lay-Far",
+      "title": "Mystical Rhythms / Kaleidoscope Represent (feat. Sean McCabe)",
+      "receipt_sha256": "cd9896dbee7cde87b2b08e2b15c54c90be1a43f3d18f673d331313e71643458d",
+      "source_url": "https://api.discogs.com/releases/9271783",
+      "accept": true,
+      "release": {
+        "id": 9271783,
+        "title": "How I Communicate",
+        "formats": [
+          {
+            "name": "CD",
+            "qty": "1",
+            "descriptions": [
+              "Album",
+              "Special Edition"
+            ]
+          }
+        ],
+        "artists": [
+          {
+            "name": "Lay-Far",
+            "anv": "",
+            "join": "",
+            "role": "",
+            "tracks": ""
+          }
+        ],
+        "tracklist": [
+          {
+            "position": "1",
+            "type_": "track",
+            "title": "Intro",
+            "duration": "0:20",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "2",
+            "type_": "track",
+            "title": "Like The First Time",
+            "duration": "5:40",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "Feat",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Magic Number",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "3",
+            "type_": "track",
+            "title": "Dva Kolca Dva Konca (Interlude)",
+            "duration": "1:23",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "4",
+            "type_": "track",
+            "title": "Lock And Rock",
+            "duration": "5:19",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "5",
+            "type_": "track",
+            "title": "Slope (Upbeat)",
+            "duration": "5:51",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "With",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Ashley Beedle",
+                "anv": "Ashley Beadle",
+                "join": "&",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Darren Morris",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "6",
+            "type_": "track",
+            "title": "Jump Higher",
+            "duration": "5:14",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "Feat.",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Mark De Clive-Lowe",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "7",
+            "type_": "track",
+            "title": "Draw Your Bow",
+            "duration": "6:06",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "Versus",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Restless Soul",
+                "anv": "Restless Soul Fun Band",
+                "join": "&",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Shea Soul",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "8",
+            "type_": "track",
+            "title": "It's Spiritual Interlude",
+            "duration": "0:09",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "9",
+            "type_": "track",
+            "title": "Side 2 Side (I Just)",
+            "duration": "4:35",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "10",
+            "type_": "track",
+            "title": "Submerging",
+            "duration": "4:57",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "11",
+            "type_": "track",
+            "title": "4/4 Interlude",
+            "duration": "0:27",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "12",
+            "type_": "track",
+            "title": "Mystical Rhythms / Kaleidoscope Represent",
+            "duration": "4:52",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "Feat",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Sean McCabe",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "13",
+            "type_": "track",
+            "title": "Another Way (The Siren Song)",
+            "duration": "6:57",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "14",
+            "type_": "track",
+            "title": "Drop The Time",
+            "duration": "3:21",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "Feat",
+                "role": "",
+                "tracks": ""
+              },
+              {
+                "name": "Ann Weller (2)",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "15",
+            "type_": "track",
+            "title": "One More Interlude",
+            "duration": "0:26",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "16",
+            "type_": "track",
+            "title": "Rising / In Between Concepts",
+            "duration": "5:48",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "17",
+            "type_": "track",
+            "title": "Outro",
+            "duration": "0:38",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          },
+          {
+            "position": "18",
+            "type_": "track",
+            "title": "Sun",
+            "duration": "1:30",
+            "artists": [
+              {
+                "name": "Lay-Far",
+                "anv": "",
+                "join": "",
+                "role": "",
+                "tracks": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
