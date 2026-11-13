@@ -18,6 +18,7 @@ import { ArchiveHeader } from "@/components/archive/archive-header";
 import { SetSeekControl } from "@/components/archive/set-seek-control";
 import { RecordedSetControls } from "@/components/archive/recorded-set-controls";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
+import { SpotifySaveButton } from "@/components/archive/spotify-save-button";
 import { SpotifyTrackPreview } from "@/components/archive/spotify-track-preview";
 import { traceAudioTiming } from "@/lib/archive/audio-timing";
 import { createSetAudioFocus } from "@/lib/archive/audio-focus";
@@ -3458,6 +3459,13 @@ export function ArchiveSetExplorer({
                                 onRegister={(pause) => audioFocus.register(String(track.idx), pause)}
                                 onPlaying={() => audioFocus.playing(String(track.idx))}
                                 onStopped={() => audioFocus.stopped(String(track.idx))}
+                              />
+                            ) : null}
+                            {isSpotifyOpen && track.spotifyTrackId ? (
+                              <SpotifySaveButton
+                                key={`save:${track.spotifyTrackId}`}
+                                trackId={track.spotifyTrackId}
+                                label={`${track.artist} – ${track.title}`}
                               />
                             ) : null}
                           </div>

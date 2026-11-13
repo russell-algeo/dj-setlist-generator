@@ -1266,6 +1266,45 @@
   display: none;
 }
 
+.root :global(.spotify-save) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.root :global(.spotify-save .spotify-save-btn) {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-color: #1db954;
+  color: #1db954;
+  background: rgb(12 48 24 / 45%);
+}
+
+.root :global(.spotify-save .spotify-save-btn:disabled) {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.root :global(.spotify-save .spotify-save-undo) {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.root :global(.spotify-save-done) {
+  color: #1db954;
+}
+
+.root :global(.spotify-save-note) {
+  color: #a9a9a9;
+}
+
 .root :global(.details-grid) {
   display: grid;
   gap: 6px;
