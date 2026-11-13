@@ -2,6 +2,13 @@
 "use client";
 
 import { createNativeAudioController, type NativeAudioSegment } from "@/lib/yoon-fest/playback";
+import {
+  clearNowPlaying,
+  publishNowPlaying,
+  publishPlaybackState,
+  registerMediaSessionActions,
+  type MediaSessionHandlers,
+} from "@/lib/media-session";
 import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
@@ -976,6 +983,7 @@ export function ArchiveSetExplorer({
   const heroTrackRef = useRef<HTMLDivElement | null>(null);
   const nativeAudioRef = useRef<HTMLAudioElement | null>(null);
   const nativeControllerRef = useRef<ReturnType<typeof createNativeAudioController> | null>(null);
+  const mediaSessionHandlersRef = useRef<MediaSessionHandlers | null>(null);
   const nativeRecoveryRef = useRef({ windowStart: 0, attempts: 0 });
   const nativeStallTimerRef = useRef<number | null>(null);
   const nativeStallMarkRef = useRef<number | null>(null);
@@ -1289,14 +1297,11 @@ export function ArchiveSetExplorer({
   }
 
   const publishNowPlayingMetadata = () => {
-    if (typeof window === "undefined" || !("mediaSession" in navigator) || !("MediaMetadata" in window)) {
-      return;
-    }
-
-    navigator.mediaSession.metadata = new window.MediaMetadata({
-      album: "Set Signal Archive",
-      artist: nowPlayingArtist,
-      title: detail.title,
+    publishNowPlaying({
+      setTitle: detail.title,
+      setArtist: nowPlayingArtist,
+      track: activeTrack,
+      artworkUrl: activeTrack?.albumArt || model.heroImageUrl || null,
     });
   };
 
@@ -2652,88 +2657,41 @@ export function ArchiveSetExplorer({
   }, [detail.id]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !("mediaSession" in navigator) || !("MediaMetadata" in window)) {
-      return;
-    }
-
     publishNowPlayingMetadata();
-
-    return () => {
-      navigator.mediaSession.metadata = null;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.id, detail.title, nowPlayingArtist, activeSource.kind, activeSource.sourceUrl]);
+  }, [detail.id, detail.title, nowPlayingArtist, activeSource.kind, activeSource.sourceUrl,
+    activeTrack?.idx, activeTrack?.title, activeTrack?.artist, activeTrack?.albumArt, model.heroImageUrl]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !("mediaSession" in navigator)) {
-      return;
-    }
+  useEffect(() => clearNowPlaying, [detail.id]);
 
-    const setActionHandler = (
-      action: MediaSessionAction,
-      handler: MediaSessionActionHandler | null,
-    ) => {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-      } catch {
-        // Browser support varies by action and platform.
-      }
-    };
-
-    setActionHandler("play", () => {
-      playPlayer();
-    });
-    setActionHandler("pause", () => {
-      pausePlayer();
-      persistLatestPlayerPosition(true);
-    });
-    setActionHandler("seekbackward", (event) => {
-      jumpTo(currentTimeRef.current - (event.seekOffset ?? 15), false, isPlayingRef.current);
-    });
-    setActionHandler("seekforward", (event) => {
-      jumpTo(currentTimeRef.current + (event.seekOffset ?? 15), false, isPlayingRef.current);
-    });
-    setActionHandler("seekto", (event) => {
-      if (typeof event.seekTime !== "number") {
+  // Read on every lock-screen press so the handlers always see this render's
+  // player state, source and tracks rather than the render that registered them.
+  mediaSessionHandlersRef.current = {
+    play: () => {
+      if (detail.duration > 0 && currentTimeRef.current >= detail.duration) {
+        jumpTo(0, false, true);
         return;
       }
-      jumpTo(event.seekTime, false, isPlayingRef.current);
-    });
-    setActionHandler("previoustrack", previousTrack);
-    setActionHandler("nexttrack", nextTrack);
+      playPlayer();
+    },
+    pause: () => {
+      pausePlayer();
+      persistLatestPlayerPosition(true);
+    },
+    seekTo: (seconds) => {
+      const keepPlaying = activeSource.kind === "native-audio"
+        ? nativeControllerRef.current?.isPlayRequested() ?? false
+        : isPlayingRef.current;
+      jumpTo(clamp(seconds, 0, Math.max(0, detail.duration)), false, keepPlaying);
+    },
+    previousTrack,
+    nextTrack,
+  };
 
-    return () => {
-      for (const action of [
-        "play",
-        "pause",
-        "seekbackward",
-        "seekforward",
-        "seekto",
-        "previoustrack",
-        "nexttrack",
-      ] as MediaSessionAction[]) {
-        setActionHandler(action, null);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.id, activeSource.kind, activeSource.sourceUrl]);
+  useEffect(() => registerMediaSessionActions(() => mediaSessionHandlersRef.current!), []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !("mediaSession" in navigator)) {
-      return;
-    }
-
-    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
-
-    try {
-      navigator.mediaSession.setPositionState({
-        duration: Math.max(0, detail.duration),
-        playbackRate: 1,
-        position: clamp(currentTime, 0, Math.max(0, detail.duration)),
-      });
-    } catch {
-      // Position state support is uneven, especially around embedded players.
-    }
+    publishPlaybackState(detail.duration, currentTime, isPlaying);
   }, [currentTime, detail.duration, isPlaying]);
 
   useEffect(() => {
