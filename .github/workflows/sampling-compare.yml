@@ -1,0 +1,75 @@
+name: sampling-compare
+
+# D07 bounded sampling comparison on sealed partial Yoon families (Preview
+# development database only, read-only). Arm A reuses the recorded 30s/15s
+# evidence; arm B re-recognizes the same audio at 30s/12s in memory. Logs carry
+# counts only. Runs only when the owner commits .github/sampling-compare-request.json.
+on:
+  push:
+    branches: [preview]
+    paths: [.github/sampling-compare-request.json]
+
+concurrency:
+  group: sampling-compare
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  PYTHONDONTWRITEBYTECODE: '1'
+  WORKER_DEPLOYMENT_TARGET: development
+  ENABLE_CHECKPOINTS: 'false'
+  NTFY_TOPIC: ''
+
+jobs:
+  plan:
+    if: ${{ github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sets: ${{ steps.plan.outputs.sets }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: plan
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, uuid
+          r = json.load(open('.github/sampling-compare-request.json'))
+          sets = [str(uuid.UUID(s)) for s in r['sets']]
+          assert 1 <= len(sets) <= 2 and len(set(sets)) == len(sets)
+          print('sets=' + json.dumps(sets))
+          PY
+
+  compare:
+    needs: plan
+    strategy:
+      fail-fast: true
+      max-parallel: 2
+      matrix:
+        set: ${{ fromJson(needs.plan.outputs.sets) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CONCURRENT_RECOGNITIONS: '2'
+      BATCH_SIZE: '10'
+      MAX_STUDY_WINDOWS: '600'
+      YOON_PARTIAL_SET_ID: ${{ matrix.set }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-base.txt -r requirements-private-recognize.txt
+      - name: Compare sampling arms (counts only)
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m worker.jobs.yoon_sampling_compare
