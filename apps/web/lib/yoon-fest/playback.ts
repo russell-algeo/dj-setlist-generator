@@ -36,6 +36,15 @@ export function locateRecordingTime(spans: RecordingSpan[], seconds: number) {
   throw new Error("Invalid set position");
 }
 
+// Browsers report media time with less precision than a sample-exact start
+// (Chrome rounds to microseconds), so a position just "before" a window start
+// is the start itself. Without this, a source window starting mid-file looks
+// permanently out of range and every tick re-seeks it.
+export const SOURCE_TIME_TOLERANCE_SECONDS = 0.002;
+// A requested play that the element silently dropped (for example at a file
+// seam while the next source was still loading) is retried after this long.
+const PLAY_WATCHDOG_MS = 1200;
+
 export type NativeAudioSegment = { src: string; startSeconds: number; durationSeconds: number };
 export type NativeAudioPort = Pick<HTMLAudioElement, "src" | "load" | "paused" | "currentTime" | "readyState" | "play" | "pause"> & { readonly ended?: boolean };
 
@@ -53,6 +62,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
   let pending: { seconds: number; autoplay: boolean } | null = null;
   let playRequested = false;
   let playAttempt: { version: number; settled: Promise<void> } | null = null;
+  let stalledSince: number | null = null;
   const startPlayback = (request: number) => {
     // Keep the pending play promise separate from the pending source seek.
     // A seek may be applied while play() is still starting or being denied.
@@ -117,7 +127,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     const part = segments[activeIndex]!;
     const target = position();
     if (target >= duration && !replayAtEnd) { pause(); return; }
-    if (pending || awaitingMetadata || audio.readyState < 1 || audio.ended || audio.currentTime < part.startSeconds ||
+    if (pending || awaitingMetadata || audio.readyState < 1 || audio.ended || audio.currentTime < part.startSeconds - SOURCE_TIME_TOLERANCE_SECONDS ||
       audio.currentTime >= part.startSeconds + part.durationSeconds) {
       seek(target >= duration ? 0 : target, true);
       return;
@@ -155,9 +165,16 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       onPaused();
     },
     tick() {
-      if (disposed || pending || awaitingMetadata || audio.readyState < 1) return position();
+      if (disposed || pending || awaitingMetadata || audio.readyState < 1) { stalledSince = null; return position(); }
       const part = segments[activeIndex]!;
-      if (audio.currentTime < part.startSeconds) seek(offsets[activeIndex]!, !audio.paused);
+      // Play was requested and nothing paused us on purpose, yet the element
+      // sits paused: the browser dropped the play. Ask again, once per window.
+      if (playRequested && audio.paused && !audio.ended && playAttempt === null) {
+        const now = Date.now();
+        if (stalledSince === null) stalledSince = now;
+        else if (now - stalledSince >= PLAY_WATCHDOG_MS) { stalledSince = null; startPlayback(++version); }
+      } else stalledSince = null;
+      if (audio.currentTime < part.startSeconds - SOURCE_TIME_TOLERANCE_SECONDS) seek(offsets[activeIndex]!, !audio.paused);
       else if (audio.currentTime >= part.startSeconds + part.durationSeconds) {
         if (!audio.paused) return ended();
         if (audio.currentTime > part.startSeconds + part.durationSeconds) seek(offsets[activeIndex]! + part.durationSeconds, false);

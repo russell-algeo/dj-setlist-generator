@@ -386,3 +386,39 @@ describe("native audio recovery after a dead provider URL", () => {
   });
   it("does nothing once disposed", () => { const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn()); c.dispose(); audio.load.mockClear(); expect(c.recover()).toBe(false); expect(audio.load).not.toHaveBeenCalled(); });
 });
+
+describe("sample-exact windows in a real browser clock", () => {
+  // 136279296 / 44100: a mid-file start that Chrome reports rounded to microseconds.
+  const start = 136279296 / 44100;
+  const segments = [{ src: "/part-a", startSeconds: start, durationSeconds: 60 }, { src: "/part-b", startSeconds: 0, durationSeconds: 60 }];
+  const make = () => ({ src: "/part-a", load: vi.fn(), paused: true, ended: false, currentTime: 0, readyState: 1,
+    play: vi.fn().mockResolvedValue(undefined), pause: vi.fn() });
+
+  it("does not re-seek a window start that the browser reports rounded down", () => {
+    const audio = make(); const c = createNativeAudioController(audio, 120, vi.fn(), segments);
+    c.seek(0, false);
+    audio.currentTime = Math.floor(start * 1e6) / 1e6;
+    audio.pause.mockClear();
+    for (let i = 0; i < 50; i += 1) c.tick();
+    expect(audio.pause).not.toHaveBeenCalled();
+    expect(audio.currentTime).toBe(Math.floor(start * 1e6) / 1e6);
+    expect(c.position()).toBe(0);
+  });
+
+  it("asks again when a requested play was dropped after a file seam", async () => {
+    vi.useFakeTimers();
+    try {
+      const audio = make(); const c = createNativeAudioController(audio, 120, vi.fn(), segments);
+      c.seek(59, true); audio.paused = false; await Promise.resolve();
+      audio.currentTime = start + 60; c.tick();
+      expect(audio.src).toBe("/part-b");
+      c.ready(); await Promise.resolve(); await Promise.resolve();
+      const calls = audio.play.mock.calls.length;
+      audio.paused = true; // The browser never started the new file.
+      c.tick(); vi.advanceTimersByTime(1300); c.tick();
+      expect(audio.play.mock.calls.length).toBe(calls + 1);
+      c.pause(); vi.advanceTimersByTime(5000); c.tick(); c.tick();
+      expect(audio.play.mock.calls.length).toBe(calls + 1);
+    } finally { vi.useRealTimers(); }
+  });
+});
