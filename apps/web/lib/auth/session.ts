@@ -169,7 +169,7 @@ export const canAccessSubmission = async (actor: SessionActor, submissionId: str
   const [row] = await db
     .select({ id: submissions.id })
     .from(submissions)
-    .where(and(eq(submissions.id, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin)))
+    .where(and(eq(submissions.id, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session")))
     .limit(1);
 
   return Boolean(row);
@@ -177,7 +177,7 @@ export const canAccessSubmission = async (actor: SessionActor, submissionId: str
 
 export const canManageSubmission = async (actor: SessionActor, submissionId: string) => {
   const [row] = await db.select({ id: submissions.id }).from(submissions)
-    .where(and(eq(submissions.id, submissionId), manageableSubmissionPredicate(actor.userId, actor.isAdmin)))
+    .where(and(eq(submissions.id, submissionId), manageableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session")))
     .limit(1);
   return Boolean(row);
 };

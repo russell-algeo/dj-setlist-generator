@@ -40,7 +40,8 @@ describe("private archive mutation boundaries", () => {
   it("all submission listing variants use the collection-aware policy", () => {
     for (const path of ["lib/jobs/public.server.ts", "lib/jobs/submissions.ts", "lib/admin/users.ts", "lib/auth/session.ts"]) {
       const code = source(path);
-      expect(code).toContain("readableSubmissionPredicate(actor.userId, actor.isAdmin)");
+      expect(code).toContain(path === "lib/admin/users.ts" ? "readableSubmissionPredicate(actor.userId, actor.isAdmin)"
+        : 'readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session")');
       expect(code).not.toContain("actor.isAdmin ? undefined : eq(submissions.requestedBy");
     }
     expect(source("app/admin/page.tsx")).toContain("listAllSubmissionsWithUser(actor)");

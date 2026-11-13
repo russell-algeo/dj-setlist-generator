@@ -14,6 +14,11 @@ describe("same-Neon collection membership", () => {
     expect(memberQuery.params).toEqual(["outsider"]); expect(memberQuery.sql).toContain('"user_id"');
     expect(new PgDialect().sqlToQuery(where.mock.calls[0]![0]).params).toEqual(["yoon-fest"]);
   });
+  it("requires the pinned audience on every access decision", async () => {
+    await hasYoonAccess(actor());
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+    expect(query.sql).toContain('app.yoon_audience_intact("app"."archive_collections"."id")');
+  });
   it("reflects membership revocation on the next request rather than caching an allow", async () => {
     limit.mockResolvedValueOnce([{ id: "synthetic-collection" }]).mockResolvedValueOnce([]);
     expect(await hasYoonAccess(actor())).toBe(true); expect(await hasYoonAccess(actor())).toBe(false);

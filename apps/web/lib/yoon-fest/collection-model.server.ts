@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { dropboxPlaybackUrl } from "./dropbox-source.server";
 import { spanDuration } from "./playback";
+import { partialCoverageSchema } from "./partial-coverage";
 
 const spotifyTrackUrl = z.string().url().regex(/^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?.*)?$/);
 const recordingSpan = z.object({
@@ -38,6 +39,7 @@ const set = z.object({
     matchedWindows: z.number().int().nonnegative(),
   }).strict().refine((value) => value.matchedWindows <= value.validResponses &&
     value.validResponses <= value.expectedWindows, "Invalid recognition coverage").optional(),
+  partialCoverage: partialCoverageSchema.optional(),
   spans: z.array(recordingSpan).min(1),
   audio: z.object({ assetId: z.string().uuid(), revision: z.string().min(1), durationSeconds: z.number().finite().positive(),
     contentType: z.enum(["audio/flac", "audio/mp4", "audio/wav", "audio/mpeg"]),
@@ -57,6 +59,7 @@ export const yoonCollectionSchema = z.object({
         entry.spans.some((span) => !entry.audio.sources.some((source) => source.recordingId === span.recordingId))) throw new Error("Missing or duplicate recording source");
       const duration = entry.spans.reduce((sum, span) => sum + spanDuration(span), 0);
       if (Math.abs(duration - entry.audio.durationSeconds) > 0.25) throw new Error("Derivative duration differs from source spans");
+      if (entry.partialCoverage && Math.abs(entry.partialCoverage.recordedSeconds - entry.audio.durationSeconds) > 0.25) throw new Error("Partial coverage differs from recorded audio");
       const positions = entry.tracks.map((item) => item.position);
       if (new Set(positions).size !== positions.length) throw new Error("Duplicate track position");
       let previousStart = -1;

@@ -213,7 +213,7 @@ export const listPublicSubmissionsForActor = async (
 ): Promise<SubmissionListItemDto[]> => {
   const filter = normalizePublicSubmissionFilter(requestedFilter);
   const whereClause = and(
-    readableSubmissionPredicate(actor.userId, actor.isAdmin),
+    readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session"),
     getFilterClause(filter),
   );
 
@@ -503,7 +503,7 @@ export const getPublicSubmissionRunEventsPage = async ({
     .select({ id: setRuns.id })
     .from(setRuns)
     .innerJoin(submissions, eq(submissions.id, setRuns.submissionId))
-    .where(and(eq(setRuns.id, setRunId), eq(setRuns.submissionId, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin)))
+    .where(and(eq(setRuns.id, setRunId), eq(setRuns.submissionId, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session")))
     .limit(1);
 
   if (!run) {

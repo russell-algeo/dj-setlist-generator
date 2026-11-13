@@ -58,6 +58,7 @@ async function loadYoonVersions(actor: SessionActor, lookup: VersionLookup): Pro
       boundaryStatus: metadata.boundaryStatus ?? "provisional",
       boundaryNote: metadata.boundaryNote ?? "Recording boundaries have not been reviewed.",
       ...(coverage ? { recognitionCoverage: coverage } : {}),
+      ...(metadata.partialCoverage ? { partialCoverage: metadata.partialCoverage } : {}),
       spans: row.sourceSpans,
       audio: { assetId: row.audioId, revision: row.revision, durationSeconds: Number(row.duration), contentType: row.contentType, sources: row.sources },
       tracks: entries.filter((entry) => entry.setId === row.id).map((entry) => {

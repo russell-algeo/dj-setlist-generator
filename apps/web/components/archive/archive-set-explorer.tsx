@@ -16,7 +16,7 @@ import { ArchiveDeleteControl, SubmittedByYouBadge } from "@/components/archive/
 import { buildArtistHref } from "@/components/archive/archive-hrefs";
 import { ArchiveHeader } from "@/components/archive/archive-header";
 import { SetSeekControl } from "@/components/archive/set-seek-control";
-import { RecordedSetControls } from "@/components/archive/recorded-set-controls";
+import { RecordedSetControls, type RecordedSetCoverage } from "@/components/archive/recorded-set-controls";
 import { ArchiveScrollRoot } from "@/components/archive/archive-scroll-root";
 import { SpotifySaveButton } from "@/components/archive/spotify-save-button";
 import { SpotifyTrackPreview } from "@/components/archive/spotify-track-preview";
@@ -93,6 +93,8 @@ export type PrivateSetContext = {
   collectionHref: string;
   boundaryNote: string;
   audio: { src: string; revision: string; segments?: NativeAudioSegment[] };
+  /** Partial recordings: notes and gap markers on the set clock. */
+  coverage?: RecordedSetCoverage | null;
 };
 
 type SetSourceModel =
@@ -2940,6 +2942,7 @@ export function ArchiveSetExplorer({
                       title={detail.title}
                       artworkUrl={dockTrack?.albumArt ?? model.heroImageUrl ?? null}
                       nowPlaying={dockTrack ? { title: dockTrack.title, artist: dockTrack.artist } : null}
+                      coverage={privateContext?.coverage ?? null}
                     />
                   </div>
                 ) : null}

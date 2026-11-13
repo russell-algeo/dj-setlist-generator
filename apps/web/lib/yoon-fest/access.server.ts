@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { unstable_noStore as noStore } from "next/cache";
 import type { SessionActor } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
@@ -14,7 +14,11 @@ export async function hasYoonAccess(actor: SessionActor | null): Promise<boolean
     .from(archiveCollections).innerJoin(archiveCollectionMembers,
       and(eq(archiveCollectionMembers.collectionId, archiveCollections.id),
         eq(archiveCollectionMembers.userId, actor.userId)))
-    .where(eq(archiveCollections.slug, "yoon-fest")).limit(1);
+    // Fail closed unless the live audience still equals the pinned two-person
+    // audience (Russell as manager, Hal as viewer). A third member, a role change
+    // or a removed member denies everyone until the owner restores it.
+    .where(and(eq(archiveCollections.slug, "yoon-fest"),
+      sql`app.yoon_audience_intact(${archiveCollections.id})`)).limit(1);
   return Boolean(member);
 }
 

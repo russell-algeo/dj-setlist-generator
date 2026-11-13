@@ -161,6 +161,12 @@ async def recognize() -> int:
                 span = spans.setdefault(part['file'], [part['start'], part['end']])
                 span[0], span[1] = min(span[0], part['start']), max(span[1], part['end'])
         local = {}
+        for name in sorted(spans):
+            header = work / 'header.bin'
+            header.unlink(missing_ok=True)
+            fetch_range(links[name], DATA_OFFSET - 8, DATA_OFFSET - 1, header)
+            if header.read_bytes()[:4] != b'data':
+                raise RuntimeError('source_data_offset_changed')
         for name, (start, end) in sorted(spans.items()):
             path = work / f'{len(local)}.pcm'
             fetch_range(links[name], DATA_OFFSET + start * ALIGN, DATA_OFFSET + end * ALIGN - 1, path)
@@ -204,8 +210,12 @@ async def recognize() -> int:
                            'response': {'segment_index': w['index'], 'timestamp': segment['timestamp'],
                                         'recognized': bool(result.recognized), 'http_status': 200,
                                         'raw_data': result.raw_data}}
-                    call('yoon_partial_record_hit', sid, w['index'], segment['pcm_sha256'],
-                         json.dumps(hit))
+                    try:
+                        call('yoon_partial_record_hit', sid, w['index'], segment['pcm_sha256'],
+                             json.dumps(hit))
+                    except Exception:
+                        failed += 1  # Rejected by the ledger's validity check; retried later.
+                        continue
                     recorded += 1
                 say(f'shard {index + 1}/{count}: {recorded + failed}/{len(pending)} attempted, '
                     f'{recorded} recorded, {failed} to retry')
@@ -253,7 +263,18 @@ def cluster(grid: list[dict], hits: list[dict]) -> list[dict]:
                     start = out[-1]['end_seconds']
             if end > start:
                 out.append({'fragment': fragment, 'track': track, 'start_seconds': start, 'end_seconds': end})
-    return out
+    # Interleaved clusters get handed over at the next track's start, so cite only
+    # windows that overlap each entry's final span (the release enforces this).
+    starts = {w['index']: w['start_frame'] / RATE for w in grid}
+    kept = []
+    for c in out:
+        t = c['track']
+        t.segment_indices = [i for i in t.segment_indices
+                             if starts[i] < c['end_seconds'] and starts[i] + 30 > c['start_seconds']]
+        t.detection_count = len(t.segment_indices)
+        if t.segment_indices:
+            kept.append(c)
+    return kept
 
 
 def stage() -> int:
@@ -290,7 +311,29 @@ def stage() -> int:
     return 0
 
 
+def quiet_process() -> None:
+    """Logs are public: no library logging, warnings or tracebacks reach them."""
+    import logging
+    import warnings
+    logging.disable(logging.CRITICAL)
+    warnings.simplefilter('ignore')
+    sink = open(os.devnull, 'w')
+    sys.stderr = sink
+    os.dup2(sink.fileno(), 2)
+
+
 def main(argv: list[str]) -> int:
+    quiet_process()
+    try:
+        return run(argv)
+    except BaseException as error:  # Only the class name: messages can carry private data.
+        if isinstance(error, SystemExit):
+            raise
+        say(f'failed: {type(error).__name__}')
+        return 1
+
+
+def run(argv: list[str]) -> int:
     if argv == ['recognize']:
         return asyncio.run(recognize())
     if argv == ['stage']:

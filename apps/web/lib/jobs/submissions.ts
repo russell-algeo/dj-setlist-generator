@@ -276,7 +276,7 @@ export const getSubmissionDetail = async (submissionId: string, actor: SessionAc
   const [submission] = await db
     .select()
     .from(submissions)
-    .where(and(eq(submissions.id, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin)))
+    .where(and(eq(submissions.id, submissionId), readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session")))
     .limit(1);
 
   if (!submission) {
@@ -336,7 +336,7 @@ export const getSubmissionDetail = async (submissionId: string, actor: SessionAc
     ? await db
         .select({ id: sets.id, slug: sets.slug })
         .from(sets)
-        .where(and(inArray(sets.id, publishedSetIds), readableSetPredicate(actor.userId)))
+        .where(and(inArray(sets.id, publishedSetIds), readableSetPredicate(actor.userId, actor.authType === "session")))
     : [];
 
   const leaseRollupsByRun = new Map(
@@ -368,12 +368,12 @@ export const listSubmissionsForActor = async (actor: SessionActor) =>
   db
     .select()
     .from(submissions)
-    .where(readableSubmissionPredicate(actor.userId, actor.isAdmin))
+    .where(readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session"))
     .orderBy(desc(submissions.createdAt))
     .limit(100);
 
 export const getDashboardSummary = async (actor: SessionActor) => {
-  const whereClause = readableSubmissionPredicate(actor.userId, actor.isAdmin);
+  const whereClause = readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session");
   const [submissionCounts] = await db
     .select({
       total: sql<number>`count(${submissions.id})`,
@@ -387,7 +387,7 @@ export const getDashboardSummary = async (actor: SessionActor) => {
     .select({ run: setRuns })
     .from(setRuns)
     .innerJoin(submissions, eq(submissions.id, setRuns.submissionId))
-    .where(readableSubmissionPredicate(actor.userId, actor.isAdmin))
+    .where(readableSubmissionPredicate(actor.userId, actor.isAdmin, actor.authType === "session"))
     .orderBy(desc(setRuns.createdAt))
     .limit(10);
 
