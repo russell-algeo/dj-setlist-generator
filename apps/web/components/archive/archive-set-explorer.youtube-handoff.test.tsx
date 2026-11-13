@@ -17,7 +17,7 @@ const base: ArchiveSetDetail = {
   highlightedTracks: [], timeline: [], tracks: [], journeyPoints: [],
 };
 
-describe("N06 Open in YouTube handoff", () => {
+describe("N06 timestamped Open Source for YouTube", () => {
   let root: Root | null;
   let host: HTMLDivElement;
   let script: HTMLScriptElement;
@@ -27,7 +27,7 @@ describe("N06 Open in YouTube handoff", () => {
   let yt: { playVideo: ReturnType<typeof vi.fn>; pauseVideo: ReturnType<typeof vi.fn>; seekTo: ReturnType<typeof vi.fn>; destroy: ReturnType<typeof vi.fn>; getCurrentTime: () => number; getPlayerState: () => number };
   const render = async (detail = base) => act(async () => root!.render(<ArchiveSetExplorer detail={detail} initialListened={null} initialQuery=""
     management={{ canDeleteSet: false, deleteImpact: null, setWillBeRemoved: false, submittedByViewer: false }} />));
-  const handoff = () => host.querySelector<HTMLAnchorElement>(".is-youtube-handoff");
+  const handoff = () => [...host.querySelectorAll<HTMLAnchorElement>(".source-player-open")].find(link => link.textContent === "Open Source") ?? null;
   // Capture the href the browser would navigate to, without leaving jsdom.
   const clickHandoff = async () => {
     let navigatedTo = "";
@@ -59,13 +59,13 @@ describe("N06 Open in YouTube handoff", () => {
     vi.useRealTimers(); vi.unstubAllGlobals();
   });
 
-  it("replaces the raw Open Source link for public YouTube sets and explains background listening", () => {
-    expect(handoff()).not.toBeNull();
-    expect(handoff()!.textContent).toBe("Open in YouTube");
+  it("keeps the single Open Source link, timestamped for YouTube, with no extra note", () => {
+    expect(host.querySelectorAll(".source-player-open")).toHaveLength(1);
     expect(handoff()!.target).toBe("_blank");
     expect(handoff()!.href).toBe("https://www.youtube.com/watch?v=abcdefghijk&t=0s");
-    expect([...host.querySelectorAll(".source-player-open")].some(link => link.textContent === "Open Source")).toBe(false);
-    expect(host.querySelector(".youtube-background-note")?.textContent).toContain("YouTube Premium");
+    expect(host.textContent).not.toContain("Open in YouTube");
+    expect(host.textContent).not.toContain("screen locks");
+    expect(host.querySelector(".youtube-player-host")).not.toBeNull();
   });
 
   it("opens at the live player position and pauses the embedded player first", async () => {
@@ -87,10 +87,8 @@ describe("N06 Open in YouTube handoff", () => {
     expect(url).toMatch(/^https:\/\/www\.youtube\.com\/watch\?v=abcdefghijk&t=\d+s$/u);
   });
 
-  it("is not offered for SoundCloud sets", async () => {
+  it("leaves the SoundCloud Open Source link as the raw source URL", async () => {
     await render({ ...base, sourcePlatform: "soundcloud", sourceUrl: "https://soundcloud.com/synthetic/set" });
-    expect(handoff()).toBeNull();
-    expect(host.querySelector(".youtube-background-note")).toBeNull();
-    expect([...host.querySelectorAll(".source-player-open")].some(link => link.textContent === "Open Source")).toBe(true);
+    expect(handoff()!.href).toBe("https://soundcloud.com/synthetic/set");
   });
 });

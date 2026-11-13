@@ -1540,10 +1540,9 @@ export function ArchiveSetExplorer({
     scWidgetRef.current = null;
   };
 
-  // N06: the embedded player cannot keep playing with the screen locked, and
-  // YouTube's developer policy forbids background players. Hand the listener
-  // over to youtube.com/the YouTube app at the live position instead (the app
-  // plays in the background for Premium members) and pause the page first.
+  // N06: Open Source on a YouTube set opens YouTube (the app on iPhone, which
+  // plays in the background for Premium members) at the live position, and
+  // pauses the page so the two don't play at once.
   const readYouTubeHandoffSeconds = () => {
     if (
       Date.now() >= seekLockUntilRef.current &&
@@ -2957,12 +2956,6 @@ export function ArchiveSetExplorer({
                     Embedded player is prevented by the video uploader.
                   </div>
                 ) : null}
-                {activeSource.kind === "youtube" && !ytEmbedBlocked && !privateContext ? (
-                  <div className="youtube-background-note">
-                    YouTube stops in this page when your screen locks. To keep listening, tap Open in YouTube: the
-                    YouTube app plays in the background with YouTube Premium.
-                  </div>
-                ) : null}
                 {scEmbedBlocked ? (
                   <div className="source-player-error-note">
                     SoundCloud embedded player requires validation in this browser. Use Open Source to continue.
@@ -3086,20 +3079,18 @@ export function ArchiveSetExplorer({
                     ))}
                   </div>
                 ) : null}
-                {activeSource.kind === "youtube" && !privateContext ? (
+                {activeSource.sourceUrl && !privateContext ? (
                   <a
-                    aria-label={`Open in YouTube at ${formatDuration(currentTime)}`}
-                    className="source-player-open is-youtube-handoff"
-                    href={buildSourceLinkAt(activeSource, currentTime)}
-                    onClick={openInYouTube}
+                    className="source-player-open"
+                    href={
+                      activeSource.kind === "youtube"
+                        ? buildSourceLinkAt(activeSource, currentTime)
+                        : activeSource.sourceUrl
+                    }
+                    onClick={activeSource.kind === "youtube" ? openInYouTube : undefined}
                     rel="noopener"
                     target="_blank"
-                    title="Pauses here and continues in YouTube from the same spot. The YouTube app keeps playing with the screen locked for YouTube Premium members."
                   >
-                    Open in YouTube
-                  </a>
-                ) : activeSource.sourceUrl && !privateContext ? (
-                  <a className="source-player-open" href={activeSource.sourceUrl} rel="noopener" target="_blank">
                     Open Source
                   </a>
                 ) : null}

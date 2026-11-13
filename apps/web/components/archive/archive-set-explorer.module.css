@@ -2362,22 +2362,6 @@
   outline-offset: 3px;
 }
 
-/* N06: only touch devices lose embedded YouTube playback on screen lock. */
-.root :global(.youtube-background-note) {
-  display: none;
-  width: 100%;
-  color: #b8b8b8;
-  font-size: 12px;
-  line-height: 1.35;
-  text-align: center;
-}
-
-@media (hover: none) and (pointer: coarse) {
-  .root :global(.youtube-background-note) {
-    display: block;
-  }
-}
-
 /* N04: estimated parts inside an Unknown entry. Dashed to read as provisional. */
 .root :global(.provisional-parts) {
   display: inline-flex;
