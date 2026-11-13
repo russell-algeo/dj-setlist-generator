@@ -978,6 +978,7 @@ export function ArchiveSetExplorer({
   const nativeRecoveryRef = useRef({ windowStart: 0, attempts: 0 });
   const nativeStallTimerRef = useRef<number | null>(null);
   const nativeStallMarkRef = useRef<number | null>(null);
+  const nativeDownloadAtRef = useRef(0);
   const youtubeHostRef = useRef<HTMLDivElement | null>(null);
   const soundCloudFrameRef = useRef<HTMLIFrameElement | null>(null);
   const currentTimeRef = useRef(currentTime);
@@ -1796,6 +1797,8 @@ export function ArchiveSetExplorer({
       nativeStallMarkRef.current = null;
       if (!current || current !== audio || !nativeControllerRef.current?.isPlayRequested()) return;
       if (mark != null && Math.abs(current.currentTime - mark) > 0.25) return;
+      // Slow but live: bytes are still arriving. Reloading would discard them.
+      if (Date.now() - nativeDownloadAtRef.current < NATIVE_STALL_RECOVERY_MS) { armNativeStallWatch(); return; }
       recoverNativeAudio("stall");
     }, NATIVE_STALL_RECOVERY_MS);
   };
@@ -2907,6 +2910,7 @@ export function ArchiveSetExplorer({
                       onWaiting={() => { traceAudioTiming("waiting-event", "native-audio"); setNativeAudioBuffering(true); armNativeStallWatch(); }}
                       onStalled={() => { if (nativeControllerRef.current?.isPlayRequested()) { setNativeAudioBuffering(true); armNativeStallWatch(); } }}
                       onLoadStart={() => { setPlayerReadyState(false); setNativeAudioBuffering(true); }}
+                      onProgress={() => { nativeDownloadAtRef.current = Date.now(); }}
                       onCanPlay={() => setNativeAudioBuffering(false)}
                       onPause={() => {
                         void nativeControllerRef.current?.observePause(() => {

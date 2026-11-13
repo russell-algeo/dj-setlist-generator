@@ -247,6 +247,19 @@ describe("recording browser-event integration", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("does not reload a slow stream that is still downloading", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      await click("Play set");
+      await act(async () => { audio.currentTime = 3125; emit("waiting"); });
+      const loads = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+      for (let i = 0; i < 8; i += 1) await act(async () => { vi.advanceTimersByTime(5_000); emit("progress"); });
+      expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(loads);
+      await act(async () => { vi.advanceTimersByTime(31_000); });
+      expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(loads + 1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("does not reconnect a stall that recovers or a paused recording", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
