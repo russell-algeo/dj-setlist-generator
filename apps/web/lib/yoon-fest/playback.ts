@@ -63,7 +63,27 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
   let playRequested = false;
   let playAttempt: { version: number; settled: Promise<void> } | null = null;
   let stalledSince: number | null = null;
+  let watchdog: ReturnType<typeof setInterval> | null = null;
+  const stopWatchdog = () => { if (watchdog !== null) { clearInterval(watchdog); watchdog = null; } stalledSince = null; };
+  // Paused media emits no timeupdate, so a dropped play is checked on a timer
+  // for as long as play is requested, not only when the explorer polls.
+  const armWatchdog = () => {
+    if (watchdog !== null || typeof setInterval !== "function") return;
+    watchdog = setInterval(() => {
+      if (disposed || !playRequested) { stopWatchdog(); return; }
+      checkDroppedPlay();
+    }, 400);
+  };
+  const checkDroppedPlay = () => {
+    if (!playRequested || pending || awaitingMetadata || audio.readyState < 1 || !audio.paused || audio.ended || playAttempt !== null) {
+      stalledSince = null; return;
+    }
+    const now = Date.now();
+    if (stalledSince === null) stalledSince = now;
+    else if (now - stalledSince >= PLAY_WATCHDOG_MS) { stalledSince = null; startPlayback(++version); }
+  };
   const startPlayback = (request: number) => {
+    armWatchdog();
     // Keep the pending play promise separate from the pending source seek.
     // A seek may be applied while play() is still starting or being denied.
     const attempt = { version: request, settled: Promise.resolve() };
@@ -167,16 +187,13 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     tick() {
       if (disposed || pending || awaitingMetadata || audio.readyState < 1) { stalledSince = null; return position(); }
       const part = segments[activeIndex]!;
-      // Play was requested and nothing paused us on purpose, yet the element
-      // sits paused: the browser dropped the play. Ask again, once per window.
-      if (playRequested && audio.paused && !audio.ended && playAttempt === null) {
-        const now = Date.now();
-        if (stalledSince === null) stalledSince = now;
-        else if (now - stalledSince >= PLAY_WATCHDOG_MS) { stalledSince = null; startPlayback(++version); }
-      } else stalledSince = null;
+      checkDroppedPlay();
       if (audio.currentTime < part.startSeconds - SOURCE_TIME_TOLERANCE_SECONDS) seek(offsets[activeIndex]!, !audio.paused);
       else if (audio.currentTime >= part.startSeconds + part.durationSeconds) {
-        if (!audio.paused) return ended();
+        // A window that ends at (or a few samples before) the end of its file
+        // reaches the browser's own end first: the element is already paused
+        // when this timeupdate arrives. Play intent, not paused, decides.
+        if (!audio.paused || playRequested) return ended();
         if (audio.currentTime > part.startSeconds + part.durationSeconds) seek(offsets[activeIndex]! + part.durationSeconds, false);
       }
       return position();
@@ -200,6 +217,6 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       return true;
     },
     pause,
-    dispose() { disposed = true; version += 1; playRequested = false; pending = null; audio.pause(); },
+    dispose() { disposed = true; version += 1; playRequested = false; pending = null; stopWatchdog(); audio.pause(); },
   };
 }

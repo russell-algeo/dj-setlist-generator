@@ -405,6 +405,21 @@ describe("sample-exact windows in a real browser clock", () => {
     expect(c.position()).toBe(0);
   });
 
+  it("continues into the next file when the window ends just before its file ends", () => {
+    // The browser reaches its own end a few samples later and is already paused
+    // when the timeupdate arrives. Play intent must carry across the seam.
+    const audio = make(); const c = createNativeAudioController(audio, 120, vi.fn(), segments);
+    c.seek(59, true); audio.paused = true; audio.ended = true;
+    audio.currentTime = start + 60 + 3 / 44100;
+    c.tick();
+    expect(audio.src).toBe("/part-b");
+    expect(c.isPlayRequested()).toBe(true);
+    const calls = audio.play.mock.calls.length;
+    c.ready();
+    expect(audio.currentTime).toBe(0);
+    expect(audio.play.mock.calls.length).toBe(calls + 1);
+  });
+
   it("asks again when a requested play was dropped after a file seam", async () => {
     vi.useFakeTimers();
     try {
