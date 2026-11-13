@@ -15,7 +15,6 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read
 
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
@@ -49,16 +48,19 @@ jobs:
   compare:
     needs: plan
     strategy:
-      fail-fast: true
+      fail-fast: false
       max-parallel: 2
       matrix:
         set: ${{ fromJson(needs.plan.outputs.sets) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     env:
       CONCURRENT_RECOGNITIONS: '2'
       BATCH_SIZE: '10'
       MAX_STUDY_WINDOWS: '600'
+      STUDY_DEADLINE_SECONDS: '7800'
+      MAX_RETRY_SECONDS: '1800'
+      QUOTA_COOLDOWN_DURATION: '60'
       YOON_PARTIAL_SET_ID: ${{ matrix.set }}
     steps:
       - uses: actions/checkout@v4
@@ -71,5 +73,5 @@ jobs:
       - name: Compare sampling arms (counts only)
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
-          GITHUB_TOKEN: ${{ github.token }}
+          SAMPLING_SOURCE_LINKS: ${{ secrets.SAMPLING_SOURCE_LINKS }}
         run: python -m worker.jobs.yoon_sampling_compare

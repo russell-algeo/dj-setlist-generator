@@ -2,7 +2,7 @@ import asyncio
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from worker.jobs import yoon_partial_runner as base
 from worker.jobs import yoon_sampling_compare as compare
@@ -56,59 +56,101 @@ class CountTests(unittest.TestCase):
 
 class FakeRecognizer:
     calls = 0
+    instances = []
 
     def __init__(self, *args, **kwargs):
         self.kwargs = kwargs
+        FakeRecognizer.instances.append(self)
 
     async def recognize_batch(self, segments, total_segments=None):
-        FakeRecognizer.calls += len(segments)
-        return [FakeRecognizer.results(s) for s in segments]
+        out = []
+        for s in segments:
+            FakeRecognizer.calls += 1
+            r = FakeRecognizer.results(s, FakeRecognizer.calls)
+            # Mirror the production path: report each throttled attempt, then the final one.
+            for _ in range(getattr(r, 'throttles', 0)):
+                self.kwargs['on_attempt'](result(429), None, 5.0)
+            self.kwargs['on_attempt'](r, None, 0)
+            out.append(r)
+        return out
 
     async def close(self):
         pass
 
 
-def result(status=200, recognized=False, raw=None):
+def result(status=200, recognized=False, raw=None, throttles=0):
     return SimpleNamespace(http_status=status, is_valid=status == 200, recognized=recognized,
+                           throttles=throttles,
                            raw_data=raw if raw is not None else ({'matches': []} if status == 200 else None))
 
 
 class ArmBTests(unittest.TestCase):
-    def run_arm(self, results, others=0):
+    def run_arm(self, results, deadline=7800):
         grid = compare.study_windows([fragment(90)], compare.STUDY_HOP_FRAMES)
         FakeRecognizer.calls = 0
+        FakeRecognizer.instances = []
         FakeRecognizer.results = results
+        stats = {'attempts': 0, 'throttled': 0, 'backoff_seconds': 0.0, 'passes': 0}
         fake_module = SimpleNamespace(TrackRecognizer=FakeRecognizer)
         def fetch(url, first, last, path):
             path.write_bytes(b'\0' * (last - first + 1))
         with patch.dict('sys.modules', {'track_recognizer': fake_module}), \
                 patch.object(base, 'fetch_range', fetch), \
-                patch.object(compare, 'other_recognizing_runs', return_value=others), \
-                patch.object(compare.asyncio, 'sleep', new_callable=AsyncMock):
-            return grid, asyncio.run(compare.recognize_arm_b(grid, {'m.wav': 'https://example.invalid/m'}))
+                patch.object(compare, 'STUDY_DEADLINE_SECONDS', deadline):
+            hits = asyncio.run(compare.recognize_arm_b(grid, {'m.wav': 'https://example.invalid/m'}, stats))
+        return grid, hits, stats
 
-    def test_single_attempt_one_call_per_window(self):
-        grid, hits = self.run_arm(lambda s: result())
+    def test_every_window_recognized_through_production_retry_path(self):
+        grid, hits, stats = self.run_arm(lambda s, n: result())
+        self.assertEqual([h['index'] for h in hits], [w['index'] for w in grid])
+        recognizer = FakeRecognizer.instances[0]
+        self.assertNotIn('single_attempt', recognizer.kwargs)
+        self.assertGreater(recognizer.kwargs['max_retry_seconds'], 0)
+        self.assertEqual(stats['passes'], 1)
+
+    def test_throttling_is_survived_and_counted(self):
+        grid, hits, stats = self.run_arm(lambda s, n: result(throttles=3 if n == 1 else 0))
         self.assertEqual(len(hits), len(grid))
-        self.assertEqual(FakeRecognizer.calls, len(grid))
+        self.assertEqual(stats['throttled'], 3)
+        self.assertEqual(stats['backoff_seconds'], 15.0)
 
-    def test_throttle_stops_immediately(self):
-        with self.assertRaisesRegex(compare.Inconclusive, 'provider_throttled'):
-            self.run_arm(lambda s: result(429))
-        self.assertLessEqual(FakeRecognizer.calls, 10)
+    def test_unresolved_windows_are_retried_in_another_pass(self):
+        grid, hits, stats = self.run_arm(lambda s, n: result(429) if n == 2 else result())
+        self.assertEqual(len(hits), len(grid))
+        self.assertEqual(stats['passes'], 2)
+        self.assertEqual(FakeRecognizer.calls, len(grid) + 1)
 
-    def test_failed_attempt_is_inconclusive(self):
-        with self.assertRaisesRegex(compare.Inconclusive, 'provider_attempt_failed'):
-            self.run_arm(lambda s: result(500))
+    def test_deadline_reports_unresolved_windows(self):
+        with self.assertRaisesRegex(compare.Inconclusive, 'deadline_with_'):
+            self.run_arm(lambda s, n: result(429), deadline=0)
 
     def test_incomplete_identity_is_inconclusive(self):
         with self.assertRaisesRegex(compare.Inconclusive, 'provider_identity_incomplete'):
-            self.run_arm(lambda s: result(200, True, {'matches': [{}], 'track': {'key': 'x'}}))
+            self.run_arm(lambda s, n: result(200, True, {'matches': [{}], 'track': {'key': 'x'}}))
 
-    def test_other_recognizing_run_stops_before_any_call(self):
-        with self.assertRaisesRegex(compare.Inconclusive, 'other_recognizing_run_active'):
-            self.run_arm(lambda s: result(), others=1)
-        self.assertEqual(FakeRecognizer.calls, 0)
+
+class SourceLinkTests(unittest.TestCase):
+    progress = {'released': True, 'fragments': [fragment(60)]}
+
+    def test_released_family_uses_secret_map_only_for_needed_masters(self):
+        links = '{"links": [{"name": "m.wav", "href": "https://x/m"}, {"name": "o.wav", "href": "https://x/o"}]}'
+        with patch.dict(os.environ, {'SAMPLING_SOURCE_LINKS': links}):
+            self.assertEqual(compare.source_links('s', self.progress), {'m.wav': 'https://x/m'})
+
+    def test_released_family_without_secret_stops(self):
+        with patch.dict(os.environ, {'SAMPLING_SOURCE_LINKS': ''}):
+            with self.assertRaises(SystemExit):
+                compare.source_links('s', self.progress)
+
+    def test_missing_master_stops_without_naming_it(self):
+        with patch.dict(os.environ, {'SAMPLING_SOURCE_LINKS': '{"links": []}'}):
+            with self.assertRaisesRegex(SystemExit, '^1 master link'):
+                compare.source_links('s', self.progress)
+
+    def test_open_family_uses_database_links(self):
+        with patch.object(base, 'call', return_value={'m.wav': 'db'}) as call:
+            self.assertEqual(compare.source_links('s', {'released': False}), {'m.wav': 'db'})
+        call.assert_called_once_with('yoon_partial_sources_for', 's')
 
 
 if __name__ == '__main__':

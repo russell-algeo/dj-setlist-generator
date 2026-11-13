@@ -12,15 +12,16 @@ same TrackRecognizer and SDK pins) and the same clustering. Only the hop differs
 Safety bounds:
   * Read-only on the database. Arm B results stay in process memory and are
     never written anywhere; the public log carries counts only.
-  * Exactly one provider attempt per window (single_attempt), so the request
-    count equals the arm B window count, capped by MAX_STUDY_WINDOWS.
-  * Stops at the first HTTP 429 and treats the result as inconclusive.
-  * Before every batch, refuses to continue if any other recognizing workflow
-    run in the repository is queued or in progress (SAMPLING_GUARD_* env).
+  * Arm B uses the production throttle-aware retry path unchanged (exponential
+    429 backoff, Retry-After, shared cooldown). Throttling is expected and is
+    survived, not treated as failure; unresolved windows are retried in further
+    passes until STUDY_DEADLINE_SECONDS. Arm B is capped by MAX_STUDY_WINDOWS.
+  * Released families keep their progress/evidence readable but seal source
+    links, so the master link map may come from the SAMPLING_SOURCE_LINKS secret.
 
   python -m worker.jobs.yoon_sampling_compare
 Environment: DATABASE_URL_DIRECT, WORKER_DEPLOYMENT_TARGET=development,
-YOON_PARTIAL_SET_ID, GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID.
+YOON_PARTIAL_SET_ID, optional SAMPLING_SOURCE_LINKS.
 """
 from __future__ import annotations
 
@@ -32,13 +33,14 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-import urllib.request
+import time
 
 from worker.jobs import yoon_partial_runner as base
 
 STUDY_HOP_FRAMES = 12 * base.RATE
 MAX_STUDY_WINDOWS = int(os.getenv('MAX_STUDY_WINDOWS', '600'))
-RECOGNIZING_WORKFLOWS = ('process-set', 'yoon-partial', 'discover-artist', 'sampling-compare')
+STUDY_DEADLINE_SECONDS = int(os.getenv('STUDY_DEADLINE_SECONDS', '7800'))
+MAX_RETRY_SECONDS = int(os.getenv('MAX_RETRY_SECONDS', '1800'))
 
 
 class Inconclusive(RuntimeError):
@@ -55,18 +57,20 @@ def study_windows(fragments: list[dict], hop: int) -> list[dict]:
         base.HOP_FRAMES = saved
 
 
-def other_recognizing_runs() -> int:
-    """Count other queued/in-progress recognizing runs in this repository."""
-    repo, token, me = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_TOKEN'], os.environ['GITHUB_RUN_ID']
-    total = 0
-    for status in ('in_progress', 'queued', 'waiting', 'pending', 'requested'):
-        request = urllib.request.Request(
-            f'https://api.github.com/repos/{repo}/actions/runs?status={status}&per_page=100',
-            headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'})
-        with urllib.request.urlopen(request, timeout=30) as response:
-            runs = json.load(response)['workflow_runs']
-        total += sum(1 for r in runs if str(r['id']) != me and r['name'] in RECOGNIZING_WORKFLOWS)
-    return total
+def source_links(sid: str, progress: dict) -> dict:
+    """DB links while the family is open; after release the DB seals them, so the
+    owner's master link map comes from the SAMPLING_SOURCE_LINKS secret instead."""
+    if not progress['released']:
+        return base.call('yoon_partial_sources_for', sid)
+    raw = os.environ.get('SAMPLING_SOURCE_LINKS') or ''
+    if not raw:
+        raise SystemExit('family released and SAMPLING_SOURCE_LINKS not configured')
+    supplied = {v['name']: v['href'] for v in json.loads(raw)['links']}
+    needed = {part['file'] for f in progress['fragments'] for part in f['parts']}
+    missing = needed - supplied.keys()
+    if missing:
+        raise SystemExit(f'{len(missing)} master link(s) missing from SAMPLING_SOURCE_LINKS')
+    return {name: supplied[name] for name in needed}
 
 
 def identified(grid: list[dict], hits: list[dict]) -> dict:
@@ -77,10 +81,17 @@ def identified(grid: list[dict], hits: list[dict]) -> dict:
             'distinct_tracks': len(keys), 'identified_entries': len(entries)}
 
 
-async def recognize_arm_b(grid: list[dict], links: dict) -> list[dict]:
+async def recognize_arm_b(grid: list[dict], links: dict, stats: dict) -> list[dict]:
+    """Recognize every arm B window through the production throttle-aware path.
+
+    The recognizer's own exponential 429 backoff, Retry-After handling and
+    shared cooldown are used unchanged. Windows still unresolved when a retry
+    budget ends are retried in further passes until the overall deadline.
+    """
     from track_recognizer import TrackRecognizer
+    deadline = time.monotonic() + STUDY_DEADLINE_SECONDS
     work = Path(tempfile.mkdtemp(prefix='yoon-sampling-'))
-    hits: list[dict] = []
+    done: dict[int, dict] = {}
     try:
         spans: dict[str, list[int]] = {}
         for w in grid:
@@ -105,36 +116,50 @@ async def recognize_arm_b(grid: list[dict], links: dict) -> list[dict]:
                 raise RuntimeError('window_size_changed')
             return bytes(pcm)
 
-        recognizer = TrackRecognizer(quiet=True, single_attempt=True)
-        try:
-            batch_size = max(1, int(os.getenv('BATCH_SIZE', '10')))
-            for start in range(0, len(grid), batch_size):
-                if other_recognizing_runs():
-                    raise Inconclusive('other_recognizing_run_active')
-                segments = []
-                for w in grid[start:start + batch_size]:
-                    path = work / f'w{w["index"]}.wav'
-                    path.write_bytes(base.wav_bytes(window_pcm(w)))
-                    segments.append({'file': path, 'index': w['index'], 'window': w,
-                                     'timestamp': w['start_frame'] / base.RATE})
-                with contextlib.redirect_stdout(io.StringIO()):
-                    results = await recognizer.recognize_batch(segments, total_segments=len(grid))
-                for segment, result in zip(segments, results):
-                    if result.http_status == 429:
-                        raise Inconclusive('provider_throttled')
-                    if not result.is_valid or not isinstance(result.raw_data, dict):
-                        raise Inconclusive('provider_attempt_failed')
-                    track = result.raw_data.get('track') or {}
-                    if result.recognized and not all(str(track.get(k) or '').strip()
-                                                     for k in ('key', 'title', 'subtitle')):
-                        raise Inconclusive('provider_identity_incomplete')
-                    hits.append({'index': segment['index'], 'response': {
-                        'recognized': bool(result.recognized), 'raw_data': result.raw_data}})
-                base.say(f'arm B: {len(hits)}/{len(grid)} windows')
-                await asyncio.sleep(1)
-        finally:
-            await recognizer.close()
-        return hits
+        def on_attempt(result, ticket, delay):
+            stats['attempts'] += 1
+            if result.http_status == 429:
+                stats['throttled'] += 1
+                stats['backoff_seconds'] += delay or 0
+            return None
+
+        batch_size = max(1, int(os.getenv('BATCH_SIZE', '10')))
+        passes = 0
+        while len(done) < len(grid):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise Inconclusive(f'deadline_with_{len(grid) - len(done)}_windows_unresolved')
+            passes += 1
+            pending = [w for w in grid if w['index'] not in done]
+            recognizer = TrackRecognizer(quiet=True, on_attempt=on_attempt,
+                                         max_retry_seconds=int(min(MAX_RETRY_SECONDS, remaining)))
+            try:
+                for start in range(0, len(pending), batch_size):
+                    if time.monotonic() >= deadline:
+                        break
+                    segments = []
+                    for w in pending[start:start + batch_size]:
+                        path = work / f'w{w["index"]}.wav'
+                        path.write_bytes(base.wav_bytes(window_pcm(w)))
+                        segments.append({'file': path, 'index': w['index'],
+                                         'timestamp': w['start_frame'] / base.RATE})
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        results = await recognizer.recognize_batch(segments, total_segments=len(grid))
+                    for segment, result in zip(segments, results):
+                        if not result.is_valid or not isinstance(result.raw_data, dict):
+                            continue  # unresolved; the next pass retries it
+                        track = result.raw_data.get('track') or {}
+                        if result.recognized and not all(str(track.get(k) or '').strip()
+                                                         for k in ('key', 'title', 'subtitle')):
+                            raise Inconclusive('provider_identity_incomplete')
+                        done[segment['index']] = {'index': segment['index'], 'response': {
+                            'recognized': bool(result.recognized), 'raw_data': result.raw_data}}
+                    base.say(f'arm B pass {passes}: {len(done)}/{len(grid)} windows, '
+                             f'{stats["throttled"]} throttled responses so far')
+            finally:
+                await recognizer.close()
+        stats['passes'] = passes
+        return [done[w['index']] for w in grid]
     finally:
         for path in work.iterdir():
             path.unlink(missing_ok=True)
@@ -144,26 +169,28 @@ async def recognize_arm_b(grid: list[dict], links: dict) -> list[dict]:
 async def compare() -> int:
     sid = base.set_id()
     progress = base.call('yoon_partial_progress', sid)
-    if progress is None or progress['released']:
-        raise SystemExit('partial family released or unknown; sources are sealed')
+    if progress is None:
+        raise SystemExit('unknown partial family')
     grid_a = base.windows(progress['fragments'])
     evidence = base.call('yoon_partial_hits_for', sid)  # raises unless arm A is complete
     grid_b = study_windows(progress['fragments'], STUDY_HOP_FRAMES)
     if not grid_b or len(grid_b) > MAX_STUDY_WINDOWS:
         raise SystemExit(f'arm B window count {len(grid_b)} outside 1..{MAX_STUDY_WINDOWS}')
-    if other_recognizing_runs():
-        raise SystemExit('another recognizing run is active; not starting')
     a = identified(grid_a, evidence['hits'])
     base.say('arm A (30s/15s, recorded): ' + json.dumps(a))
-    links = base.call('yoon_partial_sources_for', sid)
+    links = source_links(sid, progress)
+    stats = {'attempts': 0, 'throttled': 0, 'backoff_seconds': 0.0, 'passes': 0}
+    started = time.monotonic()
     try:
-        hits_b = await recognize_arm_b(grid_b, links)
+        hits_b = await recognize_arm_b(grid_b, links, stats)
     except Inconclusive as exc:
-        base.say(f'INCONCLUSIVE: {exc}')
+        base.say(f'INCONCLUSIVE: {exc} ' + json.dumps(stats))
         return 4
+    stats['runtime_seconds'] = round(time.monotonic() - started)
+    stats['backoff_seconds'] = round(stats['backoff_seconds'], 1)
     b = identified(grid_b, hits_b)
     base.say('arm B (30s/12s, fresh): ' + json.dumps(b))
-    base.say('RESULT ' + json.dumps({'arm_a': a, 'arm_b': b,
+    base.say('RESULT ' + json.dumps({'arm_a': a, 'arm_b': b, 'arm_b_provider': stats,
              'identified_delta': b['identified_entries'] - a['identified_entries']}))
     return 0
 
