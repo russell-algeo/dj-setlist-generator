@@ -35,6 +35,7 @@ import sys
 import tempfile
 import time
 
+from recognition_retry_policy import throttle_delay
 from worker.jobs import yoon_partial_runner as base
 
 STUDY_HOP_FRAMES = 12 * base.RATE
@@ -74,11 +75,27 @@ def source_links(sid: str, progress: dict) -> dict:
 
 
 def identified(grid: list[dict], hits: list[dict]) -> dict:
-    entries = base.cluster(grid, hits)
+    with contextlib.redirect_stdout(io.StringIO()):  # SetlistBuilder prints titles
+        entries = base.cluster(grid, hits)
     recognized = [h for h in hits if h['response']['recognized']]
     keys = {h['response']['raw_data']['track']['key'] for h in recognized}
     return {'windows': len(grid), 'recognized_windows': len(recognized),
             'distinct_tracks': len(keys), 'identified_entries': len(entries)}
+
+
+def shared_window_agreement(grid_a, hits_a, grid_b, hits_b) -> dict:
+    """Catalog-drift check, counts only: windows at the same start in both grids."""
+    def by_start(grid, hits):
+        index = {h['index']: h for h in hits}
+        out = {}
+        for w in grid:
+            r = index[w['index']]['response']
+            out[(w['fragment'], w['start_frame'])] = (r['raw_data']['track']['key']
+                                                      if r['recognized'] else None)
+        return out
+    a, b = by_start(grid_a, hits_a), by_start(grid_b, hits_b)
+    shared = a.keys() & b.keys()
+    return {'shared_windows': len(shared), 'same_result': sum(a[k] == b[k] for k in shared)}
 
 
 async def recognize_arm_b(grid: list[dict], links: dict, stats: dict) -> list[dict]:
@@ -98,6 +115,12 @@ async def recognize_arm_b(grid: list[dict], links: dict, stats: dict) -> list[di
             for part in w['parts']:
                 span = spans.setdefault(part['file'], [part['start'], part['end']])
                 span[0], span[1] = min(span[0], part['start']), max(span[1], part['end'])
+        for name in sorted(spans):
+            header = work / 'header.bin'
+            header.unlink(missing_ok=True)
+            base.fetch_range(links[name], base.DATA_OFFSET - 8, base.DATA_OFFSET - 1, header)
+            if header.read_bytes()[:4] != b'data':
+                raise RuntimeError('source_data_offset_changed')
         local = {}
         for name, (start, end) in sorted(spans.items()):
             path = work / f'{len(local)}.pcm'
@@ -125,15 +148,23 @@ async def recognize_arm_b(grid: list[dict], links: dict, stats: dict) -> list[di
 
         batch_size = max(1, int(os.getenv('BATCH_SIZE', '10')))
         passes = 0
-        while len(done) < len(grid):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise Inconclusive(f'deadline_with_{len(grid) - len(done)}_windows_unresolved')
-            passes += 1
-            pending = [w for w in grid if w['index'] not in done]
-            recognizer = TrackRecognizer(quiet=True, on_attempt=on_attempt,
-                                         max_retry_seconds=int(min(MAX_RETRY_SECONDS, remaining)))
-            try:
+        # One recognizer for the whole study keeps its shared cooldown across
+        # passes; continuation_deadline bounds every retry by the study deadline.
+        recognizer = TrackRecognizer(quiet=True, on_attempt=on_attempt,
+                                     max_retry_seconds=MAX_RETRY_SECONDS,
+                                     continuation_deadline=deadline)
+        try:
+            while len(done) < len(grid):
+                if deadline - time.monotonic() < 1:
+                    raise Inconclusive(f'deadline_with_{len(grid) - len(done)}_windows_unresolved')
+                if passes:
+                    # Unresolved windows are never re-sent at once: back off
+                    # exponentially between passes, and respect any cooldown.
+                    pause = throttle_delay(passes)
+                    pause = max(pause, recognizer._quota_cooldown_until - time.monotonic())
+                    await asyncio.sleep(max(0, min(pause, deadline - time.monotonic() - 1)))
+                passes += 1
+                pending = [w for w in grid if w['index'] not in done]
                 for start in range(0, len(pending), batch_size):
                     if time.monotonic() >= deadline:
                         break
@@ -156,8 +187,8 @@ async def recognize_arm_b(grid: list[dict], links: dict, stats: dict) -> list[di
                             'recognized': bool(result.recognized), 'raw_data': result.raw_data}}
                     base.say(f'arm B pass {passes}: {len(done)}/{len(grid)} windows, '
                              f'{stats["throttled"]} throttled responses so far')
-            finally:
-                await recognizer.close()
+        finally:
+            await recognizer.close()
         stats['passes'] = passes
         return [done[w['index']] for w in grid]
     finally:
@@ -172,6 +203,8 @@ async def compare() -> int:
     if progress is None:
         raise SystemExit('unknown partial family')
     grid_a = base.windows(progress['fragments'])
+    if len(grid_a) != progress['expected']:
+        raise SystemExit('window_grid_mismatch')
     evidence = base.call('yoon_partial_hits_for', sid)  # raises unless arm A is complete
     grid_b = study_windows(progress['fragments'], STUDY_HOP_FRAMES)
     if not grid_b or len(grid_b) > MAX_STUDY_WINDOWS:
@@ -190,10 +223,23 @@ async def compare() -> int:
     stats['backoff_seconds'] = round(stats['backoff_seconds'], 1)
     b = identified(grid_b, hits_b)
     base.say('arm B (30s/12s, fresh): ' + json.dumps(b))
+    drift = shared_window_agreement(grid_a, evidence['hits'], grid_b, hits_b)
     base.say('RESULT ' + json.dumps({'arm_a': a, 'arm_b': b, 'arm_b_provider': stats,
+             'catalog_drift_check': drift,
              'identified_delta': b['identified_entries'] - a['identified_entries']}))
     return 0
 
 
+def main() -> int:
+    base.quiet_process()
+    try:
+        return asyncio.run(compare())
+    except SystemExit:
+        raise
+    except BaseException as error:  # Only the class name: messages can carry private data.
+        base.say(f'failed: {type(error).__name__}')
+        return 1
+
+
 if __name__ == '__main__':
-    sys.exit(asyncio.run(compare()))
+    sys.exit(main())

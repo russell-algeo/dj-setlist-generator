@@ -2,7 +2,9 @@ import asyncio
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+import contextlib
+import io
 
 from worker.jobs import yoon_partial_runner as base
 from worker.jobs import yoon_sampling_compare as compare
@@ -53,6 +55,23 @@ class CountTests(unittest.TestCase):
         self.assertEqual(result['distinct_tracks'], 2)
         self.assertEqual(result['identified_entries'], 2)
 
+    def test_counting_prints_nothing_publicly(self):
+        grid = compare.study_windows([fragment(300)], compare.STUDY_HOP_FRAMES)
+        hits = [hit(w['index'], 'k1' if w['index'] < 8 else None) for w in grid]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            compare.identified(grid, hits)
+        self.assertEqual(out.getvalue(), '')
+
+    def test_drift_check_compares_identical_start_windows(self):
+        frag = [fragment(300)]
+        ga, gb = base.windows(frag), compare.study_windows(frag, compare.STUDY_HOP_FRAMES)
+        ha = [hit(w['index'], 'k') for w in ga]
+        hb = [hit(w['index'], 'k' if w['start_frame'] % (120 * RATE) == 0 else None) for w in gb]
+        result = compare.shared_window_agreement(ga, ha, gb, hb)
+        self.assertEqual(result['shared_windows'], len([w for w in ga if w['start_frame'] % (60 * RATE) == 0]))
+        self.assertEqual(result['same_result'], len([w for w in ga if w['start_frame'] % (120 * RATE) == 0]))
+
 
 class FakeRecognizer:
     calls = 0
@@ -60,6 +79,7 @@ class FakeRecognizer:
 
     def __init__(self, *args, **kwargs):
         self.kwargs = kwargs
+        self._quota_cooldown_until = 0
         FakeRecognizer.instances.append(self)
 
     async def recognize_batch(self, segments, total_segments=None):
@@ -93,10 +113,13 @@ class ArmBTests(unittest.TestCase):
         stats = {'attempts': 0, 'throttled': 0, 'backoff_seconds': 0.0, 'passes': 0}
         fake_module = SimpleNamespace(TrackRecognizer=FakeRecognizer)
         def fetch(url, first, last, path):
-            path.write_bytes(b'\0' * (last - first + 1))
+            size = last - first + 1
+            path.write_bytes(b'data' + b'\0' * (size - 4) if first == base.DATA_OFFSET - 8 else b'\0' * size)
         with patch.dict('sys.modules', {'track_recognizer': fake_module}), \
                 patch.object(base, 'fetch_range', fetch), \
-                patch.object(compare, 'STUDY_DEADLINE_SECONDS', deadline):
+                patch.object(compare, 'STUDY_DEADLINE_SECONDS', deadline), \
+                patch.object(compare.asyncio, 'sleep', new_callable=AsyncMock) as sleep:
+            self.sleep = sleep
             hits = asyncio.run(compare.recognize_arm_b(grid, {'m.wav': 'https://example.invalid/m'}, stats))
         return grid, hits, stats
 
@@ -106,6 +129,7 @@ class ArmBTests(unittest.TestCase):
         recognizer = FakeRecognizer.instances[0]
         self.assertNotIn('single_attempt', recognizer.kwargs)
         self.assertGreater(recognizer.kwargs['max_retry_seconds'], 0)
+        self.assertIsNotNone(recognizer.kwargs['continuation_deadline'])
         self.assertEqual(stats['passes'], 1)
 
     def test_throttling_is_survived_and_counted(self):
@@ -119,6 +143,17 @@ class ArmBTests(unittest.TestCase):
         self.assertEqual(len(hits), len(grid))
         self.assertEqual(stats['passes'], 2)
         self.assertEqual(FakeRecognizer.calls, len(grid) + 1)
+        self.assertEqual(len(FakeRecognizer.instances), 1)  # cooldown survives passes
+        self.assertGreaterEqual(self.sleep.await_args.args[0], 60)  # no immediate re-send
+
+    def test_wrong_master_header_stops_before_recognition(self):
+        grid = compare.study_windows([fragment(90)], compare.STUDY_HOP_FRAMES)
+        FakeRecognizer.calls = 0
+        with patch.dict('sys.modules', {'track_recognizer': SimpleNamespace(TrackRecognizer=FakeRecognizer)}), \
+                patch.object(base, 'fetch_range', lambda u, f, l, p: p.write_bytes(b'\0' * (l - f + 1))):
+            with self.assertRaisesRegex(RuntimeError, 'source_data_offset_changed'):
+                asyncio.run(compare.recognize_arm_b(grid, {'m.wav': 'x'}, {}))
+        self.assertEqual(FakeRecognizer.calls, 0)
 
     def test_deadline_reports_unresolved_windows(self):
         with self.assertRaisesRegex(compare.Inconclusive, 'deadline_with_'):
