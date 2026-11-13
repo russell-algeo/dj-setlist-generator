@@ -3,6 +3,7 @@
 from pathlib import Path
 exec((Path(__file__).with_name('test_yoon_resume_pg.py')).read_text().split("RUN='a0000000")[0])
 import copy, os, io, contextlib
+os.environ['PROCESS_SET_MAX_ACTIVE_RUNS'] = '2'  # Synthetic capacity fixture only.
 from worker.jobs.yoon_queue import PrivateQueue, identity, KEY
 from worker.jobs import yoon_admission as admission
 RUN='a0000000-0000-4000-8000-000000000010'

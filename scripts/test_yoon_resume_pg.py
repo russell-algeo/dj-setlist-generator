@@ -1,4 +1,5 @@
 """Actual ResumeStore methods over a local stdin/stdout PGlite adapter, no sockets."""
+import os; os.environ['PROCESS_SET_MAX_ACTIVE_RUNS']='2'  # Synthetic capacity fixture only.
 import json,sys,uuid
 from decimal import Decimal
 from contextlib import contextmanager

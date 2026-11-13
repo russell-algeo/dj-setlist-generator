@@ -5,7 +5,27 @@ is required so the occupancy query sees the last lock holder's commit. Existing
 running legacy owners are counted, but new legacy admissions must be stopped
 at rollout because they do not take this lock. No timeout-based takeover.
 """
-CAP = 2
+import os
+import re
+
+
+def capacity():
+    """Use the ordinary scheduler's configuration, never a private default.
+
+    The runtime value must be copied from the verified effective ordinary
+    scheduler setting at rollout. GitHub and Vercel do not share environments;
+    absence is not evidence that Production uses its source default. Keep this
+    lazy so release/cleanup can still run when configuration is unavailable.
+    """
+    value = os.environ.get('PROCESS_SET_MAX_ACTIVE_RUNS')
+    if value is None or value == '':
+        raise RuntimeError('private_admission_capacity_unconfigured')
+    # Stricter than JavaScript parseInt: reject suffixes/fractions rather than
+    # silently authorizing a different limit. Do not echo configuration values.
+    if not re.fullmatch(r'[1-9][0-9]{0,15}', value) or int(value) > 9007199254740991:
+        raise RuntimeError('private_admission_capacity_invalid')
+    return int(value)
+
 LOCK_SQL = "SELECT pg_advisory_xact_lock(183601, 2)"
 def _object_fields_sql(expression, fields):
     # Retain malformed/scalar/null values exactly so existing validators still
@@ -97,6 +117,7 @@ def occupied(row):
 
 
 def check(cur, run_id, target_set_id, *, generation=None):
+    limit = capacity()
     # Caller owns the global admission transaction lock and the target row lock.
     # Release never creates occupancy and therefore needs no global lock.
     cur.execute('SELECT ops.assert_yoon_version_execution(%s, %s, %s)',
@@ -115,5 +136,5 @@ def check(cur, run_id, target_set_id, *, generation=None):
     if any(str(row['id'])==str(run_id) or str(row['target_set_id'])==str(target_set_id)
            for row in active):
         raise RuntimeError('private_admission_duplicate_target')
-    if len(active) >= CAP:
+    if len(active) >= limit:
         raise RuntimeError('private_admission_capacity')

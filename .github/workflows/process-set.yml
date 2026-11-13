@@ -63,6 +63,10 @@ concurrency:
   cancel-in-progress: ${{ github.event.inputs.private_analysis != 'true' }}
 
 env:
+  # Non-secret parity value: populate only from the verified effective ordinary
+  # scheduler setting. GitHub vars and Vercel env are separate; no default here.
+  # Missing/invalid configuration fails closed, without releasing existing work.
+  PROCESS_SET_MAX_ACTIVE_RUNS: ${{ vars.PROCESS_SET_MAX_ACTIVE_RUNS }}
   SET_LIST_DISPATCH_GENERATION: ${{ github.event.inputs.dispatch_generation }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -570,7 +574,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements-base.txt
-      - name: Consume reviewed private queue at existing bounded capacity
+      - name: Consume reviewed private queue at configured ordinary capacity
         env:
           DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
           APP_BASE_URL: ${{ secrets.DEVELOPMENT_APP_BASE_URL }}

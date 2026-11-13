@@ -10,6 +10,9 @@ from worker.jobs.yoon_queue import consume, identity, PrivateQueue
 from test_yoon_admission import Cursor, row
 
 class QueueTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict('os.environ', {'PROCESS_SET_MAX_ACTIVE_RUNS': '2'}))
+
     def queued(self,i,status='reserved'):
         r=row(i,status='private_resume_pending')
         r['source_metadata']['yoon_queue_v1']={'version':1,'status':status,'generation':'fence'+str(i),'owner':None}

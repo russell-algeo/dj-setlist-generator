@@ -287,8 +287,9 @@ class PrivateQueue:
             return {str(row['id']) for row in cur.fetchall() if requires_review(row)}
 
     def tick(self, send, *, max_reservations=None):
+        limit = admission.capacity()
         if max_reservations is not None and (type(max_reservations) is not int
-                or not 1 <= max_reservations <= admission.CAP):
+                or not 1 <= max_reservations <= limit):
             raise ValueError('private_queue_dispatch_limit_invalid')
         counts = {'pending': 0, 'reserved': 0, 'blocked': 0}
         blocked_ids = self.blocked_ids()

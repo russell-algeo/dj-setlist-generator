@@ -16,6 +16,9 @@ EMPTY = dict(pending=0, reserved=0, blocked=0)
 
 
 class ControllerPollTests(TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict('os.environ', {'PROCESS_SET_MAX_ACTIVE_RUNS': '2'}))
+
     def run_controller(self, results=None, *, tick_seconds=0, rollover_ids=None, send_error=None,
                        once=None, queue_override=None, after_send=None, monotonic_values=None):
         clock = SimpleNamespace(now=0)
@@ -40,7 +43,7 @@ class ControllerPollTests(TestCase):
         response = Mock()
         response.__enter__ = Mock(return_value=SimpleNamespace(status=200))
         response.__exit__ = Mock(return_value=False)
-        env = dict(GITHUB_ACTIONS='true', RUNNER_OS='Linux',
+        env = dict(PROCESS_SET_MAX_ACTIVE_RUNS='2', GITHUB_ACTIONS='true', RUNNER_OS='Linux',
                    GITHUB_REPOSITORY='russell-algeo/dj-setlist-generator',
                    GITHUB_REF='refs/heads/preview', WORKER_DEPLOYMENT_TARGET='development',
                    GITHUB_RUN_ID='9001', GITHUB_RUN_ATTEMPT='1')

@@ -92,6 +92,7 @@ class RegistryConcurrencyTests(unittest.TestCase):
         cls.temp.cleanup()
 
     def setUp(self):
+        self.enterContext(patch.dict(os.environ, {'PROCESS_SET_MAX_ACTIVE_RUNS': '2'}))
         with self.connect() as c:
             c.execute('DROP SCHEMA IF EXISTS ops,app,authn CASCADE')
             for file in sorted((ROOT / 'drizzle/migrations').glob('[0-9]*.sql')):
@@ -230,7 +231,7 @@ class RegistryConcurrencyTests(unittest.TestCase):
             with observer.transaction():
                 self.reserve(observer, self.ids[2])
         self.assertEqual(observer.execute("SELECT count(*) AS n FROM ops.set_runs WHERE source_metadata->'yoon_queue_v1'->>'status'='reserved'").fetchone()['n'], 2)
-        self.assertEqual(admission.CAP, 2)
+        self.assertEqual(admission.capacity(), 2)
 
     def test_stale_prelock_registry_read_cannot_authorize_after_promotion(self):
         self.complete_candidate()

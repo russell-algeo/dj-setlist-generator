@@ -2,6 +2,7 @@ import hashlib
 import copy
 import threading
 import unittest
+from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from worker.jobs import yoon_admission as a
@@ -21,6 +22,9 @@ class Cursor:
     def fetchone(self): return {'transaction_isolation':'read committed'}
 
 class AdmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict('os.environ', {'PROCESS_SET_MAX_ACTIVE_RUNS': '2'}))
+
     def test_cap_and_legacy_occupancy(self):
         rows=[row(1)]
         a.check(Cursor(rows),'2','set2')
