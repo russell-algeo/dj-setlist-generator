@@ -1,0 +1,13 @@
+{
+  "note": "Editing this file on preview runs yoon-partial.yml. Ids only; names and links stay in the database.",
+  "attempt": 1,
+  "shards": 8,
+  "sets": [
+    "68a6bf67-8151-5381-8e0c-dcc106d978c3",
+    "6fce4eb8-27f5-5966-9185-dfc9622fcb35",
+    "9ed06b2e-738a-5444-aea1-76efefa9a41e",
+    "0c7bdc16-d885-5d3b-b759-aafab912ee32",
+    "bcb95699-4a9c-536b-a1a6-589090680c5b",
+    "c24afb76-a453-5c85-9a4f-e6de2e151a68"
+  ]
+}

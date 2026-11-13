@@ -1,0 +1,114 @@
+name: yoon-partial
+
+# Recognize and stage the six sealed partial Yoon families on the development
+# database. Logs carry counts only: names, links and recognitions never leave
+# the database. Release stays a separate owner step.
+on:
+  push:
+    branches: [preview]
+    paths: [.github/yoon-partial-request.json]
+  workflow_dispatch:
+
+concurrency:
+  group: yoon-partial
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  PYTHONDONTWRITEBYTECODE: '1'
+  WORKER_DEPLOYMENT_TARGET: development
+  ENABLE_CHECKPOINTS: 'false'
+  NTFY_TOPIC: ''
+
+jobs:
+  plan:
+    if: ${{ github.repository == 'russell-algeo/dj-setlist-generator' && github.ref == 'refs/heads/preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      sets: ${{ steps.plan.outputs.sets }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: plan
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, uuid
+          r = json.load(open('.github/yoon-partial-request.json'))
+          sets = [str(uuid.UUID(s)) for s in r['sets']]
+          n = int(r['shards'])
+          assert 1 <= n <= 16 and 1 <= len(sets) <= 6
+          print('sets=' + json.dumps(sets))
+          print('shards=' + json.dumps([{'set': s, 'index': i, 'count': n} for s in sets for i in range(n)]))
+          PY
+
+  recognize:
+    needs: plan
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CONCURRENT_RECOGNITIONS: '2'
+      BATCH_SIZE: '10'
+      QUOTA_COOLDOWN_DURATION: '60'
+      MAX_RETRY_SECONDS: '1800'
+      YOON_PARTIAL_SET_ID: ${{ matrix.shard.set }}
+      SHARD_INDEX: ${{ matrix.shard.index }}
+      SHARD_COUNT: ${{ matrix.shard.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-base.txt -r requirements-private-recognize.txt
+      - name: Recognize one contiguous shard
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+        run: |
+          # A shard with throttled windows retries itself once before giving up.
+          python -m worker.jobs.yoon_partial_runner recognize || python -m worker.jobs.yoon_partial_runner recognize
+
+  stage:
+    needs: [plan, recognize]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        set: ${{ fromJson(needs.plan.outputs.sets) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      YOON_PARTIAL_SET_ID: ${{ matrix.set }}
+      ENABLE_SPOTIFY: 'true'
+      ENABLE_YOUTUBE: 'true'
+      ENABLE_DISCOGS: 'true'
+      ENABLE_SPOTIFY_PLAYLISTS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-publish.txt -r requirements-private-recognize.txt
+      - name: Cluster, enrich and stage for owner release
+        env:
+          DATABASE_URL_DIRECT: ${{ secrets.DEVELOPMENT_DATABASE_URL_DIRECT }}
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
+          DISCOGS_CONSUMER_KEY: ${{ secrets.DISCOGS_CONSUMER_KEY }}
+          DISCOGS_CONSUMER_SECRET: ${{ secrets.DISCOGS_CONSUMER_SECRET }}
+        run: python -m worker.jobs.yoon_partial_runner stage

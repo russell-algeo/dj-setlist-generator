@@ -176,6 +176,13 @@
       "when": 1794355200001,
       "tag": "0025_yoon_bounded_family_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794355200002,
+      "tag": "0026_yoon_partial_families",
+      "breakpoints": true
     }
   ]
 }
