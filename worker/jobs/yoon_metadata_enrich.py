@@ -191,7 +191,7 @@ class MetadataStore(Store):
         return snapshot
 
     def reserve(self):
-        with self.locked() as (cur, row, tracks):
+        with self.locked(capacity=True) as (cur, row, tracks):
             prior = row['source_metadata'].get(self.key)
             snapshot = self.snapshot(cur, row)
             if prior is not None:

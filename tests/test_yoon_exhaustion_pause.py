@@ -28,7 +28,9 @@ class ExhaustionTests(TestCase):
         before=copy.deepcopy((state,data))
         cursor=Mock();cursor.fetchone.return_value={'id':'lease','status':status,'raw_data':{'private_jackson_v2':data}}
         @contextmanager
-        def locked():yield cursor,{'db_now':110},state
+        def locked(*, capacity=False):
+            self.assertTrue(capacity)
+            yield cursor,{'db_now':110},state
         store.locked=locked;store.save_state=Mock()
         try:store.reserve(0)
         finally:

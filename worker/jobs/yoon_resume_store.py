@@ -91,14 +91,20 @@ class ResumeStore:
         self.source = JACKSON
 
     @contextmanager
-    def locked(self, *, owner=True, admission=False, _owner_check=False):
+    def locked(self, *, owner=True, admission=False, capacity=False, _owner_check=False):
         from worker.jobs.yoon_once import PRIVATE_GUARD, validate_descriptor
         with recognition_transaction(self.connect) as conn, conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '5s'")
             cur.execute("SET LOCAL statement_timeout = '15s'")
-            if admission:
+            if capacity:
+                from worker.jobs.sampling_capacity import check_ledger
+                check_ledger(cur)  # preflight only; authoritative recheck below
+            if admission or capacity:
                 from worker.jobs.yoon_admission import lock
                 lock(cur)
+            if capacity:
+                from worker.jobs.sampling_capacity import check_ledger
+                check_ledger(cur)
             # Keep validation in Python, including malformed/falsey JSON semantics.
             # Default reads retain complete descriptor, resume and queue: unknown
             # state fields must survive save_state, and queue identity is exact.
@@ -145,6 +151,8 @@ class ResumeStore:
             source = reviewed_source(descriptor)
             self.source = source
             state = dict(row['source_metadata'].get('yoon_resume') or {})
+            from worker.jobs.sampling_capacity import require_private_pause_integrity
+            require_private_pause_integrity(state)
             if descriptor.get('recognition_mode') != 'resumable' or state.get('version') != 1:
                 raise RuntimeError('private_resume_required')
             if source != JACKSON and (state.get('initialization_mode') != 'fresh'
@@ -172,7 +180,7 @@ class ResumeStore:
     @retry_lock_timeouts
     def claim(self):
         from worker.jobs.yoon_once import validate_descriptor
-        with self.locked(owner=False, admission=True) as (cur,row,state):
+        with self.locked(owner=False, admission=True, capacity=True) as (cur,row,state):
             from worker.jobs.yoon_admission import check
             generation = os.getenv('SET_LIST_DISPATCH_GENERATION') or None
             from worker.jobs.yoon_queue import consume
@@ -218,6 +226,11 @@ class ResumeStore:
                 WHERE set_run_id=%s AND raw_data->'private_jackson_v2'->>'in_flight'='true' ''', (self.run_id,))
             if cur.fetchone()['n']:
                 raise RuntimeError('uncertain_request_requires_reconciliation')
+            if 'sampling_capacity_pause_v1' in state:
+                from worker.jobs.sampling_capacity import valid_private_pause
+                if not valid_private_pause(state['sampling_capacity_pause_v1'], state):
+                    raise RuntimeError('private_capacity_pause_requires_reconciliation')
+                state.pop('sampling_capacity_pause_v1')
             state.update(self.owner, continuations=state['continuations']+1,
                          session_requests=0,session_started=row['db_now'], reason=None,
                          recognition_mode='resumable', status='preparing', pacing_policy='shared-production-v2')
@@ -311,6 +324,21 @@ class ResumeStore:
         if cur.fetchone()['n']!=origin['valid_windows']:
             raise RuntimeError('private_origin_coverage_changed')
         state['provenance_seeded'] = True
+
+    @retry_lock_timeouts
+    def note_capacity_pause(self, pause):
+        """Keep a matrix-slot hold until the existing whole-workflow release."""
+        from worker.jobs.sampling_capacity import CapacityPause, valid_pause_observation
+        if not isinstance(pause, CapacityPause) or not valid_pause_observation(str(pause), pause.observed_at):
+            raise RuntimeError('private_capacity_pause_evidence_required')
+        with self.locked() as (cur, row, state):
+            if 'sampling_capacity_pause_v1' in state:
+                from worker.jobs.sampling_capacity import valid_private_pause
+                if not valid_private_pause(state['sampling_capacity_pause_v1'], self.owner):
+                    raise RuntimeError('private_capacity_pause_requires_reconciliation')
+            state['sampling_capacity_pause_v1'] = dict(version=1, **self.owner,
+                reason=str(pause), observed_at=pause.observed_at)
+            self.save_state(cur, state)
 
     @retry_lock_timeouts
     def check_owner(self):
@@ -409,7 +437,7 @@ class ResumeStore:
 
     @retry_lock_timeouts
     def reserve(self, index, slot_index=0):
-        with self.locked() as (cur,row,state):
+        with self.locked(capacity=True) as (cur,row,state):
             slots, size = self._slot(state, slot_index)
             if state.get('review_required'):
                 raise QueuePause('private_resume_review_required')
@@ -500,6 +528,8 @@ class ResumeStore:
     @retry_lock_timeouts
     def release(self, reason):
         with self.locked() as (cur,row,state):
+            from worker.jobs.sampling_capacity import require_private_pause_integrity
+            require_private_pause_integrity(state)
             if self.coverage_ready(cur):
                 self.complete_locked(cur,state)
                 return
@@ -526,6 +556,15 @@ class ResumeStore:
                         next_allowed_at=pending['due'],windows=self.source.windows) or reason
                     if reason == 'cooldown':
                         reason = 'cooldown_pending'
+                    # A peer receipt may update generic reason, but not erase a
+                    # no-request hold observed by another slot in this owner.
+                    marker = state.get('sampling_capacity_pause_v1')
+                    if marker is not None:
+                        from worker.jobs.sampling_capacity import valid_private_pause
+                        if not valid_private_pause(marker, self.owner):
+                            raise RuntimeError('private_capacity_pause_requires_reconciliation')
+                        if reason == 'workflow_interrupted':
+                            reason = marker['reason']
             state.update(status='paused',reason=reason,review_required=bool(state.get('review_required') or uncertain))
             self.save_state(cur,state,'private_resume_paused')
 
@@ -587,6 +626,8 @@ class ResumeStore:
             self.complete_locked(cur,state)
 
     def complete_locked(self,cur,state):
+        from worker.jobs.sampling_capacity import require_private_pause_integrity
+        require_private_pause_integrity(state)
         from worker.pipeline.models import Recognition
         from worker.pipeline.aggregate import build_tracks_from_recognitions
         cur.execute('''SELECT segment_index,raw_data FROM ops.segment_hits

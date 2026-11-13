@@ -20,6 +20,8 @@ import { buildRequeueWithCleanupQuery } from "@/lib/jobs/requeue";
 
 import { sharedRecognition, sharedRecognitionConsumesRecoveryAttempt, sharedRecognitionExhausted, sharedRecognitionNeedsReview, validRecognitionHit } from "./shared-recognition";
 
+import { validSamplingCapacityDeferral, buildSamplingCapacityRequeue } from "./sampling-capacity";
+
 const db = getDb();
 
 // ---------------------------------------------------------------------------
@@ -528,6 +530,18 @@ export const finalizeSetRunWorkflow = async (values: {
   }
   if (shared && sharedRecognitionNeedsReview(shared, state.inFlightCount)) {
     return { action: "recognition_requires_reconciliation" as const };
+  }
+
+  if (Object.prototype.hasOwnProperty.call(sourceMetadata, "sampling_capacity_deferral_v1")) {
+    if (!validSamplingCapacityDeferral(sourceMetadata, run.stage, values.workflowRunId)) {
+      return { action: "sampling_capacity_requires_reconciliation" as const };
+    }
+    const requeued = await db.execute(buildSamplingCapacityRequeue(run));
+    if (requeued.rows.length === 0) return { action: "recovery_skipped" as const };
+    await syncSubmissionStatusFromRuns(run.submissionId);
+    // Do not immediately dispatch unrelated discovery/publish work from this
+    // callback. The ordinary scheduler's authoritative ledger gate owns retry.
+    return { action: "sampling_capacity_queued" as const };
   }
 
   if (recognitionComplete) {

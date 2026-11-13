@@ -13,13 +13,14 @@ import time
 import uuid
 
 from worker.jobs import yoon_admission as admission
+from worker.jobs.sampling_capacity import CapacityPause, PAUSE_REASONS
 from worker.jobs.yoon_resume_store import ResumeStore
 from worker.jobs.yoon_resume_policy import may_reserve
 from worker.jobs.yoon_sources import reviewed_source
 
 KEY = 'yoon_queue_v1'
 RESERVED = frozenset(('reserved', 'sending', 'dispatched'))
-SAFE_PAUSES = frozenset(('workflow_time_budget', 'cooldown_pending'))
+SAFE_PAUSES = frozenset(('workflow_time_budget', 'cooldown_pending')) | PAUSE_REASONS
 COMPLETION_PAUSES = SAFE_PAUSES | {'lifetime_time_budget', 'lifetime_request_budget',
                                   'continuation_budget', 'window_attempt_budget'}
 
@@ -43,6 +44,10 @@ def completion_block_reason(row, state):
         return 'recognition_requires_review'
     if state.get('in_flight') is not None and state.get('in_flight') is not False:
         return 'private_queue_completion_uncertain'
+    if 'sampling_capacity_pause_v1' in state or state.get('reason') in PAUSE_REASONS:
+        from worker.jobs.sampling_capacity import valid_private_pause
+        if not valid_private_pause(state.get('sampling_capacity_pause_v1'), state):
+            return 'private_capacity_pause_requires_reconciliation'
     if row['status'] == 'private_resume_paused' and state.get('reason') not in COMPLETION_PAUSES:
         return 'pause_requires_review'
     if row['status'] == 'private_resume_complete' and (state.get('status') != 'complete' or state.get('reason') is not None):
@@ -187,8 +192,17 @@ class PrivateQueue:
             return ids
 
     def refresh_and_reserve(self, run_id):
+        # Completion/reconciliation creates no occupancy and can drain while a
+        # study holds the session mutex. New reservation repeats every predicate
+        # under the global-before-row lock; never upgrade a held row lock.
+        result = self._refresh_or_reserve(run_id, capacity=False)
+        if result is not True:
+            return result
+        return self._refresh_or_reserve(run_id, capacity=True)
+
+    def _refresh_or_reserve(self, run_id, *, capacity):
         store = self.store(run_id)
-        with store.locked(owner=False, admission=True) as (cur, row, state):
+        with store.locked(owner=False, admission=capacity, capacity=capacity) as (cur, row, state):
             queue = dict(row['source_metadata'].get(KEY) or {})
             validate_identity(row, state, queue)
             status = queue['status']
@@ -240,6 +254,8 @@ class PrivateQueue:
                 return None
             # Do not release old reservation in a separate transaction. Occupancy
             # and capacity are checked before the new generation is committed.
+            if not capacity:
+                return True  # decision only; release row locks before admission
             admission.check(cur, run_id, row['target_set_id'])
             generation = str(uuid.uuid4())
             queue.update(status='reserved', generation=generation, owner=None, reason=None,
@@ -300,6 +316,10 @@ class PrivateQueue:
         for run_id in ids:
             try:
                 reservation = self.refresh_and_reserve(run_id)
+            except CapacityPause:
+                # Known durable sampling hold is a wait, not uncertain dispatch.
+                # The admission transaction rolled back; no send or queue reset.
+                return {**counts, 'capacity_held': True}
             except RuntimeError as exc:
                 if str(exc) == 'private_admission_capacity':
                     continue

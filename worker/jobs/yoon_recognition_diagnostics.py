@@ -69,7 +69,8 @@ def phase(name):
     except Exception as error:
         # QueuePause is intentional flow control, not a worker failure.
         from worker.jobs.yoon_resume_store import QueuePause
-        if not isinstance(error, QueuePause):
+        from worker.jobs.sampling_capacity import CapacityPause
+        if not isinstance(error, (QueuePause, CapacityPause)):
             report(name, error)
         raise
 

@@ -149,6 +149,8 @@ class Store:
                 from worker.jobs.yoon_admission import lock, check
                 cur.execute("SET LOCAL lock_timeout = '5s'")
                 cur.execute("SET LOCAL statement_timeout = '15s'")
+                from worker.jobs.sampling_capacity import check_ledger
+                check_ledger(cur)  # read-only preflight; locked check below is authoritative
                 lock(cur)
                 check(cur, self.run_id, self.target[0])
             cur.execute('''UPDATE ops.set_runs r SET

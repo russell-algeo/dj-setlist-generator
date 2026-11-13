@@ -50,8 +50,11 @@ class PrivateEnrichmentTests(unittest.TestCase):
         from worker.jobs.yoon_spotify_enrich import Store, KEY
         store=object.__new__(Store);store.expected={'pin':'x'};store.owner={'workflow_run_id':'1'}
         row={'source_metadata':{}}
+        lock_modes=[]
         @contextmanager
-        def locked():yield None,row,[]
+        def locked(*,capacity=False):
+            lock_modes.append(capacity)
+            yield None,row,[]
         store.locked=locked
         store.write=lambda cur,value:row['source_metadata'].update({KEY:value})
         store.run_id='synthetic-run'
@@ -65,6 +68,7 @@ class PrivateEnrichmentTests(unittest.TestCase):
         self.assertEqual(store.reserve(),(None,[]))
         row['source_metadata'][KEY]['results']=[{'changed':True}]
         with self.assertRaises(RuntimeError):store.reserve()
+        self.assertEqual(lock_modes,[True,True,False,False,True,True])
 
     def test_verified_result(self):
         tracks=self.fixture()[1]['clustered_setlist'][:1];tracks[0]['title']='Synthetic'

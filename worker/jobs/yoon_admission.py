@@ -120,6 +120,10 @@ def check(cur, run_id, target_set_id, *, generation=None):
     limit = capacity()
     # Caller owns the global admission transaction lock and the target row lock.
     # Release never creates occupancy and therefore needs no global lock.
+    # The mutex helper also serves receipt/finalization paths. Only genuine
+    # admission checks the study capacity; settling existing work stays possible.
+    from worker.jobs.sampling_capacity import check_ledger
+    check_ledger(cur)
     cur.execute('SELECT ops.assert_yoon_version_execution(%s, %s, %s)',
                 (str(run_id), 'admit', generation))
     cur.execute(ROWS_SQL)

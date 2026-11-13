@@ -37,8 +37,11 @@ class RecheckTests(unittest.TestCase):
         row, tracks, expected = self.fixture(); original = copy.deepcopy(row['source_metadata'][KEY])
         store = object.__new__(subject.RecheckStore)
         store.expected=expected;store.owner={'workflow_run_id':'2','run_attempt':'1'}
+        lock_modes=[]
         @contextmanager
-        def locked(): yield None,row,tracks
+        def locked(*,capacity=False):
+            lock_modes.append(capacity)
+            yield None,row,tracks
         store.locked=locked
         store.write=lambda cur,value:row['source_metadata'].update({store.key:value})
         store.run_id='synthetic-run'
@@ -54,6 +57,7 @@ class RecheckTests(unittest.TestCase):
         self.assertEqual(row['source_metadata'][KEY],original)
         row['source_metadata'][subject.RECHECK_KEY]['results'][0]['index']=99
         with self.assertRaises(RuntimeError):store.reserve()
+        self.assertEqual(lock_modes,[True,True,False,True,True])  # Invalid result rejected before any lock.
 
     def test_only_seven_tracks_rechecked(self):
         _,tracks,_=self.fixture();fake=Mock()

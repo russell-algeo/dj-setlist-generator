@@ -8,7 +8,10 @@ from worker.jobs import yoon_metadata_enrich as m
 class TitleTests(unittest.TestCase):
  def reserve(self,snapshot):
   store=object.__new__(m.MetadataStore);store.publication_digest=m.digest(snapshot);store.expected={};store.owner={'workflow_run_id':'1','run_attempt':'1'};store.run_id='54a97b8c-157a-5ea7-b64a-d0351e737d4e'
-  row={'target_set_id':'target','source_metadata':{}};store.locked=lambda:nullcontext((None,row,[]));store.snapshot=lambda cur,row:snapshot;writes=[];store.write=lambda cur,value:writes.append(value)
+  row={'target_set_id':'target','source_metadata':{}}
+  def locked(*,capacity=False):
+   self.assertTrue(capacity);return nullcontext((None,row,[]))
+  store.locked=locked;store.snapshot=lambda cur,row:snapshot;writes=[];store.write=lambda cur,value:writes.append(value)
   with patch('worker.jobs.yoon_admission.check'):
    return store.reserve()
  def test_fallback_preserves_snapshot(self):

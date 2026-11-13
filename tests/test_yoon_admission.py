@@ -19,7 +19,13 @@ class Cursor:
     def __init__(self,rows): self.rows=rows;self.sql=[]
     def execute(self,sql,params=None): self.sql.append(sql)
     def fetchall(self): return self.rows
-    def fetchone(self): return {'transaction_isolation':'read committed'}
+    def fetchone(self):
+        # A no-study fixture must model the explicit durable capacity read.
+        from worker.jobs.sampling_capacity import LEDGER_SQL
+        if self.sql and self.sql[-1] == LEDGER_SQL:
+            return dict(active=False, unsettled=False, invalid_retry_after=False,
+                        next_allowed_at=0.0, db_now=100.0)
+        return {'transaction_isolation':'read committed'}
 
 class AdmissionTests(unittest.TestCase):
     def setUp(self):
@@ -110,9 +116,9 @@ class AdmissionTests(unittest.TestCase):
     def test_shared_pipeline_reviewed_throttle_policy_pins(self):
         here=Path(__file__).resolve().parents[1]
         # Reviewed policy3 changes the common retry engine, not private-only pacing.
-        # Database-only lock retries are reviewed separately; provider transport,
+        # Offline v4 changes admission and deliberate-pause flow; provider transport,
         # aggregation and source recognizer remain pinned unchanged.
-        pins={'worker/jobs/shared_recognition.py': '5b3ffa77ff131992671cfb9d512f82b8428102bb4825325101126d8b473395c0', 'worker/jobs/yoon_resume.py': 'a29136c9adca394639e9d17041eeb009173f19cf304a48dfbb31b24eee9c9f77', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': 'd7d93f4ea8ac591baf868533876d5ec90462edf0355700752a6dc9cbd1a075c5', 'recognition_transport.py': '3eb691ef807eb82fe2e69dcdd1f8c398d28e7cc6f6c5d8acf038989693796a4b', 'worker/jobs/yoon_resume_policy.py': '50fca4b2c3413b255b37555783ecf0c2db1ae916df604d8b4813ca4eec0a80f8', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
+        pins={'worker/jobs/shared_recognition.py': '23e25af41bbd5cfcf5a15a672514c0c87c6dfe151e9617adb37dfeb686b66c02', 'worker/jobs/yoon_resume.py': 'e374e2ade4728569b8e51d71b9eee2859071d7e0cd6958ca4e5e6d50ac7f1513', 'worker/jobs/yoon_recognition.py': 'a6fa53971ca4cc5633205c2988b5c48eef3568fc71f97b76dcf4b8f59eb74beb', 'track_recognizer.py': 'd7d93f4ea8ac591baf868533876d5ec90462edf0355700752a6dc9cbd1a075c5', 'recognition_transport.py': '3eb691ef807eb82fe2e69dcdd1f8c398d28e7cc6f6c5d8acf038989693796a4b', 'worker/jobs/yoon_resume_policy.py': '50fca4b2c3413b255b37555783ecf0c2db1ae916df604d8b4813ca4eec0a80f8', 'worker/pipeline/aggregate.py': 'c56af3972aae077686311ffdf056c85617996170cecb33aaba6f01d1e9e1934a'}
         for name,expected in pins.items():
             self.assertEqual(hashlib.sha256((here/name).read_bytes()).hexdigest(),expected,name)
     def test_per_run_workflow_group(self):

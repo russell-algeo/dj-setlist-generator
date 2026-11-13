@@ -105,14 +105,17 @@ class RecognitionStore:
         self.identity = f'{self.workflow}:{self.attempt}'
 
     @contextmanager
-    def locked(self):
+    def locked(self, *, capacity=False):
         from psycopg import Error
         try:
             with recognition_transaction(self.connect) as conn, conn.cursor() as cur:
                 cur.execute("SET LOCAL lock_timeout='5s'")
                 cur.execute("SET LOCAL statement_timeout='15s'")
-                # Row locks serialize evidence changes for this run only; no
-                # database-wide provider mutex or delay is introduced.
+                if capacity:
+                    from worker.jobs.sampling_capacity import lock_and_check
+                    lock_and_check(cur)
+                # A new request takes the shared admission mutex before run
+                # locks. Receipt/cleanup operations do not acquire that mutex.
                 cur.execute('''SELECT r.*,extract(epoch FROM clock_timestamp())::float8 AS db_now
                   FROM ops.set_runs r JOIN ops.submissions u ON u.id=r.submission_id
                   WHERE r.id=%s AND r.publication_visibility='public' AND u.visibility='public'
@@ -132,6 +135,36 @@ class RecognitionStore:
         except Error:
             raise RecognitionFence('shared_storage_error') from None
 
+    @retry_lock_timeouts
+    def defer_capacity(self, pause):
+        """Record an observed pre-bootstrap hold without fabricating recognition.
+
+        This metadata is only a no-work deferral receipt. Finalizers must retain
+        evidence and retire this exact generation before requeue; the dispatcher
+        independently rechecks current capacity. A hold clearing during cleanup
+        does not turn the already-aborted bootstrap into a successful execution.
+        """
+        from worker.jobs.sampling_capacity import (CapacityPause, check_ledger,
+            valid_pause_observation, valid_deferral, DEFERRAL_KEY, DEFERRAL_STAGE)
+        if not isinstance(pause, CapacityPause) or not valid_pause_observation(str(pause), pause.observed_at):
+            raise RecognitionFence('sampling_capacity_deferral_evidence_required')
+        # This is receipt/deferral cleanup, not admission. It must remain possible
+        # while a study owns the long session mutex; no occupancy/status changes.
+        with self.locked() as (cur, row, state):
+            if DEFERRAL_KEY in row['source_metadata'] and not valid_deferral(row['source_metadata'], row.get('stage')):
+                raise RecognitionFence('sampling_capacity_deferral_requires_reconciliation')
+            try:
+                check_ledger(cur)
+            except CapacityPause as current:
+                pause = current
+            marker = dict(version=1, workflow_run_id=self.workflow,
+                run_attempt=self.attempt, dispatch_generation=self.generation,
+                reason=str(pause), observed_at=pause.observed_at)
+            cur.execute("""UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,
+                '{sampling_capacity_deferral_v1}',%s::jsonb),stage=%s,
+                heartbeat_at=now(),updated_at=now() WHERE id=%s""",
+                (json.dumps(marker), DEFERRAL_STAGE, self.run_id))
+
     def save(self, cur, state):
         cur.execute('''UPDATE ops.set_runs SET source_metadata=jsonb_set(source_metadata,
           '{shared_recognition}',%s::jsonb),heartbeat_at=now(),updated_at=now() WHERE id=%s''',
@@ -146,9 +179,10 @@ class RecognitionStore:
     def begin(self):
         """Count continuation before download; return None for legacy evidence."""
         reason = None
-        with self.locked() as (cur, row, state):
+        with self.locked(capacity=True) as (cur, row, state):
             cur.execute("SELECT obj_description('ops.claim_next_dispatchable_set_run(integer)'::regprocedure,'pg_proc') AS marker")
-            if cur.fetchone()['marker'] != 'shared-recognition-throttle-v3':
+            from worker.jobs.sampling_capacity import DISPATCH_MARKER
+            if cur.fetchone()['marker'] != DISPATCH_MARKER:
                 raise RecognitionFence('shared_recognition_migration_required')
             if not state:
                 cur.execute('''SELECT (SELECT count(*) FROM ops.segment_hits WHERE set_run_id=%s)
@@ -267,7 +301,7 @@ class RecognitionStore:
 
     @retry_lock_timeouts
     def claim_lease(self, worker_name):
-        with self.locked() as (cur,row,state):
+        with self.locked(capacity=True) as (cur,row,state):
             self.require_state(state)
             if state.get('review_required'):
                 raise RecognitionPause('recognition_requires_reconciliation')
@@ -297,7 +331,7 @@ class RecognitionStore:
     def reserve(self, index, lease_id, worker_name):
         """Reserve one actual HTTP attempt; other windows/leases remain concurrent."""
         from recognition_transport import RequestAuthorizationError
-        with self.locked() as (cur,row,state):
+        with self.locked(capacity=True) as (cur,row,state):
             self.require_state(state)
             reason=budget_reason(state,row['db_now'])
             if reason or state.get('review_required'):

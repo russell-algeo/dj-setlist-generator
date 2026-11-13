@@ -30,9 +30,9 @@ class RecheckStore(Store):
         super().__init__(expected, workflow, attempt, run_id)
 
     @contextmanager
-    def locked(self):
+    def locked(self, *, capacity=False):
         # Parent validates audience, complete recognition and immutable source pins.
-        with super().locked() as (cur, row, tracks):
+        with super().locked(capacity=capacity) as (cur, row, tracks):
             validate_prior(row, tracks, self.expected)
             yield cur, row, tracks
 

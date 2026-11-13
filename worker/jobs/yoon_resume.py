@@ -8,6 +8,7 @@ from pathlib import Path
 from worker.jobs.yoon_recognition_diagnostics import phase
 from worker.jobs.yoon_resume_policy import WORKFLOW_SECONDS
 from worker.jobs.yoon_resume_store import QueuePause
+from worker.jobs.sampling_capacity import CapacityPause
 from worker.jobs.yoon_sources import CATALOG, JACKSON
 
 
@@ -15,23 +16,28 @@ async def _recognize_batch_preserving_stops(recognizer, segments, total_segments
     """Permit cooldown reselection only after every gathered task settled safely."""
     original = recognizer.recognize_segment_with_backoff
     stops = []
+    capacity_holds = []
 
     async def observed(segment):
         try:
             return await original(segment)
         except (Exception, asyncio.CancelledError) as exc:
-            if not (isinstance(exc, QueuePause) and str(exc) == 'cooldown'):
+            if isinstance(exc, CapacityPause):
+                capacity_holds.append(exc)
+            elif not (isinstance(exc, QueuePause) and str(exc) == 'cooldown'):
                 stops.append(exc)
             raise
 
     recognizer.recognize_segment_with_backoff = observed
     try:
         return await recognizer.recognize_batch(segments,total_segments=total_segments)
-    except QueuePause as exc:
-        if str(exc) == 'cooldown' and stops:
+    except (QueuePause, CapacityPause) as exc:
+        if (isinstance(exc, CapacityPause) or str(exc) == 'cooldown') and stops:
             # The common batch raises in segment order. An earlier cooldown must
-            # not hide a later cancellation, owner failure or uncertain error.
+            # or capacity hold must not hide a later cancellation, owner failure or uncertain error.
             raise next((stop for stop in stops if isinstance(stop, asyncio.CancelledError)), stops[0])
+        if capacity_holds and isinstance(exc, QueuePause) and str(exc) == 'cooldown':
+            raise capacity_holds[0]
         raise
     finally:
         recognizer.recognize_segment_with_backoff = original
@@ -150,6 +156,9 @@ async def recognize_resumable(store, audio: Path, *, slot_index=0):
                     with phase('cleanup'):
                         for segment in extracted:
                             segment['file'].unlink(missing_ok=True)
+    except CapacityPause as pause:
+        store.note_capacity_pause(pause)
+        return 'paused'
     except QueuePause:
         return 'paused'
     finally:

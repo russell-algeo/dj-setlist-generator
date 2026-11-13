@@ -115,9 +115,9 @@ class TransactionTests(unittest.TestCase):
         from worker.jobs.shared_recognition import RecognitionStore
         from worker.jobs.yoon_resume_store import ResumeStore
         for cls, expected in ((RecognitionStore, {
-                'begin','prepared','state','claim_lease','missing_indices','reserve','finish','settle_lease','pause'}),
+                'begin','prepared','state','claim_lease','missing_indices','reserve','finish','settle_lease','pause','defer_capacity'}),
                 (ResumeStore, {'claim','require_owner','check_owner','write','prepare_scheduler','next_windows','reserve',
-                              'finish','release','finalize_ready','summary','complete','clock_state'})):
+                              'finish','release','finalize_ready','summary','complete','clock_state','note_capacity_pause'})):
             actual = {name for name, fn in vars(cls).items() if hasattr(fn, '__wrapped__') and name != 'locked'}
             self.assertEqual(actual, expected)
 

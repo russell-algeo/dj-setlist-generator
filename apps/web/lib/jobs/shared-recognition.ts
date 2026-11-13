@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import { segmentHits, setRuns } from "@/lib/db/schema";
+import { isSamplingCapacityReason } from "./sampling-capacity";
 
 export const sharedRecognition = (metadata: Record<string, unknown>) => {
   const value = metadata.shared_recognition;
@@ -20,8 +21,8 @@ const validThrottleCounters = (state: Record<string, unknown>) => {
 // Only clean bounded recognition progress is exempt from ordinary recovery
 // attempts. Preparation/storage failures can occur before any provider request.
 export const sharedRecognitionConsumesRecoveryAttempt = (state: Record<string, unknown> | null) =>
-  !state || !["workflow_time_budget", "recognition_retry_pending", "cooldown_pending",
-    "recognition_requests_in_flight"].includes(String(state.reason));
+  !state || (!isSamplingCapacityReason(state.reason) && !["workflow_time_budget", "recognition_retry_pending", "cooldown_pending",
+    "recognition_requests_in_flight"].includes(String(state.reason)));
 
 // Do not infer validity from row presence, recognized=false, or a legacy response.
 export const sharedRecognitionNeedsReview = (state: Record<string, unknown>, inFlight = 0) =>

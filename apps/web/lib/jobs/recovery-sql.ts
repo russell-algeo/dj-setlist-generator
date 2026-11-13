@@ -12,6 +12,7 @@ export const recoverStaleLeasesQuery = sql`
       and lease.status = 'claimed' and lease.claimed_at < now() - interval '15 minutes'
       and run.publication_visibility = 'public'
       and not (coalesce(run.source_metadata, '{}'::jsonb) ? 'shared_recognition')
+      and not (coalesce(run.source_metadata, '{}'::jsonb) ? 'sampling_capacity_deferral_v1')
       and run.cancel_requested_at is null
       and run.status in ('dispatched', 'resolving', 'recognizing', 'aggregating', 'enriching')
       and run.published_set_id is null
@@ -34,6 +35,7 @@ export const recoverStaleRunsQuery = sql`
         heartbeat_at = null, updated_at = now()
     where publication_visibility = 'public'
       and not (coalesce(source_metadata, '{}'::jsonb) ? 'shared_recognition')
+      and not (coalesce(source_metadata, '{}'::jsonb) ? 'sampling_capacity_deferral_v1')
       and status in ('dispatched', 'resolving', 'recognizing', 'aggregating', 'enriching', 'publishing', 'cancelling')
       and coalesce(heartbeat_at, updated_at, created_at) < now() - interval '30 minutes'
       and published_set_id is null
@@ -54,6 +56,7 @@ export const recoverStaleRunsQuery = sql`
     where run.publication_visibility = 'public' and run.status = 'queued'
       and run.cancel_requested_at is null and run.published_set_id is null
       and run.stage is distinct from 'publishing_committed'
+      and not (coalesce(run.source_metadata, '{}'::jsonb) ? 'sampling_capacity_deferral_v1')
       and run.source_metadata->'shared_recognition'->>'version' = '1'
       and run.source_metadata->'shared_recognition'->'policy_version' is distinct from '3'::jsonb
       and run.source_metadata->'shared_recognition'->>'review_required' = 'false'

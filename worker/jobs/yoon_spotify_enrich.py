@@ -150,10 +150,13 @@ class Store:
         self.expected = expected
 
     @contextmanager
-    def locked(self):
+    def locked(self, *, capacity=False):
         with self.connect() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '5s'")
             cur.execute("SET LOCAL statement_timeout = '15s'")
+            if capacity:
+                from worker.jobs.sampling_capacity import check_ledger
+                check_ledger(cur)  # preflight only; admission.check rechecks under lock
             from worker.jobs.yoon_admission import lock
             lock(cur)
             cur.execute("""SELECT r.* FROM ops.set_runs r
@@ -191,7 +194,7 @@ class Store:
                     ([self.key], json.dumps(value), self.run_id))
 
     def reserve(self):
-        with self.locked() as (cur, row, tracks):
+        with self.locked(capacity=True) as (cur, row, tracks):
             prior = row['source_metadata'].get(self.key)
             if prior is not None:
                 if (prior.get('status') == 'complete' and prior.get('input') == self.expected

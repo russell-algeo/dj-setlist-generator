@@ -378,6 +378,7 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
     )
 
     from worker.jobs.shared_recognition import RecognitionStore, RecognitionPause
+    from worker.jobs.sampling_capacity import CapacityPause
     durable_store = None
     durable_state = None
     try:
@@ -438,6 +439,11 @@ async def _bootstrap_phase(set_run_id: str) -> dict[str, object]:
             "audio_file": context.audio_file,
         }
     except RunCancelledError:
+        raise
+    except CapacityPause as pause:
+        # No download/request occurred. Preserve exact owner-bound deferral;
+        # web finalization requeues without erasing legacy evidence or budgets.
+        durable_store.defer_capacity(pause)
         raise
     except RecognitionPause:
         # Durable reason/cooldown survives; the existing finalizer requeues only
@@ -884,6 +890,15 @@ def finalize_phase(
     run_row = _load_run(set_run_id)
     if (run_row.get("cancel_requested_at") or run_row.get("status") in {"cancelling", "cancelled"}) and not run_row.get("published_set_id"):
         _finish_cancelled(set_run_id)
+        return
+    from worker.jobs.sampling_capacity import DEFERRAL_KEY, valid_deferral
+    metadata = run_row.get('source_metadata') or {}
+    if (str(run_row['status']) not in {'completed', 'failed', 'cancelled'}
+            and not run_row.get('published_set_id') and DEFERRAL_KEY in metadata):
+        if not valid_deferral(metadata, run_row.get('stage')):
+            raise RuntimeError('sampling_capacity_deferral_requires_reconciliation')
+        # Only the fenced web finalizer retires/requeues this generation. Never
+        # synthesize shared recognition or turn a deliberate no-work hold failed.
         return
     terminal_status = str(run_row["status"])
     if (run_row.get("source_metadata", {}).get("shared_recognition") or {}).get("version") == 1:
