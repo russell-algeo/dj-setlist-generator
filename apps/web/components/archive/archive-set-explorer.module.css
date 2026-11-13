@@ -2376,6 +2376,8 @@
   .root :global(.youtube-background-note) {
     display: block;
   }
+}
+
 /* N04: estimated parts inside an Unknown entry. Dashed to read as provisional. */
 .root :global(.provisional-parts) {
   display: inline-flex;
