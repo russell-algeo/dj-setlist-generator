@@ -2852,6 +2852,9 @@ export function ArchiveSetExplorer({
                       error={nativeAudioError}
                       onTogglePlay={togglePlay}
                       onSeek={commitScrub}
+                      title={detail.title}
+                      artworkUrl={dockTrack?.albumArt ?? model.heroImageUrl ?? null}
+                      nowPlaying={activeTrack ? { title: activeTrack.title, artist: activeTrack.artist } : null}
                     />
                   </div>
                 ) : null}

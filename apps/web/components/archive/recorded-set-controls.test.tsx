@@ -64,4 +64,36 @@ describe("set-relative recording controls", () => {
     expect(input(RecordedSetControls({ ...base, ready: false }))!.props.disabled).toBe(true);
     expect(input(RecordedSetControls({ ...base, unavailable: true }))!.props.disabled).toBe(true);
   });
+
+  it("looks like an integrated source card without exposing the private source", () => {
+    const html = renderToStaticMarkup(<RecordedSetControls {...base} title="Jackson Algeo" artworkUrl="/art.jpg"
+      nowPlaying={{ title: "Track", artist: "Artist" }} />);
+    expect(html).toContain("Private recording");
+    expect(html).toContain("Jackson Algeo");
+    expect(html).toContain("Artist — Track");
+    expect(html).toContain('src="/art.jpg"');
+    expect(html).toContain("dock-progress recorded-set-progress");
+    expect(html).toContain("<svg");
+    expect(html).not.toMatch(/dropbox|https?:/i);
+    expect(html).toContain("Lock-screen and background controls depend on your browser");
+  });
+
+  it("renders partial coverage notes and in-range gap markers on the set clock", () => {
+    const html = renderToStaticMarkup(<RecordedSetControls {...base} coverage={{
+      notes: ["This set is partial: the recording starts after the scheduled start."],
+      gaps: [{ at: 1800, label: "Recording gap (modeled, length unknown)" }, { at: 9000, label: "Out of range" }, { at: Number.NaN, label: "Bad" }],
+    }} />);
+    expect(html).toContain('aria-label="Recording coverage"');
+    expect(html).toContain("This set is partial");
+    expect(html).toContain("Recording gap (modeled, length unknown) at 30:00");
+    expect(html).toContain("left:25%");
+    expect(html).not.toContain("Out of range");
+    expect(html).not.toContain("Bad");
+    expect(renderToStaticMarkup(<RecordedSetControls {...base} />)).not.toContain("Recording coverage");
+  });
+
+  it("shows the playing state with the dock's inverted treatment", () => {
+    const html = renderToStaticMarkup(<RecordedSetControls {...base} isPlaying currentTime={10} />);
+    expect(html).toContain('class="recorded-set-play is-playing"');
+  });
 });

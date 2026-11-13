@@ -2093,10 +2093,78 @@
   }
 }
 
-/* Private recordings share the existing set clock, not the source file clock. */
+/* Private recordings share the existing set clock, not the source file clock.
+   The card follows the provider-embed footprint and the dock's lime controls. */
 .root :global(.recorded-set-controls) {
-  padding: clamp(12px, 3vw, 24px);
+  padding: clamp(12px, 3vw, 20px);
   min-width: 0;
+}
+
+.root :global(.recorded-set-card) {
+  display: grid;
+  grid-template-columns: clamp(64px, 14vw, 118px) minmax(0, 1fr);
+  gap: clamp(12px, 2.5vw, 20px);
+  align-items: center;
+}
+
+.root :global(.recorded-set-art) {
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  background: #141414;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 22px;
+}
+
+.root :global(.recorded-set-art img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.root :global(.recorded-set-body) {
+  min-width: 0;
+}
+
+.root :global(.recorded-set-meta) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.root :global(.recorded-set-badge) {
+  align-self: flex-start;
+  padding: 2px 6px;
+  border: 1px solid rgb(216 255 90 / 45%);
+  border-radius: var(--radius);
+  color: var(--lime);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.root :global(.recorded-set-title) {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.root :global(.recorded-set-now) {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .root :global(.recorded-set-controls-row) {
@@ -2105,60 +2173,91 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
+  margin-bottom: 10px;
 }
 
 .root :global(.recorded-set-play) {
-  min-width: 88px;
+  min-width: 96px;
   min-height: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 10px 14px;
+  padding: 10px 16px;
   border: 1px solid var(--lime);
-  border-radius: 6px;
-  background: #111;
-  color: var(--lime);
+  border-radius: var(--radius);
+  background: var(--lime);
+  color: #0c1207;
   font: inherit;
+  font-weight: 800;
   cursor: pointer;
+}
+
+.root :global(.recorded-set-play.is-playing) {
+  background: #101510;
+  color: var(--lime);
 }
 
 .root :global(.recorded-set-time) {
   color: var(--ink);
+  font-family: var(--font-mono), monospace;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.root :global(.recorded-set-seek) {
-  display: block;
-  width: 100%;
+/* Same thin filled timeline as the dock, with a 48px invisible hit target. */
+.root :global(.recorded-set-body .set-seek-timeline) {
+  height: 10px;
+  margin: 19px 0;
+}
+
+.root :global(.recorded-set-body .set-seek-input) {
+  top: -19px;
   height: 48px;
-  margin: 6px 0 0;
-  accent-color: var(--lime);
-  cursor: pointer;
 }
 
-.root :global(.recorded-set-seek::-webkit-slider-thumb) {
-  min-width: 24px;
-  min-height: 24px;
+/* Gap markers sit on top of the timeline bar and never take pointer input. */
+.root :global(.recorded-set-gaps) {
+  position: relative;
+  z-index: 2;
+  height: 14px;
+  margin-top: -31px;
+  margin-bottom: 17px;
+  pointer-events: none;
 }
 
-.root :global(.recorded-set-seek::-moz-range-thumb) {
-  width: 24px;
-  height: 24px;
+.root :global(.recorded-set-gap) {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 14px;
+  margin-left: -1.5px;
+  background: var(--violet);
 }
 
-.root :global(.recorded-set-play:focus-visible),
-.root :global(.recorded-set-seek:focus-visible) {
+.root :global(.recorded-set-coverage) {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.root :global(.recorded-set-play:focus-visible) {
   outline: 2px solid var(--lime);
   outline-offset: 4px;
 }
 
-.root :global(.recorded-set-play:disabled),
-.root :global(.recorded-set-seek:disabled) {
+.root :global(.recorded-set-play:disabled) {
+  border-color: rgb(216 255 90 / 36%);
+  background: rgb(216 255 90 / 13%);
+  color: rgb(216 255 90 / 58%);
   cursor: not-allowed;
-  opacity: 0.5;
+}
+
+.root :global(.recorded-set-status) {
+  margin-top: 8px;
 }
 
 .root :global(.recorded-set-status p) {
@@ -2168,6 +2267,22 @@
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.root :global(.recorded-set-status p.recorded-set-limits) {
+  min-height: 0;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+@media (forced-colors: active) {
+  .root :global(.recorded-set-body .set-seek-input) {
+    opacity: 1;
+  }
+
+  .root :global(.recorded-set-progress) {
+    display: none;
+  }
 }
 
 .root :global(.set-seek-control) {
