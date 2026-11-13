@@ -28,7 +28,7 @@ export function SetSeekControl({
   const position = Number.isFinite(currentTime) ? clampPosition(currentTime) : 0;
   const unavailable = disabled || total <= 0;
   const [draft, setDraft] = useState<number | null>(null);
-  const gesture = useRef<{ kind: "pointer" | "keyboard"; pointerId?: number; value: number | null; cancelled?: boolean } | null>(null);
+  const gesture = useRef<{ kind: "pointer" | "keyboard"; pointerId?: number; value: number | null; cancelled?: boolean; tracked?: boolean } | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -48,6 +48,13 @@ export function SetSeekControl({
     gesture.current = null;
     setDraft(null);
     if (mounted.current && !unavailable && Number.isFinite(value)) onCommit(clampPosition(value));
+  };
+  // Map a pointer to the timeline position under it, so a drag may start
+  // anywhere on the track (iOS Safari only moves a native range from its thumb).
+  const valueAt = (element: HTMLElement, clientX: number) => {
+    const rect = element.getBoundingClientRect();
+    if (!(rect.width > 0) || !Number.isFinite(clientX)) return null;
+    return clampPosition(Math.round((clientX - rect.left) / rect.width * total));
   };
   const displayed = unavailable ? position : draft ?? position;
   const valueText = `${formatDuration(displayed)} of ${formatDuration(total)}`;
@@ -69,15 +76,25 @@ export function SetSeekControl({
           disabled={unavailable}
           onPointerDown={(event) => {
             if (unavailable || event.button !== 0 || event.isPrimary === false || (gesture.current && !gesture.current.cancelled)) return;
-            gesture.current = { kind: "pointer", pointerId: event.pointerId, value: null };
-            setDraft(position);
+            const start = valueAt(event.currentTarget, event.clientX);
+            gesture.current = { kind: "pointer", pointerId: event.pointerId, value: start, tracked: start !== null };
+            setDraft(start ?? position);
             event.currentTarget.setPointerCapture?.(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const current = gesture.current;
+            if (current?.kind !== "pointer" || !current.tracked || current.cancelled || current.pointerId !== event.pointerId) return;
+            const value = valueAt(event.currentTarget, event.clientX);
+            if (value === null) return;
+            current.value = value;
+            setDraft(value);
           }}
           onChange={(event) => {
             if (unavailable || gesture.current?.cancelled) return;
             const seconds = Number(event.currentTarget.value);
             if (!Number.isFinite(seconds)) return;
             const value = clampPosition(seconds);
+            if (gesture.current?.tracked) return; // pointer position owns this gesture
             if (gesture.current) {
               gesture.current.value = value;
               setDraft(value);

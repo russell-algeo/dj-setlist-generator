@@ -120,4 +120,41 @@ describe("commit-on-release set seek control", () => {
     expect(host.querySelector("#dockCurrentTime")!.textContent).toBe("0:10");
   });
 
+
+  describe("drag from anywhere on the track", () => {
+    const at = async (type: string, clientX: number, pointerId = 1) => act(async () => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX });
+      Object.defineProperties(event, { pointerId: { value: pointerId }, pointerType: { value: "touch" }, isPrimary: { value: true } });
+      input().dispatchEvent(event);
+    });
+    beforeEach(() => {
+      input().getBoundingClientRect = () => ({ left: 100, width: 300, top: 0, height: 32, right: 400, bottom: 32, x: 100, y: 0, toJSON() {} }) as DOMRect;
+    });
+
+    it("starts at the touched spot, follows the finger and commits once on release", async () => {
+      await at("pointerdown", 250); // middle of a 600 s set, far from the 10 s playhead
+      expect(input().value).toBe("300");
+      expect(host.querySelector("#dockCurrentTime")!.textContent).toBe("5:00");
+      await at("pointermove", 325);
+      await change(20); // a native thumb value cannot override the finger position
+      expect(input().value).toBe("450");
+      expect(onCommit).not.toHaveBeenCalled();
+      await at("pointerup", 325);
+      expect(onCommit.mock.calls).toEqual([[450]]);
+    });
+
+    it("treats a tap as a seek, clamps outside the track and ignores other pointers", async () => {
+      await at("pointerdown", 40); await at("pointermove", 380, 2); await at("pointerup", 40);
+      expect(onCommit.mock.calls).toEqual([[0]]);
+      await at("pointerdown", 999); await at("pointerup", 999);
+      expect(onCommit.mock.calls).toEqual([[0], [600]]);
+    });
+
+    it("a cancelled touch (vertical scroll) commits nothing", async () => {
+      await at("pointerdown", 250); await at("pointermove", 300); await pointer("pointercancel", "touch");
+      await at("pointerup", 300);
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(input().value).toBe("10");
+    });
+  });
 });

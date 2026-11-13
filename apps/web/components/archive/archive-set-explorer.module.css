@@ -2351,6 +2351,8 @@
   margin: 0;
   opacity: 0;
   cursor: pointer;
+  /* Horizontal drags scrub; a vertical swipe still scrolls (and cancels). */
+  touch-action: pan-y;
 }
 
 .root :global(.set-seek-input:disabled) {
