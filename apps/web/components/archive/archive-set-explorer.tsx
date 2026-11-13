@@ -30,6 +30,7 @@ import {
 } from "@/lib/archive/listen-progress";
 import { buildSetSpotifyExportCounts } from "@/lib/archive/spotify-export";
 import { selectPrimaryTrackLink } from "@/lib/archive/track-links";
+import { buildSkipTargets, nextSkipTarget, previousSkipTarget } from "@/lib/archive/skip-targets";
 import type {
   ArchiveConfidence,
   ArchiveJourneyPoint,
@@ -1154,6 +1155,7 @@ export function ArchiveSetExplorer({
   const visibleTrackIds = new Set(confidenceFilteredTracks.map((track) => track.idx));
   const journeyView = buildJourneyViewModel(detail.journeyPoints, activeMetrics, detail.duration);
   const activeTrack = model.tracks.find((track) => track.idx === activeIdx) ?? null;
+  const skipTargets = useMemo(() => buildSkipTargets(model.tracks), [model.tracks]);
   const dockTrack = activeTrack ?? model.tracks[0] ?? null;
   const showDock =
     (activeSource.kind === "youtube" || activeSource.kind === "soundcloud" || activeSource.kind === "native-audio") &&
@@ -2164,28 +2166,20 @@ export function ArchiveSetExplorer({
   };
 
   const nextTrack = () => {
-    const next = model.tracks.find((track) => track.start > currentTimeRef.current + 1);
-    if (next) {
-      jumpTo(next.start, false, true);
+    const next = nextSkipTarget(skipTargets, currentTimeRef.current);
+    if (next != null) {
+      jumpTo(next, false, true);
     }
   };
 
   const previousTrack = () => {
     const now = Date.now();
-    const sorted = [...model.tracks].sort((left, right) => left.start - right.start);
-    const current = [...sorted].reverse().find((track) => track.start <= currentTimeRef.current);
-
-    if (current && now - prevTrackPressTsRef.current < 2000) {
-      const previous = [...sorted].reverse().find((track) => track.start < current.start);
-      if (previous) {
-        jumpTo(previous.start, false, true);
-      }
-    } else if (current) {
-      jumpTo(current.start, false, true);
-    } else {
-      jumpTo(0, false, true);
-    }
-
+    const target = previousSkipTarget(
+      skipTargets,
+      currentTimeRef.current,
+      now - prevTrackPressTsRef.current < 2000,
+    );
+    jumpTo(target, false, true);
     prevTrackPressTsRef.current = now;
   };
 
@@ -3395,6 +3389,30 @@ export function ArchiveSetExplorer({
                                 </div>
                                 <div className="track-meta">
                                   <span className={joinClasses("pill", "confidence-pill", confidenceClass)}>{track.conf}</span>
+                                  {track.isUnknownTrack && (track.provisionalStarts?.length ?? 0) > 0 ? (
+                                    <span
+                                      className="provisional-parts"
+                                      title="Estimated from changes in the audio, not identified. Starts are approximate."
+                                    >
+                                      <span className="pill provisional-pill">
+                                        ~{(track.provisionalStarts?.length ?? 0) + 1} tracks (estimated)
+                                      </span>
+                                      {(track.provisionalStarts ?? []).map((value) => (
+                                        <button
+                                          aria-label={`Jump to estimated track start ${formatDuration(value)}`}
+                                          className="provisional-start"
+                                          key={value}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            jumpTo(value, ytEmbedBlocked && activeSource.kind === "youtube", true);
+                                          }}
+                                          type="button"
+                                        >
+                                          ~{formatDuration(value)}
+                                        </button>
+                                      ))}
+                                    </span>
+                                  ) : null}
                               </div>
                             </div>
                             <div className="track-actions">

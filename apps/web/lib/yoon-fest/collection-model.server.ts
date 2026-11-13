@@ -20,6 +20,8 @@ const archiveTrack = z.object({
   linkStatus: z.object({ spotify: z.enum(["confirmed", "legacy", "unverified"]), youtube: z.enum(["confirmed", "legacy", "unverified"]), discogs: z.enum(["confirmed", "legacy", "unverified"]) }),
   detectionCount: z.number(), clusterDensity: z.number().nullable(), clusterSpan: z.number().nullable(),
   sourceDeepLink: z.null(),
+  // N04 estimated starts inside Unknown entries: plain numbers, no evidence.
+  provisionalStarts: z.array(z.number().finite().nonnegative()).optional(),
 }).strict();
 const track = z.object({
   position: z.number().int().positive(), artist: z.string().min(1), title: z.string().min(1),

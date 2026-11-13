@@ -34,6 +34,12 @@ export type ArchiveSetTrack = {
   clusterDensity: number | null;
   clusterSpan: number | null;
   sourceDeepLink: string | null;
+  /**
+   * Estimated starts of further unidentified tracks inside an Unknown entry
+   * (N04). Derived from audio analysis, never from recognition, and always
+   * provisional: they are skip targets, not identified tracks.
+   */
+  provisionalStarts?: number[];
 };
 
 export type ArchiveJourneyPoint = {

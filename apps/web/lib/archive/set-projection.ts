@@ -10,6 +10,42 @@ const formatArchiveGenre = (value: string) =>
     .trim()
     .toLowerCase()
     .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+const MIN_PROVISIONAL_GAP_SECONDS = 30;
+
+/**
+ * Read provisional in-span boundaries (N04) from entry metadata. Only values
+ * strictly inside the entry, at least 30s from its edges and from each other,
+ * survive; anything malformed is dropped rather than trusted.
+ */
+export const readProvisionalStarts = (
+  metadata: Record<string, unknown>,
+  start: number,
+  end: number | null,
+): number[] => {
+  const raw = metadata.provisional_boundaries;
+  if (!Array.isArray(raw) || end == null || !(end > start)) return [];
+  const values = raw
+    .map((item) => {
+      if (typeof item === "number") return item;
+      const record = asRecord(item);
+      return getNumber(record.start_seconds);
+    })
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    .map((value) => Math.round(value))
+    .filter(
+      (value) =>
+        value >= start + MIN_PROVISIONAL_GAP_SECONDS && value <= end - MIN_PROVISIONAL_GAP_SECONDS,
+    )
+    .sort((left, right) => left - right);
+  const result: number[] = [];
+  for (const value of values) {
+    if (result.length === 0 || value - result[result.length - 1] >= MIN_PROVISIONAL_GAP_SECONDS) {
+      result.push(value);
+    }
+  }
+  return result;
+};
+
 export const mapSetTrack = (row: {
   position: number;
   displayArtist: string;
@@ -106,6 +142,7 @@ export const mapSetTrack = (row: {
     clusterDensity: getNumber(row.clusterDensity),
     clusterSpan: row.clusterSpan,
     sourceDeepLink: row.sourceDeepLink ?? getString(merged.source_deep_link),
+    provisionalStarts: readProvisionalStarts(entryMetadata, row.startTimeSeconds, row.endTimeSeconds),
   };
 };
 
