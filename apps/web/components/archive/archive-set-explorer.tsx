@@ -2949,7 +2949,7 @@ export function ArchiveSetExplorer({
                       onSeek={commitScrub}
                       title={detail.title}
                       artworkUrl={dockTrack?.albumArt ?? model.heroImageUrl ?? null}
-                      nowPlaying={activeTrack ? { title: activeTrack.title, artist: activeTrack.artist } : null}
+                      nowPlaying={dockTrack ? { title: dockTrack.title, artist: dockTrack.artist } : null}
                     />
                   </div>
                 ) : null}

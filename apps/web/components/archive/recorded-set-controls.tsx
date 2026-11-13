@@ -84,6 +84,9 @@ export function RecordedSetControls({
                 {nowPlaying.artist} — {nowPlaying.title}
               </span>
             ) : null}
+            <span className="recorded-set-limits">
+              Plays in this tab only. Lock-screen and background controls depend on your browser and may not work.
+            </span>
           </div>
           <SetSeekControl
             className="dock-progress recorded-set-progress"
@@ -138,9 +141,6 @@ export function RecordedSetControls({
       ) : null}
       <div className="recorded-set-status">
         {error ? <p role="alert">{error}</p> : <p role="status" aria-live="polite">{status}</p>}
-        <p className="recorded-set-limits">
-          Plays in this tab only. Lock-screen and background controls depend on your browser and may not work.
-        </p>
       </div>
     </div>
   );
