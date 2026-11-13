@@ -3,6 +3,7 @@
 
 import { createNativeAudioController, type NativeAudioSegment } from "@/lib/yoon-fest/playback";
 import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { ArchiveDeleteControl, SubmittedByYouBadge } from "@/components/archive/archive-delete-control";
 import { buildArtistHref } from "@/components/archive/archive-hrefs";
@@ -816,7 +817,7 @@ const loadScript = (src: string) =>
   });
 
 const buildSourceLinkAt = (source: SetSourceModel, seconds: number) => {
-  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
 
   if (source.kind === "youtube") {
     if (source.embedId) {
@@ -1527,6 +1528,32 @@ export function ArchiveSetExplorer({
     }
     ytPlayerRef.current = null;
     scWidgetRef.current = null;
+  };
+
+  // N06: the embedded player cannot keep playing with the screen locked, and
+  // YouTube's developer policy forbids background players. Hand the listener
+  // over to youtube.com/the YouTube app at the live position instead (the app
+  // plays in the background for Premium members) and pause the page first.
+  const readYouTubeHandoffSeconds = () => {
+    if (
+      Date.now() >= seekLockUntilRef.current &&
+      playerReadyRef.current &&
+      ytPlayerRef.current?.getCurrentTime
+    ) {
+      const seconds = ytPlayerRef.current.getCurrentTime();
+      if (Number.isFinite(seconds) && seconds >= 0) return seconds;
+    }
+    return currentTimeRef.current;
+  };
+
+  const openInYouTube = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (activeSource.kind !== "youtube") return;
+    const seconds = readYouTubeHandoffSeconds();
+    const link = buildSourceLinkAt(activeSource, seconds);
+    // Update href before the default navigation so iOS can route the tap to
+    // the YouTube app as a universal link.
+    if (link) event.currentTarget.href = link;
+    pausePlayer("user");
   };
 
   const showYouTubeBlockedFallback = () => {
@@ -2974,6 +3001,12 @@ export function ArchiveSetExplorer({
                     Embedded player is prevented by the video uploader.
                   </div>
                 ) : null}
+                {activeSource.kind === "youtube" && !ytEmbedBlocked && !privateContext ? (
+                  <div className="youtube-background-note">
+                    YouTube stops in this page when your screen locks. To keep listening, tap Open in YouTube: the
+                    YouTube app plays in the background with YouTube Premium.
+                  </div>
+                ) : null}
                 {scEmbedBlocked ? (
                   <div className="source-player-error-note">
                     SoundCloud embedded player requires validation in this browser. Use Open Source to continue.
@@ -3097,7 +3130,19 @@ export function ArchiveSetExplorer({
                     ))}
                   </div>
                 ) : null}
-                {activeSource.sourceUrl && !privateContext ? (
+                {activeSource.kind === "youtube" && !privateContext ? (
+                  <a
+                    aria-label={`Open in YouTube at ${formatDuration(currentTime)}`}
+                    className="source-player-open is-youtube-handoff"
+                    href={buildSourceLinkAt(activeSource, currentTime)}
+                    onClick={openInYouTube}
+                    rel="noopener"
+                    target="_blank"
+                    title="Pauses here and continues in YouTube from the same spot. The YouTube app keeps playing with the screen locked for YouTube Premium members."
+                  >
+                    Open in YouTube
+                  </a>
+                ) : activeSource.sourceUrl && !privateContext ? (
                   <a className="source-player-open" href={activeSource.sourceUrl} rel="noopener" target="_blank">
                     Open Source
                   </a>
