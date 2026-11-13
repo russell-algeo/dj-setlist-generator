@@ -165,6 +165,23 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       return position();
     },
     ready() { awaitingMetadata = false; if (pending) seek(pending.seconds, pending.autoplay); },
+    // Provider media URLs behind the same-origin route are short-lived and a
+    // network error or a dead stall is terminal for the element. Re-request the
+    // active source through the route and restore the set position and the
+    // current play intent. A pause stays paused; nothing plays past the end.
+    recover() {
+      if (disposed) return false;
+      const target = position();
+      const request = ++version;
+      playRequested = playRequested && target < duration;
+      pending = { seconds: target, autoplay: playRequested };
+      awaitingMetadata = true;
+      audio.pause();
+      audio.src = segments[activeIndex]!.src;
+      audio.load();
+      if (playRequested) startPlayback(request);
+      return true;
+    },
     pause,
     dispose() { disposed = true; version += 1; playRequested = false; pending = null; audio.pause(); },
   };

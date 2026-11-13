@@ -185,6 +185,12 @@ const TOOLTIP_OFFSET = 14;
 const PLAYBACK_STORAGE_PREFIX = "set-signal:playback:v1:";
 const PLAYBACK_SAVE_INTERVAL_MS = 5000;
 const PLAYBACK_SAVE_DELTA_SECONDS = 3;
+// Private recordings: bounded automatic reconnects before asking for a reload.
+const NATIVE_RECOVERY_ATTEMPTS = 2;
+const NATIVE_RECOVERY_WINDOW_MS = 60_000;
+const NATIVE_STALL_RECOVERY_MS = 15_000;
+// SoundCloud may deliver queued progress from the muted warmup after it ends.
+const SOUNDCLOUD_WARMUP_DRAIN_MS = 1_500;
 const LISTEN_PROGRESS_STORAGE_PREFIX = "set-signal:listen-progress-cache:v1:";
 const LISTEN_PROGRESS_SYNC_INTERVAL_MS = 5000;
 const LISTEN_PROGRESS_MIN_INTERVAL_SECONDS = 0.75;
@@ -849,6 +855,7 @@ type PlayerWindow = Window &
         },
       ) => YouTubePlayer;
       PlayerState?: {
+        BUFFERING?: number;
         CUED?: number;
         ENDED?: number;
         PAUSED?: number;
@@ -968,6 +975,9 @@ export function ArchiveSetExplorer({
   const heroTrackRef = useRef<HTMLDivElement | null>(null);
   const nativeAudioRef = useRef<HTMLAudioElement | null>(null);
   const nativeControllerRef = useRef<ReturnType<typeof createNativeAudioController> | null>(null);
+  const nativeRecoveryRef = useRef({ windowStart: 0, attempts: 0 });
+  const nativeStallTimerRef = useRef<number | null>(null);
+  const nativeStallMarkRef = useRef<number | null>(null);
   const youtubeHostRef = useRef<HTMLDivElement | null>(null);
   const soundCloudFrameRef = useRef<HTMLIFrameElement | null>(null);
   const currentTimeRef = useRef(currentTime);
@@ -997,6 +1007,7 @@ export function ArchiveSetExplorer({
   const soundCloudWarmupTimerRef = useRef<number | null>(null);
   const soundCloudWarmupActiveRef = useRef(false);
   const soundCloudWarmupFinishingRef = useRef(false);
+  const soundCloudWarmupEndedAtRef = useRef(0);
   const heroRailRafRef = useRef<number | null>(null);
   const heroRailLastTsRef = useRef(0);
   const prevTrackPressTsRef = useRef(0);
@@ -1615,7 +1626,10 @@ export function ArchiveSetExplorer({
     ) {
       const playerWindow = window as PlayerWindow;
       const state = ytPlayerRef.current.getPlayerState();
-      const playing = state === playerWindow.YT?.PlayerState?.PLAYING;
+      // Buffering mid-play is still playing: flipping the dock to Play here made
+      // the next press restart playback instead of pausing it.
+      const playing = state === playerWindow.YT?.PlayerState?.PLAYING ||
+        (state === playerWindow.YT?.PlayerState?.BUFFERING && isPlayingRef.current);
       const paused =
         state === playerWindow.YT?.PlayerState?.PAUSED ||
         state === playerWindow.YT?.PlayerState?.ENDED ||
@@ -1703,6 +1717,7 @@ export function ArchiveSetExplorer({
     clearSoundCloudWarmupTimer();
     soundCloudWarmupActiveRef.current = false;
     soundCloudWarmupFinishingRef.current = false;
+    soundCloudWarmupEndedAtRef.current = Date.now();
     widget.setVolume?.(100);
     playbackStartedRef.current = false;
     setIsPlaying(false);
@@ -1740,6 +1755,49 @@ export function ArchiveSetExplorer({
       widget.pause?.();
       restoreSoundCloudAfterWarmup(widget, onDone, isCurrent);
     }, 5200);
+  };
+
+  const clearNativeStallWatch = () => {
+    if (nativeStallTimerRef.current != null) window.clearTimeout(nativeStallTimerRef.current);
+    nativeStallTimerRef.current = null;
+    nativeStallMarkRef.current = null;
+  };
+
+  // A private recording reaches the provider through a same-origin redirect to
+  // a short-lived media URL. After a long pause, a network drop or a dead
+  // stall the element cannot continue on its own. Re-request the route at the
+  // current set position a bounded number of times before reporting failure.
+  const recoverNativeAudio = (reason: string) => {
+    const controller = nativeControllerRef.current;
+    if (!controller) return false;
+    const now = Date.now();
+    const budget = nativeRecoveryRef.current;
+    if (now - budget.windowStart > NATIVE_RECOVERY_WINDOW_MS) {
+      budget.windowStart = now;
+      budget.attempts = 0;
+    }
+    if (budget.attempts >= NATIVE_RECOVERY_ATTEMPTS) return false;
+    budget.attempts += 1;
+    traceAudioTiming(`recover-${reason}`, "native-audio");
+    clearNativeStallWatch();
+    setNativeAudioError(null);
+    setNativeAudioBuffering(true);
+    return controller.recover();
+  };
+
+  const armNativeStallWatch = () => {
+    const audio = nativeAudioRef.current;
+    if (!audio || !nativeControllerRef.current?.isPlayRequested() || nativeStallTimerRef.current != null) return;
+    nativeStallMarkRef.current = audio.currentTime;
+    nativeStallTimerRef.current = window.setTimeout(() => {
+      nativeStallTimerRef.current = null;
+      const current = nativeAudioRef.current;
+      const mark = nativeStallMarkRef.current;
+      nativeStallMarkRef.current = null;
+      if (!current || current !== audio || !nativeControllerRef.current?.isPlayRequested()) return;
+      if (mark != null && Math.abs(current.currentTime - mark) > 0.25) return;
+      recoverNativeAudio("stall");
+    }, NATIVE_STALL_RECOVERY_MS);
   };
 
   const startPlayerPoll = () => {
@@ -2024,7 +2082,8 @@ export function ArchiveSetExplorer({
     ) {
       const playerWindow = window as PlayerWindow;
       const state = ytPlayerRef.current.getPlayerState();
-      if (state === playerWindow.YT?.PlayerState?.PLAYING) {
+      if (state === playerWindow.YT?.PlayerState?.PLAYING ||
+        (state === playerWindow.YT?.PlayerState?.BUFFERING && isPlayingRef.current)) {
         pausePlayer();
         return;
       }
@@ -2262,6 +2321,8 @@ export function ArchiveSetExplorer({
         setNativeAudioError(message);
       }, privateContext?.audio.segments);
       nativeControllerRef.current.seek(0, false);
+      nativeRecoveryRef.current = { windowStart: 0, attempts: 0 };
+      clearNativeStallWatch();
       if (audio.readyState >= 1) setPlayerReadyState(true);
     }
 
@@ -2417,10 +2478,22 @@ export function ArchiveSetExplorer({
             }
             scheduleSoundCloudControlsReady();
           });
-          bindCurrent(playerWindow.SC.Widget.Events.PLAY, () => {
-            if (soundCloudWarmupActiveRef.current) {
-              return;
-            }
+          // Progress queued by the muted warmup can arrive just after it ends.
+          // Without an app play request, trust only the widget's own state;
+          // otherwise the first Play press is read as Pause.
+          const deferIfWarmupResidue = (handler: () => void) => {
+            if (awaitingPlaybackProgressRef.current ||
+              Date.now() - soundCloudWarmupEndedAtRef.current > SOUNDCLOUD_WARMUP_DRAIN_MS) return false;
+            if (!widget.isPaused) return true;
+            widget.isPaused((paused) => {
+              if (isCurrent() && !paused) {
+                soundCloudWarmupEndedAtRef.current = 0;
+                handler();
+              }
+            });
+            return true;
+          };
+          const handleSoundCloudPlay = () => {
             traceAudioTiming("playing-event", "soundcloud");
             if (audioFocus.guardSetPlayback()) return;
             if (!scrubPausePendingRef.current) scrubPlaybackIntentRef.current = true;
@@ -2429,6 +2502,13 @@ export function ArchiveSetExplorer({
             setIsPlaying(true);
             startPlayerPoll();
             pollPlayerTime();
+          };
+          bindCurrent(playerWindow.SC.Widget.Events.PLAY, () => {
+            if (soundCloudWarmupActiveRef.current) {
+              return;
+            }
+            if (deferIfWarmupResidue(handleSoundCloudPlay)) return;
+            handleSoundCloudPlay();
           });
           bindCurrent(playerWindow.SC.Widget.Events.PAUSE, () => {
             if (soundCloudWarmupActiveRef.current) {
@@ -2464,6 +2544,15 @@ export function ArchiveSetExplorer({
                 finishSoundCloudWarmup(widget);
                 return;
               }
+              if (deferIfWarmupResidue(() => {
+                if (!playbackStartedRef.current) {
+                  playbackStartedRef.current = true;
+                  publishNowPlayingMetadata();
+                }
+                setIsPlaying(true);
+                startPlayerPoll();
+                pollPlayerTime();
+              })) return;
               if (awaitingPlaybackProgressRef.current) {
                 traceAudioTiming("first-progress-event", "soundcloud");
                 awaitingPlaybackProgressRef.current = false;
@@ -2492,6 +2581,7 @@ export function ArchiveSetExplorer({
 
     return () => {
       cancelled = true;
+      clearNativeStallWatch();
       destroyPlayers(false);
       youtubeHost?.replaceChildren();
     };
@@ -2809,16 +2899,18 @@ export function ArchiveSetExplorer({
                       }}
                       onPlaying={(event) => {
                         traceAudioTiming("playing-event", "native-audio");
+                        clearNativeStallWatch();
                         if (event.currentTarget.paused || !nativeControllerRef.current?.isPlayRequested()) return;
                         if (audioFocus.guardSetPlayback()) return;
                         setNativeAudioBuffering(false); setIsPlaying(true);
                       }}
-                      onWaiting={() => { traceAudioTiming("waiting-event", "native-audio"); setNativeAudioBuffering(true); }}
-                      onStalled={() => { if (nativeControllerRef.current?.isPlayRequested()) setNativeAudioBuffering(true); }}
+                      onWaiting={() => { traceAudioTiming("waiting-event", "native-audio"); setNativeAudioBuffering(true); armNativeStallWatch(); }}
+                      onStalled={() => { if (nativeControllerRef.current?.isPlayRequested()) { setNativeAudioBuffering(true); armNativeStallWatch(); } }}
                       onLoadStart={() => { setPlayerReadyState(false); setNativeAudioBuffering(true); }}
                       onCanPlay={() => setNativeAudioBuffering(false)}
                       onPause={() => {
                         void nativeControllerRef.current?.observePause(() => {
+                          clearNativeStallWatch();
                           audioFocus.setPaused();
                           setNativeAudioBuffering(false);
                           setIsPlaying(false);
@@ -2834,7 +2926,10 @@ export function ArchiveSetExplorer({
                       onTimeUpdate={(event) => {
                         if (event.currentTarget === nativeAudioRef.current) updateFromPolledTime(nativeControllerRef.current?.tick() ?? 0);
                       }}
-                      onError={() => {
+                      onError={(event) => {
+                        if (event.currentTarget !== nativeAudioRef.current) return;
+                        if (recoverNativeAudio("error")) return;
+                        clearNativeStallWatch();
                         nativeControllerRef.current?.pause();
                         setPlayerReadyState(false); setIsPlaying(false);
                         setNativeAudioUnavailable(true); setNativeAudioBuffering(false);

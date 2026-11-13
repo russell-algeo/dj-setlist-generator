@@ -171,8 +171,9 @@ describe("retired SoundCloud callback generations", () => {
   it("preserves replacement buffering intent when an old PAUSE arrives", async () => {
     const old = latest; await toYouTube();
     await act(async () => { ytState = 3; ytEvents.onStateChange({ data: 3 }); vi.advanceTimersByTime(400); });
-    expect(playing()).toBe(false);
-    await emit(old, "PAUSE"); await seek(100);
+    // Mid-play buffering keeps the playing state (N05); an old PAUSE must not clear it.
+    expect(playing()).toBe(true);
+    await emit(old, "PAUSE"); expect(playing()).toBe(true); await seek(100);
     expect(yt.seekTo.mock.calls).toEqual([[100, true]]);
     expect(yt.playVideo).toHaveBeenCalledOnce(); expect(yt.pauseVideo).not.toHaveBeenCalled();
   });

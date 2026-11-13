@@ -208,4 +208,57 @@ describe("recording browser-event integration", () => {
     expect(audio.currentTime).toBe(4000); expect(paused).toBe(true);
   });
 
+
+  it("reconnects a playing recording at the same position after a provider network error", async () => {
+    await click("Play set"); await scrub(14); await metadata();
+    await act(async () => { audio.currentTime = 25.5; emit("timeupdate"); });
+    const loads = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+    await act(async () => { emit("error"); });
+    expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(loads + 1);
+    expect(audio.getAttribute("src")).toBe("/synthetic-b");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    await metadata();
+    expect(audio.currentTime).toBe(25.5); expect(paused).toBe(false);
+    expect(button("Pause set")).not.toBeNull();
+  });
+
+  it("keeps a paused recording paused when it reconnects, then reports a persistent failure", async () => {
+    await scrub(6); await metadata();
+    await act(async () => { emit("error"); }); await metadata();
+    expect(audio.currentTime).toBe(3126); expect(paused).toBe(true);
+    await act(async () => { emit("error"); }); await metadata();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => { emit("error"); });
+    expect(container.textContent).toContain("The private recording is unavailable");
+  });
+
+  it("reconnects a playing recording whose stream stalls without progress", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await click("Play set");
+      await act(async () => { audio.currentTime = 3125; emit("timeupdate"); emit("waiting"); });
+      const loads = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+      await act(async () => { vi.advanceTimersByTime(14_000); });
+      expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(loads);
+      await act(async () => { vi.advanceTimersByTime(1_500); });
+      expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(loads + 1);
+      await metadata();
+      expect(audio.currentTime).toBe(3125); expect(paused).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not reconnect a stall that recovers or a paused recording", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await click("Play set");
+      await act(async () => { audio.currentTime = 3125; emit("waiting"); });
+      await act(async () => { audio.currentTime = 3126; emit("playing"); });
+      const loads = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+      await act(async () => { vi.advanceTimersByTime(30_000); });
+      await act(async () => { emit("waiting"); });
+      await click("Pause set");
+      await act(async () => { vi.advanceTimersByTime(30_000); });
+      expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(loads);
+    } finally { vi.useRealTimers(); }
+  });
 });

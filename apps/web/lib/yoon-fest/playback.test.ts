@@ -362,3 +362,27 @@ it("does not automatically replay an ended recording when the displayed clock wa
   controller.resume(); // A subsequent explicit Play may replay.
   expect(audio.play).toHaveBeenCalledOnce(); expect(audio.currentTime).toBe(0);
 });
+describe("native audio recovery after a dead provider URL", () => {
+  const make = () => ({ src: "/synthetic-a", load: vi.fn(), paused: true, currentTime: 0, readyState: 1, play: vi.fn().mockResolvedValue(undefined), pause: vi.fn() });
+  it("reloads the same-origin route and resumes at the set position while playing", () => {
+    const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn());
+    c.seek(7, true); audio.currentTime = 9.5; audio.play.mockClear();
+    expect(c.recover()).toBe(true);
+    expect(audio.load).toHaveBeenCalledOnce(); expect(audio.src).toBe("/synthetic-a");
+    expect(audio.play).toHaveBeenCalledOnce(); expect(c.isPending()).toBe(true); expect(c.position()).toBe(9.5);
+    c.ready(); expect(audio.currentTime).toBe(9.5); expect(c.isPlayRequested()).toBe(true);
+  });
+  it("keeps a paused recording paused and never plays past the end", () => {
+    const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn());
+    c.seek(4, false); audio.play.mockClear(); c.recover(); expect(audio.play).not.toHaveBeenCalled(); c.ready(); expect(audio.currentTime).toBe(4);
+    c.seek(20, true); audio.play.mockClear(); c.recover(); expect(audio.play).not.toHaveBeenCalled(); expect(c.isPlayRequested()).toBe(false);
+  });
+  it("reloads the active source window of a multi-file set", () => {
+    const audio = make();
+    const c = createNativeAudioController(audio, 20, vi.fn(), [{ src: "/part-0", startSeconds: 0, durationSeconds: 10 }, { src: "/part-1", startSeconds: 30, durationSeconds: 10 }]);
+    c.seek(14, true); audio.readyState = 1; c.ready(); expect(audio.currentTime).toBe(34);
+    audio.load.mockClear(); c.recover(); expect(audio.src).toBe("/part-1"); expect(audio.load).toHaveBeenCalledOnce();
+    c.ready(); expect(audio.currentTime).toBe(34); expect(c.position()).toBe(14);
+  });
+  it("does nothing once disposed", () => { const audio = make(); const c = createNativeAudioController(audio, 20, vi.fn()); c.dispose(); audio.load.mockClear(); expect(c.recover()).toBe(false); expect(audio.load).not.toHaveBeenCalled(); });
+});
