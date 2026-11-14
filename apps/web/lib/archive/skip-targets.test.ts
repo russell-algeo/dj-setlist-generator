@@ -28,6 +28,15 @@ describe("N04 skip targets", () => {
     expect(previousSkipTarget(targets, 0, true)).toBe(0);
   });
 
+  it("goes back a track when pressed within 3s of a start, however slowly", () => {
+    const targets = buildSkipTargets(tracks);
+    // A restart lands at 620; a second press 1-2s of playback later goes back.
+    expect(previousSkipTarget(targets, 620, false)).toBe(300);
+    expect(previousSkipTarget(targets, 622.5, false)).toBe(300);
+    expect(previousSkipTarget(targets, 623, false)).toBe(620);
+    expect(previousSkipTarget(targets, 1, false)).toBe(0);
+  });
+
   it("without provisional starts behaves like plain track starts", () => {
     const plain = buildSkipTargets([{ start: 0 }, { start: 300 }, { start: 1200 }]);
     expect(nextSkipTarget(plain, 310)).toBe(1200);

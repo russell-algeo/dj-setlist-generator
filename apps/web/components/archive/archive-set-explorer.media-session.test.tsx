@@ -129,15 +129,31 @@ describe("system media controls for recordings", () => {
     expect(audio.getAttribute("src")).toBe("/synthetic-b");
     await metadata();
     expect(audio.currentTime).toBe(24); expect(paused).toBe(false);
-    expect(session.metadata).toMatchObject({ title: "Closing Synthetic", artist: "Artist C",
-      album: "Synthetic DJ · Synthetic lock-screen set" });
+    expect(session.metadata).toMatchObject({ title: "Closing Synthetic – Artist C", artist: "Synthetic lock-screen set",
+      album: "Synthetic DJ" });
   });
 
   it("restarts the current track, then goes back a track on a quick second press", async () => {
+    let clock = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
     await press("play"); await press("seekto", { seekTime: 16 }); await metadata();
-    await tick(26);
+    clock += 2000; await tick(28); // past the post-seek lock, 4s into the track
     await press("previoustrack");
     expect(audio.currentTime).toBe(24);
+    await press("previoustrack");
+    expect(audio.getAttribute("src")).toBe("/synthetic-a");
+    await metadata();
+    expect(audio.currentTime).toBe(3128); expect(paused).toBe(false);
+  });
+
+  it("still goes back a track on a slow second press made early in the track", async () => {
+    let clock = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    await press("play"); await press("seekto", { seekTime: 16 }); await metadata();
+    clock += 2000; await tick(28);
+    await press("previoustrack");
+    expect(audio.currentTime).toBe(24);
+    clock += 6000; await tick(26); // 6s later on the wall clock, 2s into the track
     await press("previoustrack");
     expect(audio.getAttribute("src")).toBe("/synthetic-a");
     await metadata();
@@ -155,16 +171,29 @@ describe("system media controls for recordings", () => {
     expect(audio.currentTime).toBe(30);
   });
 
+  it("reports paused to the lock screen while a scrub target buffers, and ignores Play then", async () => {
+    await press("play");
+    expect(session.playbackState).toBe("playing");
+    await press("seekto", { seekTime: 16 });
+    expect(audio.getAttribute("src")).toBe("/synthetic-b");
+    expect(session.playbackState).toBe("paused");
+    const loads = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+    await press("play");
+    expect(vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length).toBe(loads);
+    await metadata(); await act(async () => { emit("playing"); });
+    expect(audio.currentTime).toBe(26); expect(session.playbackState).toBe("playing");
+  });
+
   it("publishes set-level position and track artwork", async () => {
     await press("play"); await tick(3125);
     expect(session.positions.at(-1)).toEqual({ duration: 20, playbackRate: 1, position: 5 });
-    expect(session.metadata).toMatchObject({ title: "Opening Synthetic", artist: "Artist A",
+    expect(session.metadata).toMatchObject({ title: "Opening Synthetic – Artist A", artist: "Synthetic lock-screen set",
       artwork: [{ src: "/art-a.png", sizes: "512x512", type: "image/png" }] });
   });
 
-  it("falls back to the set title for unknown tracks", async () => {
+  it("labels unknown tracks and falls back to set artwork", async () => {
     await press("seekto", { seekTime: 9 });
-    expect(session.metadata).toMatchObject({ title: "Synthetic lock-screen set", artist: "Synthetic DJ",
+    expect(session.metadata).toMatchObject({ title: "Unknown track", artist: "Synthetic lock-screen set",
       artwork: [{ src: "/synthetic-hero.jpg", sizes: "512x512", type: "image/jpeg" }] });
   });
 

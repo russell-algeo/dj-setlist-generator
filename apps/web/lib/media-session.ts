@@ -74,16 +74,12 @@ export function buildNowPlayingMetadata({ setTitle, setArtist, track, artworkUrl
   const artwork: MediaImage[] = artworkUrl
     ? [{ src: artworkUrl, sizes: "512x512", ...(imageType(artworkUrl) ? { type: imageType(artworkUrl) } : {}) }]
     : [];
-  // Lock screens show title and artist most prominently: the current track
-  // there, with the DJ and set kept in the album line.
-  return knownTrack
-    ? {
-      title: knownTrack.title,
-      artist: knownTrack.artist || setArtist,
-      album: `${setArtist} · ${setTitle}`,
-      artwork,
-    }
-    : { title: setTitle, artist: setArtist, album: "Set Signal Archive", artwork };
+  // Lock screens show title and artist most prominently. The set stays the
+  // "artist" line; the title says which track is playing within it.
+  const trackLine = knownTrack
+    ? (knownTrack.artist.trim() ? `${knownTrack.title} – ${knownTrack.artist}` : knownTrack.title)
+    : track ? "Unknown track" : setTitle;
+  return { title: trackLine, artist: setTitle, album: setArtist, artwork };
 }
 
 export function publishNowPlaying(input: NowPlayingInput): void {

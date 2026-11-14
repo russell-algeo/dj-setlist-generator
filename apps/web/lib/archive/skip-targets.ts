@@ -27,20 +27,30 @@ export const nextSkipTarget = (targets: number[], currentTime: number): number |
   targets.find((value) => value > currentTime + 1) ?? null;
 
 /**
+ * Seconds into a segment after which Previous restarts it rather than going
+ * back one. Matches the feel of Spotify and Apple Music: a press early in a
+ * track (including a second press shortly after a restart) goes back a track.
+ */
+export const PREVIOUS_RESTART_THRESHOLD_SECONDS = 3;
+
+/**
  * Previous-press behaviour: restart the current segment, or go to the one
- * before it when pressed again within the double-press window.
+ * before it when the playhead is still near its start (position-based, so a
+ * slower second press or a buffering restart still goes back). `goBack`
+ * forces going back, for a repeat press whose restart has not landed yet.
  */
 export const previousSkipTarget = (
   targets: number[],
   currentTime: number,
-  isDoublePress: boolean,
+  goBack = false,
 ): number => {
   let currentIndex = -1;
   for (let index = 0; index < targets.length; index += 1) {
     if (targets[index] <= currentTime) currentIndex = index;
   }
   if (currentIndex < 0) return 0;
-  if (isDoublePress && currentIndex > 0) return targets[currentIndex - 1];
+  const nearStart = currentTime - targets[currentIndex] < PREVIOUS_RESTART_THRESHOLD_SECONDS;
+  if ((goBack || nearStart) && currentIndex > 0) return targets[currentIndex - 1];
   return targets[currentIndex];
 };
 
