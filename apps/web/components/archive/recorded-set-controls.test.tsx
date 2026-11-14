@@ -65,17 +65,24 @@ describe("set-relative recording controls", () => {
     expect(input(RecordedSetControls({ ...base, unavailable: true }))!.props.disabled).toBe(true);
   });
 
-  it("looks like an integrated source card without exposing the private source", () => {
+  it("looks like a player window without badges, notes or the private source", () => {
     const html = renderToStaticMarkup(<RecordedSetControls {...base} title="Jackson Algeo" artworkUrl="/art.jpg"
       nowPlaying={{ title: "Track", artist: "Artist" }} />);
-    expect(html).toContain("Private recording");
+    expect(html).toContain("is-widget");
     expect(html).toContain("Jackson Algeo");
-    expect(html).toContain("Artist — Track");
+    expect(html).toContain("Track — Artist");
     expect(html).toContain('src="/art.jpg"');
     expect(html).toContain("dock-progress recorded-set-progress");
     expect(html).toContain("<svg");
     expect(html).not.toMatch(/dropbox|https?:/i);
-    expect(html).toContain("Lock-screen and background controls depend on your browser");
+    expect(html).not.toContain("Private recording");
+    expect(html).not.toContain("Lock-screen");
+  });
+
+  it.each(["video", "artwork"] as const)("supports the %s window layout", (variant) => {
+    const html = renderToStaticMarkup(<RecordedSetControls {...base} variant={variant} artworkUrl="/art.jpg" />);
+    expect(html).toContain(`is-${variant}`);
+    expect(html.match(/aria-label="Play set"/g)).toHaveLength(1);
   });
 
   it("renders partial coverage notes and in-range gap markers on the set clock", () => {

@@ -2933,7 +2933,7 @@ export function ArchiveSetExplorer({
                       onTogglePlay={togglePlay}
                       onSeek={commitScrub}
                       title={detail.title}
-                      artworkUrl={dockTrack?.albumArt ?? model.heroImageUrl ?? null}
+                      artworkUrl={model.heroImageUrl ?? null}
                       nowPlaying={dockTrack ? { title: dockTrack.title, artist: dockTrack.artist } : null}
                       coverage={privateContext?.coverage ?? null}
                     />

@@ -2133,31 +2133,33 @@
 }
 
 /* Private recordings share the existing set clock, not the source file clock.
-   The card follows the provider-embed footprint and the dock's lime controls. */
+   The window follows the SoundCloud/YouTube frames used on ordinary sets. */
+.root :global(.source-player-frame.is-native-audio:has(.recorded-set-controls)) {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
 .root :global(.recorded-set-controls) {
-  padding: clamp(12px, 3vw, 20px);
   min-width: 0;
 }
 
-.root :global(.recorded-set-card) {
-  display: grid;
-  grid-template-columns: clamp(64px, 14vw, 118px) minmax(0, 1fr);
-  gap: clamp(12px, 2.5vw, 20px);
-  align-items: center;
-}
-
-.root :global(.recorded-set-art) {
-  aspect-ratio: 1;
-  border: 1px solid var(--line);
-  background: #141414;
+.root :global(.recorded-set-window) {
+  position: relative;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
-  font-size: 22px;
+  border: 1px solid var(--line);
+  background: #090909;
+  color: var(--ink);
 }
 
+.root :global(.recorded-set-backdrop) {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.root :global(.recorded-set-backdrop img),
 .root :global(.recorded-set-art img) {
   width: 100%;
   height: 100%;
@@ -2165,34 +2167,39 @@
   display: block;
 }
 
+.root :global(.recorded-set-art) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #141414;
+  color: var(--muted);
+  font-size: 28px;
+}
+
 .root :global(.recorded-set-body) {
+  min-width: 0;
+}
+
+.root :global(.recorded-set-head) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
 }
 
 .root :global(.recorded-set-meta) {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
-  margin-bottom: 8px;
-}
-
-.root :global(.recorded-set-badge) {
-  align-self: flex-start;
-  padding: 2px 6px;
-  border: 1px solid rgb(216 255 90 / 45%);
-  border-radius: var(--radius);
-  color: var(--lime);
-  font-family: var(--font-mono), monospace;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .root :global(.recorded-set-title) {
   color: var(--ink);
   font-size: 15px;
   font-weight: 700;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2206,63 +2213,88 @@
   white-space: nowrap;
 }
 
-.root :global(.recorded-set-controls-row) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
 .root :global(.recorded-set-play) {
-  min-width: 96px;
-  min-height: 48px;
+  flex: none;
+  width: 52px;
+  height: 52px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 10px 16px;
-  border: 1px solid var(--lime);
-  border-radius: var(--radius);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
   background: var(--lime);
   color: #0c1207;
-  font: inherit;
-  font-weight: 800;
   cursor: pointer;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 35%);
 }
 
-.root :global(.recorded-set-play.is-playing) {
-  background: #101510;
-  color: var(--lime);
+.root :global(.recorded-set-play svg) {
+  width: 20px;
+  height: 20px;
+}
+
+.root :global(.recorded-set-play.is-waiting) {
+  animation: recorded-set-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recorded-set-pulse {
+  50% { opacity: 0.6; }
+}
+
+.root :global(.recorded-set-play:focus-visible) {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+}
+
+.root :global(.recorded-set-play:disabled) {
+  background: rgb(216 255 90 / 25%);
+  color: rgb(12 18 7 / 70%);
+  cursor: not-allowed;
 }
 
 .root :global(.recorded-set-time) {
-  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--muted);
   font-family: var(--font-mono), monospace;
-  font-size: 13px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
-/* Same thin filled timeline as the dock, with a 48px invisible hit target. */
-.root :global(.recorded-set-body .set-seek-timeline) {
-  height: 10px;
-  margin: 19px 0;
+.root :global(.recorded-set-wait) {
+  color: var(--lime);
 }
 
-.root :global(.recorded-set-body .set-seek-input) {
-  top: -19px;
-  height: 48px;
-}
-
-/* Gap markers sit on top of the timeline bar and never take pointer input. */
-.root :global(.recorded-set-gaps) {
+.root :global(.recorded-set-track) {
   position: relative;
+}
+
+/* Same thin filled timeline as the dock, with a 44px invisible hit target. */
+.root :global(.recorded-set-track .set-seek-timeline) {
+  height: 6px;
+}
+
+.root :global(.recorded-set-track .dock-progress) {
+  height: 6px;
+  border: 0;
+  background: rgb(255 255 255 / 18%);
+}
+
+.root :global(.recorded-set-track .set-seek-input) {
+  top: -19px;
+  height: 44px;
+}
+
+.root :global(.recorded-set-gaps) {
+  position: absolute;
   z-index: 2;
-  height: 14px;
-  margin-top: -31px;
-  margin-bottom: 17px;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 12px;
   pointer-events: none;
 }
 
@@ -2270,9 +2302,189 @@
   position: absolute;
   top: 0;
   width: 3px;
-  height: 14px;
+  height: 12px;
   margin-left: -1.5px;
   background: var(--violet);
+}
+
+/* Widget: the SoundCloud embed footprint (art left, play beside the title). */
+.root :global(.recorded-set-controls.is-widget .recorded-set-window) {
+  display: grid;
+  grid-template-columns: 166px minmax(0, 1fr);
+  height: 166px;
+}
+
+.root :global(.recorded-set-controls.is-widget .recorded-set-body) {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px 18px 18px;
+}
+
+/* Video: the YouTube frame (16:9, art centered, big centered play). */
+.root :global(.recorded-set-controls.is-video .recorded-set-window) {
+  aspect-ratio: 16 / 9;
+  max-height: 58vh;
+  margin: 0 auto;
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-backdrop img) {
+  filter: blur(28px) brightness(0.45);
+  transform: scale(1.2);
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-art) {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: 46%;
+  max-width: 300px;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 55%);
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-center) {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-center .recorded-set-play) {
+  width: 68px;
+  height: 68px;
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-center .recorded-set-play svg) {
+  width: 26px;
+  height: 26px;
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-center .recorded-set-play.is-playing) {
+  opacity: 0;
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-window:hover .recorded-set-play.is-playing),
+.root :global(.recorded-set-controls.is-video .recorded-set-play.is-playing:focus-visible) {
+  opacity: 1;
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-body),
+.root :global(.recorded-set-controls.is-artwork .recorded-set-body) {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 40px 16px 14px;
+  background: linear-gradient(transparent, rgb(0 0 0 / 82%));
+}
+
+/* Artwork: the cover fills the window, controls sit on the lower edge. */
+.root :global(.recorded-set-controls.is-artwork .recorded-set-window) {
+  aspect-ratio: 16 / 9;
+  max-height: 58vh;
+}
+
+.root :global(.recorded-set-controls.is-artwork .recorded-set-backdrop img) {
+  filter: brightness(0.85);
+}
+
+.root :global(.recorded-set-controls.is-artwork .recorded-set-art) {
+  display: none;
+}
+
+.root :global(.recorded-set-controls.is-artwork .recorded-set-body) {
+  padding-top: 64px;
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-title),
+.root :global(.recorded-set-controls.is-artwork .recorded-set-title) {
+  font-size: 16px;
+}
+
+.root :global(.recorded-set-controls.is-video .recorded-set-now),
+.root :global(.recorded-set-controls.is-artwork .recorded-set-now),
+.root :global(.recorded-set-controls.is-video .recorded-set-time),
+.root :global(.recorded-set-controls.is-artwork .recorded-set-time) {
+  color: rgb(255 255 255 / 75%);
+}
+
+@media (max-width: 520px) {
+  .root :global(.recorded-set-controls.is-widget .recorded-set-window) {
+    grid-template-columns: 112px minmax(0, 1fr);
+    height: 120px;
+  }
+
+  .root :global(.recorded-set-controls.is-widget .recorded-set-body) {
+    padding: 10px 12px 12px;
+  }
+
+  .root :global(.recorded-set-controls.is-widget .recorded-set-play),
+  .root :global(.recorded-set-controls.is-artwork .recorded-set-play) {
+    width: 44px;
+    height: 44px;
+  }
+
+  .root :global(.recorded-set-controls.is-widget .recorded-set-title) {
+    font-size: 14px;
+  }
+
+  .root :global(.recorded-set-controls.is-artwork .recorded-set-window) {
+    aspect-ratio: 1;
+  }
+
+  .root :global(.recorded-set-controls.is-video .recorded-set-center .recorded-set-play) {
+    width: 56px;
+    height: 56px;
+  }
+
+  .root :global(.recorded-set-controls.is-video .recorded-set-art) {
+    top: 36%;
+    width: 36%;
+  }
+
+  .root :global(.recorded-set-controls.is-video .recorded-set-center) {
+    top: 36%;
+  }
+
+  /* Touch has no hover, so keep Pause reachable while playing. */
+  .root :global(.recorded-set-controls.is-video .recorded-set-center .recorded-set-play.is-playing) {
+    opacity: 0.85;
+  }
+
+  .root :global(.recorded-set-controls.is-video .recorded-set-body) {
+    padding: 24px 12px 10px;
+    gap: 6px;
+  }
+
+  .root :global(.recorded-set-controls.is-video .recorded-set-now) {
+    display: none;
+  }
+}
+
+.root :global(.recorded-set-error) {
+  margin: 8px 0 0;
+  color: #e8a0a0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.root :global(.recorded-set-sr) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .root :global(.recorded-set-coverage) {
@@ -2283,40 +2495,8 @@
   line-height: 1.5;
 }
 
-.root :global(.recorded-set-play:focus-visible) {
-  outline: 2px solid var(--lime);
-  outline-offset: 4px;
-}
-
-.root :global(.recorded-set-play:disabled) {
-  border-color: rgb(216 255 90 / 36%);
-  background: rgb(216 255 90 / 13%);
-  color: rgb(216 255 90 / 58%);
-  cursor: not-allowed;
-}
-
-.root :global(.recorded-set-status) {
-  margin-top: 8px;
-}
-
-.root :global(.recorded-set-status p) {
-  min-height: 1.5em;
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.root :global(.recorded-set-limits) {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
-  opacity: 0.8;
-}
-
 @media (forced-colors: active) {
-  .root :global(.recorded-set-body .set-seek-input) {
+  .root :global(.recorded-set-track .set-seek-input) {
     opacity: 1;
   }
 
