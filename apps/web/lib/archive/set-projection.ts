@@ -146,6 +146,40 @@ export const mapSetTrack = (row: {
   };
 };
 
+/**
+ * N04: show an Unknown entry with provisional in-span starts as N consecutive
+ * Unknown rows, one per estimated track. Split starts are estimates from the
+ * audio, so those rows carry `estimatedStart`. Track numbers are renumbered
+ * from the first row's number so they stay consecutive.
+ */
+export const expandProvisionalTracks = (tracks: ArchiveSetTrack[]): ArchiveSetTrack[] => {
+  if (!tracks.some((track) => (track.provisionalStarts?.length ?? 0) > 0)) return tracks;
+  const out: ArchiveSetTrack[] = [];
+  for (const track of tracks) {
+    const starts = track.provisionalStarts ?? [];
+    if (starts.length === 0 || track.title !== "Unknown Track" || track.end == null) {
+      out.push(track);
+      continue;
+    }
+    const edges = [track.start, ...starts, track.end];
+    for (let part = 0; part < edges.length - 1; part += 1) {
+      const start = edges[part];
+      const end = edges[part + 1];
+      out.push({
+        ...track,
+        start,
+        end,
+        startFmt: part === 0 ? track.startFmt : formatDuration(start),
+        endFmt: part === edges.length - 2 ? track.endFmt : formatDuration(end),
+        provisionalStarts: [],
+        estimatedStart: part > 0 ? true : undefined,
+      });
+    }
+  }
+  const base = tracks[0]?.idx ?? 1;
+  return out.map((track, index) => ({ ...track, idx: base + index }));
+};
+
 export const buildTimeline = (
   tracks: ArchiveSetTrack[],
   duration: number,

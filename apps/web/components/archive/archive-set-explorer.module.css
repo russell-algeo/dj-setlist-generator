@@ -2544,33 +2544,8 @@
   outline-offset: 3px;
 }
 
-/* N04: estimated parts inside an Unknown entry. Dashed to read as provisional. */
-.root :global(.provisional-parts) {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
+/* N04: Unknown rows split at an estimated track change. Dashed to read as provisional. */
 .root :global(.provisional-pill) {
   border-style: dashed;
   opacity: 0.85;
-}
-
-.root :global(.provisional-start) {
-  min-height: 28px;
-  padding: 2px 8px;
-  border: 1px dashed currentColor;
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 0.85em;
-  opacity: 0.8;
-  cursor: pointer;
-}
-
-.root :global(.provisional-start:hover),
-.root :global(.provisional-start:focus-visible) {
-  opacity: 1;
 }

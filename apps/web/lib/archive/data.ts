@@ -43,7 +43,7 @@ import type {
   ArchiveSetTrack,
 } from "@/lib/archive/types";
 import { pickFirstImageUrl } from "@/lib/archive/artist-visuals";
-import { mapSetTrack, buildTimeline, buildJourneyPoints } from "@/lib/archive/set-projection";
+import { mapSetTrack, buildTimeline, buildJourneyPoints, expandProvisionalTracks } from "@/lib/archive/set-projection";
 import {
   resolveSetVisualImageUrl,
 } from "@/lib/archive/set-images";
@@ -198,7 +198,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
       .orderBy(desc(setSourceLinks.isPrimary), asc(setSourceLinks.platform), asc(setSourceLinks.url)),
   ]);
 
-  const trackCards = entryRows.map(mapSetTrack);
+  const trackCards = expandProvisionalTracks(entryRows.map(mapSetTrack));
   const recognizedTracks = trackCards.filter((track) => track.title !== "Unknown Track");
   const setMetadata = asRecord(setRecord.metadata);
   const mixInfo = asRecord(setMetadata.mixInfo);
@@ -334,7 +334,7 @@ const getArchiveSetDetailUncached = async (slug: string): Promise<ArchiveSetDeta
 export const getArchiveSetDetailBySlug = async (slug: string) =>
   unstable_cache(
     async () => getArchiveSetDetailUncached(slug),
-    [getArchiveCacheNamespace(), "archive-set-detail-v2", slug],
+    [getArchiveCacheNamespace(), "archive-set-detail-v3", slug],
     { tags: [ARCHIVE_TAGS.set(slug)] },
   )();
 

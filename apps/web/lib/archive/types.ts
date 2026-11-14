@@ -40,6 +40,8 @@ export type ArchiveSetTrack = {
    * provisional: they are skip targets, not identified tracks.
    */
   provisionalStarts?: number[];
+  /** N04: this row starts at an estimated (unidentified) track change. */
+  estimatedStart?: boolean;
 };
 
 export type ArchiveJourneyPoint = {

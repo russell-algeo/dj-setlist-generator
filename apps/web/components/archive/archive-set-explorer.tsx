@@ -3390,8 +3390,8 @@ export function ArchiveSetExplorer({
                                       ? "❚❚"
                                       : "▶"}
                                 </button>
-                                <span className="track-time-label" title="Track timestamp">
-                                  {track.startFmt}
+                                <span className="track-time-label" title={track.estimatedStart ? "Estimated track start" : "Track timestamp"}>
+                                  {track.estimatedStart ? "~" : ""}{track.startFmt}
                                 </span>
                               </div>
                               <div className="track-main">
@@ -3402,28 +3402,12 @@ export function ArchiveSetExplorer({
                                 </div>
                                 <div className="track-meta">
                                   <span className={joinClasses("pill", "confidence-pill", confidenceClass)}>{track.conf}</span>
-                                  {track.isUnknownTrack && (track.provisionalStarts?.length ?? 0) > 0 ? (
+                                  {track.estimatedStart ? (
                                     <span
-                                      className="provisional-parts"
-                                      title="Estimated from changes in the audio, not identified. Starts are approximate."
+                                      className="pill provisional-pill"
+                                      title="Estimated from changes in the audio, not identified. The start time is approximate."
                                     >
-                                      <span className="pill provisional-pill">
-                                        ~{(track.provisionalStarts?.length ?? 0) + 1} tracks (estimated)
-                                      </span>
-                                      {(track.provisionalStarts ?? []).map((value) => (
-                                        <button
-                                          aria-label={`Jump to estimated track start ${formatDuration(value)}`}
-                                          className="provisional-start"
-                                          key={value}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            jumpTo(value, ytEmbedBlocked && activeSource.kind === "youtube", true);
-                                          }}
-                                          type="button"
-                                        >
-                                          ~{formatDuration(value)}
-                                        </button>
-                                      ))}
+                                      estimated start
                                     </span>
                                   ) : null}
                               </div>
