@@ -1410,7 +1410,15 @@ export function ArchiveSetExplorer({
         }
       }
     }
-    return best ?? model.tracks[0] ?? null;
+    if (best) return best;
+    // Partial recordings list identified tracks only, so a position can fall
+    // between entries (or around a recording gap). Follow the most recent
+    // track instead of snapping back to the first one.
+    let previous: UiTrack | null = null;
+    for (const track of model.tracks) {
+      if (track.start <= safeSeconds && (!previous || track.start > previous.start)) previous = track;
+    }
+    return previous ?? model.tracks[0] ?? null;
   };
 
   const scrollToTrack = (idx: number) => {
@@ -2354,7 +2362,10 @@ export function ArchiveSetExplorer({
         setIsPlaying(false);
         setNativeAudioBuffering(false);
         setNativeAudioError(message);
-      }, privateContext?.audio.segments);
+      }, privateContext?.audio.segments, {
+        // Off-page element that preloads the next original file before a seam.
+        createStandby: () => { const standby = new Audio(); standby.preload = "auto"; return standby; },
+      });
       nativeControllerRef.current.seek(0, false);
       nativeRecoveryRef.current = { windowStart: 0, attempts: 0 };
       clearNativeStallWatch();

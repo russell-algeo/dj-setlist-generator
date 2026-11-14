@@ -45,12 +45,22 @@ export const SOURCE_TIME_TOLERANCE_SECONDS = 0.002;
 // seam while the next source was still loading) is retried after this long.
 const PLAY_WATCHDOG_MS = 1200;
 
+// Seamless file seams: a second, off-page element loads the next original file
+// shortly before the boundary and keeps playing from it while the visible
+// element switches files, then hands back at a buffered point.
+const PRELOAD_SECONDS = 20;
+const HANDOFF_LEAD_SECONDS = 1.5;
+
 export type NativeAudioSegment = { src: string; startSeconds: number; durationSeconds: number };
+export type StandbyAudio = NativeAudioPort & { preload: string;
+  addEventListener(type: "loadedmetadata" | "error", listener: () => void): void;
+  removeEventListener(type: "loadedmetadata" | "error", listener: () => void): void };
+export type NativeAudioOptions = { createStandby?: () => StandbyAudio };
 export type NativeAudioPort = Pick<HTMLAudioElement, "src" | "load" | "paused" | "currentTime" | "readyState" | "play" | "pause"> & { readonly ended?: boolean };
 
 // The set clock spans original files. Only the selected source window is played;
 // source URLs are same-origin authorized redirects, never bearer URLs in props.
-export function createNativeAudioController(audio: NativeAudioPort, duration: number, onError: (message: string) => void, sourceSegments?: NativeAudioSegment[]) {
+export function createNativeAudioController(audio: NativeAudioPort, duration: number, onError: (message: string) => void, sourceSegments?: NativeAudioSegment[], options: NativeAudioOptions = {}) {
   const segments = sourceSegments ?? [{ src: audio.src, startSeconds: 0, durationSeconds: duration }];
   if (!segments.length || segments.some((part) => !Number.isFinite(part.startSeconds) || part.startSeconds < 0 || !Number.isFinite(part.durationSeconds) || part.durationSeconds <= 0) ||
     Math.abs(segments.reduce((sum, part) => sum + part.durationSeconds, 0) - duration) > 0.25) throw new Error("Invalid playback segments");
@@ -63,6 +73,77 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
   let playRequested = false;
   let playAttempt: { version: number; settled: Promise<void> } | null = null;
   let stalledSince: number | null = null;
+  let standby: StandbyAudio | null = null;
+  let prepared: number | null = null;
+  let bridge: { index: number; handoffAt: number | null } | null = null;
+  let handoffTimer: ReturnType<typeof setInterval> | null = null;
+  const windowEnd = (index: number) => offsets[index]! + segments[index]!.durationSeconds;
+  const bridgedPosition = () => {
+    const part = segments[bridge!.index]!;
+    return Math.max(offsets[bridge!.index]!, Math.min(windowEnd(bridge!.index), offsets[bridge!.index]! + standby!.currentTime - part.startSeconds));
+  };
+  const endBridge = () => {
+    if (handoffTimer !== null) { clearInterval(handoffTimer); handoffTimer = null; }
+    if (!bridge) return;
+    bridge = null;
+    prepared = null;
+    standby?.pause();
+  };
+  const prepareNext = () => {
+    const next = activeIndex + 1;
+    if (!options.createStandby || bridge || next >= segments.length || prepared === next) return;
+    if (!playRequested || audio.paused || pending || awaitingMetadata) return;
+    if (windowEnd(activeIndex) - position() > PRELOAD_SECONDS) return;
+    const target = standby ?? (standby = options.createStandby());
+    const part = segments[next]!;
+    prepared = next;
+    const cleanup = () => { target.removeEventListener("loadedmetadata", onMeta); target.removeEventListener("error", onFail); };
+    const onMeta = () => { cleanup(); if (prepared !== next) return; try { target.currentTime = part.startSeconds; } catch { prepared = null; } };
+    const onFail = () => { cleanup(); if (prepared === next && !bridge) prepared = null; };
+    target.addEventListener("loadedmetadata", onMeta);
+    target.addEventListener("error", onFail);
+    target.preload = "auto";
+    target.src = part.src;
+    target.load();
+  };
+  const standbyReady = (index: number) => Boolean(standby && prepared === index && !bridge && standby.readyState >= 3 &&
+    Math.abs(standby.currentTime - segments[index]!.startSeconds) < 0.25);
+  const beginBridge = (next: number) => {
+    const voice = standby!;
+    bridge = { index: next, handoffAt: null };
+    version += 1;
+    voice.play().catch(() => {
+      if (!bridge || bridge.index !== next) return;
+      const at = bridgedPosition();
+      endBridge();
+      seek(at, true);
+    });
+    audio.pause();
+    activeIndex = next;
+    awaitingMetadata = true;
+    pending = null;
+    audio.src = segments[next]!.src;
+    audio.load();
+    if (typeof setInterval === "function") handoffTimer = setInterval(handoff, 40);
+  };
+  const handoff = () => {
+    if (disposed || !bridge) { endBridge(); return; }
+    if (bridge.handoffAt === null || awaitingMetadata) return;
+    const at = bridgedPosition();
+    if (at < bridge.handoffAt - 0.02) return;
+    if (audio.readyState >= 3) {
+      endBridge();
+      startPlayback(++version);
+      return;
+    }
+    if (at > bridge.handoffAt + 0.3) aimHandoff(at);
+  };
+  const aimHandoff = (at: number) => {
+    const index = bridge!.index;
+    const target = Math.min(windowEnd(index), at + HANDOFF_LEAD_SECONDS);
+    bridge!.handoffAt = target;
+    audio.currentTime = segments[index]!.startSeconds + target - offsets[index]!;
+  };
   let watchdog: ReturnType<typeof setInterval> | null = null;
   const stopWatchdog = () => { if (watchdog !== null) { clearInterval(watchdog); watchdog = null; } stalledSince = null; };
   // Paused media emits no timeupdate, so a dropped play is checked on a timer
@@ -75,7 +156,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     }, 400);
   };
   const checkDroppedPlay = () => {
-    if (!playRequested || pending || awaitingMetadata || audio.readyState < 1 || !audio.paused || audio.ended || playAttempt !== null) {
+    if (bridge || !playRequested || pending || awaitingMetadata || audio.readyState < 1 || !audio.paused || audio.ended || playAttempt !== null) {
       stalledSince = null; return;
     }
     const now = Date.now();
@@ -100,6 +181,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     });
   };
   const pause = () => {
+    if (bridge) { const at = bridgedPosition(); endBridge(); seek(at, false); return; }
     version += 1;
     playRequested = false;
     if (pending) pending = { ...pending, autoplay: false };
@@ -107,6 +189,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
   };
   const seek = (seconds: number, autoplay: boolean) => {
     if (disposed || !Number.isFinite(seconds)) return;
+    endBridge();
     const request = ++version;
     const target = Math.max(0, Math.min(duration, seconds));
     const index = segments.findIndex((part, index) => target < offsets[index]! + part.durationSeconds);
@@ -138,10 +221,10 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       onError("This recording could not seek. Reload the page to try again.");
     }
   };
-  const position = () => pending?.seconds ?? Math.max(offsets[activeIndex]!, Math.min(offsets[activeIndex]! + segments[activeIndex]!.durationSeconds,
+  const position = (): number => bridge ? bridgedPosition() : pending?.seconds ?? Math.max(offsets[activeIndex]!, Math.min(offsets[activeIndex]! + segments[activeIndex]!.durationSeconds,
     offsets[activeIndex]! + audio.currentTime - segments[activeIndex]!.startSeconds));
   const resume = (replayAtEnd = true) => {
-    if (disposed) return;
+    if (disposed || bridge) return;
     // A normal pause keeps the decoder, buffer and exact media position.
     // Seeking to our displayed (polled) clock would discard that warm state.
     const part = segments[activeIndex]!;
@@ -159,8 +242,12 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     if (disposed) return duration;
     // ended events can already be queued when a user or Spotify pauses us.
     // They cannot grant a new autoplay request after that pause.
-    if (!playRequested) return position();
-    if (activeIndex < segments.length - 1) { seek(offsets[activeIndex + 1]!, true); return position(); }
+    if (!playRequested || bridge) return position();
+    if (activeIndex < segments.length - 1) {
+      if (standbyReady(activeIndex + 1)) beginBridge(activeIndex + 1);
+      else seek(offsets[activeIndex + 1]!, true);
+      return position();
+    }
     seek(duration, false);
     return duration;
   };
@@ -169,9 +256,12 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     resume,
     position,
     ended,
-    isPlayRequested: () => playRequested,
-    isPending: () => pending !== null || awaitingMetadata,
+    // During a bridge the visible element is paused on purpose; its events
+    // must not read as a stall or a user pause.
+    isPlayRequested: () => playRequested && !bridge,
+    isPending: () => !bridge && (pending !== null || awaitingMetadata),
     async observePause(onPaused: () => void) {
+      if (bridge) return;
       const observedVersion = version;
       const attempt = playAttempt;
       // pause events are queued. An internal seek's pause must not cancel a
@@ -185,9 +275,11 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       onPaused();
     },
     tick() {
+      if (bridge) return position();
       if (disposed || pending || awaitingMetadata || audio.readyState < 1) { stalledSince = null; return position(); }
       const part = segments[activeIndex]!;
       checkDroppedPlay();
+      prepareNext();
       if (audio.currentTime < part.startSeconds - SOURCE_TIME_TOLERANCE_SECONDS) seek(offsets[activeIndex]!, !audio.paused);
       else if (audio.currentTime >= part.startSeconds + part.durationSeconds) {
         // A window that ends at (or a few samples before) the end of its file
@@ -198,7 +290,11 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       }
       return position();
     },
-    ready() { awaitingMetadata = false; if (pending) seek(pending.seconds, pending.autoplay); },
+    ready() {
+      awaitingMetadata = false;
+      if (bridge) { try { aimHandoff(bridgedPosition()); } catch { const at = bridgedPosition(); endBridge(); seek(at, true); } return; }
+      if (pending) seek(pending.seconds, pending.autoplay);
+    },
     // Provider media URLs behind the same-origin route are short-lived and a
     // network error or a dead stall is terminal for the element. Re-request the
     // active source through the route and restore the set position and the
@@ -206,6 +302,7 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
     recover() {
       if (disposed) return false;
       const target = position();
+      endBridge();
       const request = ++version;
       playRequested = playRequested && target < duration;
       pending = { seconds: target, autoplay: playRequested };
@@ -217,6 +314,6 @@ export function createNativeAudioController(audio: NativeAudioPort, duration: nu
       return true;
     },
     pause,
-    dispose() { disposed = true; version += 1; playRequested = false; pending = null; stopWatchdog(); audio.pause(); },
+    dispose() { endBridge(); disposed = true; version += 1; playRequested = false; pending = null; stopWatchdog(); audio.pause(); if (standby) { standby.src = ""; standby = null; } },
   };
 }

@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArchiveSetDetail, ArchiveSetTrack } from "@/lib/archive/types";
 import { ArchiveSetExplorer } from "./archive-set-explorer";
+import { stubStandbyAudio } from "@/test/standby-audio.test-support";
 
 vi.mock("./archive-header", () => ({ ArchiveHeader: () => null }));
 vi.mock("./archive-delete-control", () => ({ ArchiveDeleteControl: () => null, SubmittedByYouBadge: () => null }));
@@ -61,6 +62,7 @@ describe("system media controls for recordings", () => {
     privateContext={privateContext} />));
 
   beforeEach(async () => {
+    stubStandbyAudio();
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());

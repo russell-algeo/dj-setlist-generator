@@ -437,3 +437,42 @@ describe("sample-exact windows in a real browser clock", () => {
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe("seamless seams with a preloaded standby element", () => {
+  const segments = [{ src: "/part-a", startSeconds: 100, durationSeconds: 60 }, { src: "/part-b", startSeconds: 0, durationSeconds: 60 }];
+  const port = (src: string) => ({ src, load: vi.fn(), paused: true, ended: false, currentTime: 0, readyState: 1,
+    play: vi.fn().mockResolvedValue(undefined), pause: vi.fn() });
+  it("preloads the next file, keeps playing through the seam and hands back at a buffered point", async () => {
+    vi.useFakeTimers();
+    try {
+      const audio = port("/part-a");
+      const listeners: Record<string, () => void> = {};
+      const standby = { ...port(""), preload: "", addEventListener: vi.fn((type: string, fn: () => void) => { listeners[type] = fn; }), removeEventListener: vi.fn() };
+      const c = createNativeAudioController(audio, 120, vi.fn(), segments, { createStandby: () => standby });
+      c.seek(45, true); audio.paused = false; await Promise.resolve();
+      audio.currentTime = 145; c.tick();
+      expect(standby.src).toBe("/part-b");
+      standby.readyState = 4; listeners.loadedmetadata!(); expect(standby.currentTime).toBe(0);
+      audio.currentTime = 160; c.tick();
+      expect(standby.play).toHaveBeenCalledOnce();
+      expect(audio.src).toBe("/part-b");
+      expect(c.isPlayRequested()).toBe(false);
+      standby.currentTime = 0.4; expect(c.position()).toBeCloseTo(60.4);
+      audio.readyState = 1; c.ready(); expect(audio.currentTime).toBeCloseTo(1.9);
+      const calls = audio.play.mock.calls.length;
+      audio.readyState = 4; standby.currentTime = 1.9; vi.advanceTimersByTime(50);
+      expect(audio.play.mock.calls.length).toBe(calls + 1);
+      expect(standby.pause).toHaveBeenCalled();
+      expect(c.isPlayRequested()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+  it("falls back to an ordinary switch when the standby is not ready", () => {
+    const audio = port("/part-a");
+    const standby = { ...port(""), preload: "", addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    const c = createNativeAudioController(audio, 120, vi.fn(), segments, { createStandby: () => standby });
+    c.seek(59, true); audio.paused = false; audio.currentTime = 160; c.tick();
+    expect(standby.play).not.toHaveBeenCalled();
+    expect(audio.src).toBe("/part-b");
+    expect(c.isPlayRequested()).toBe(true);
+  });
+});
